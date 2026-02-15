@@ -2,7 +2,7 @@
  * OpenClaw Gateway 连接管理器
  */
 
-import type { ConnectionState, GatewayFrame, HelloOk, ConnectParams } from './types'
+import { ConnectionState, type GatewayFrame, type HelloOk, type ConnectParams } from './types'
 import { RequestManager } from './request'
 import { EventDispatcher } from './events'
 

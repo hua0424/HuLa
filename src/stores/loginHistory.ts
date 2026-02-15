@@ -1,8 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-// 同时导出两个名字以防万一
+
 export const useLoginHistoryStore = defineStore('loginHistory', () => {
   const history = ref<any[]>([])
-  return { history }
+  const addLoginHistory = (item: any) => {}
+  const getLoginHistory = async () => []
+  const clearLoginHistory = async () => {}
+  return { history, addLoginHistory, getLoginHistory, clearLoginHistory }
 })
 export const useLoginHistoriesStore = useLoginHistoryStore
