@@ -1,6 +1,18 @@
 import { defineStore } from 'pinia'
+import { ref } from 'vue'
+
 export const useFileStore = defineStore('file', () => {
   const fileList = ref<any[]>([])
   const addFile = () => {}
-  return { fileList, addFile }
+  const getRoomFilesForDisplay = () => []
+  const scanLocalFiles = async () => {}
+  const roomFilesMap = ref<any>({})
+  
+  return { 
+    fileList, 
+    addFile,
+    getRoomFilesForDisplay,
+    scanLocalFiles,
+    roomFilesMap
+  }
 })
