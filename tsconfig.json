@@ -5,8 +5,6 @@
     "module": "ESNext",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
-
-    /** Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
@@ -14,23 +12,36 @@
     "noEmit": true,
     "jsx": "preserve",
     "jsxImportSource": "vue",
-
-    /** Linting */
     "strict": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-
     "baseUrl": ".",
     "paths": {
       "~/*": ["./*"],
       "@/*": ["./src/*"],
       "#/*": ["./src/mobile/*"]
     },
-    "types": ["vitest/globals", "@vue/test-utils", "node"],
+    "types": ["vite/client", "vitest/globals", "@vue/test-utils", "node"],
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true
   },
-  "include": ["scripts/**/*", "src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue", "src/**/*.test.ts"],
+  "include": [
+    "src/main.ts",
+    "src/App.vue",
+    "src/router/**/*.ts",
+    "src/layout/index.vue",
+    "src/components/rightBox/chatBox/index.vue",
+    "src/views/loginWindow/Login.vue",
+    "src/services/i18n.ts",
+    "src/services/webSocketAdapter.ts",
+    "src/stores/index.ts",
+    "src/enums/**/*.ts",
+    "src/directives/**/*.ts",
+    "src/common/**/*.ts",
+    "src/utils/PlatformConstants.ts",
+    "src/utils/WebVitalsObserver.ts",
+    "src/typings/**/*.d.ts"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
