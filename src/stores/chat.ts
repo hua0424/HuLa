@@ -9,6 +9,10 @@ export const useChatStore = defineStore('chat', () => {
   const pushMsg = async () => {}
   const updateSession = () => {}
   const changeRoom = async () => {}
+  const getSession = (id: string) => ({ unreadCount: 0 })
+  const markSessionRead = (id: string) => {}
+  const getMessage = (id: string) => ({})
+  const updateMsg = (msg: any) => {}
   
   return {
     sessionList,
@@ -16,6 +20,10 @@ export const useChatStore = defineStore('chat', () => {
     getSessionList,
     pushMsg,
     updateSession,
-    changeRoom
+    changeRoom,
+    getSession,
+    markSessionRead,
+    getMessage,
+    updateMsg
   }
 })

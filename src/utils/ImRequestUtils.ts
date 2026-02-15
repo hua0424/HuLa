@@ -55,3 +55,4 @@ export const conversationGetMy = async (): Promise<unknown> => undefined
 export const getEmoji = async (): Promise<unknown> => undefined
 export const addEmoji = async (): Promise<unknown> => undefined
 export const deleteEmoji = async (): Promise<unknown> => undefined
+export const getAllUserState = async (): Promise<unknown> => undefined
