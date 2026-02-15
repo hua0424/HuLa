@@ -6,6 +6,7 @@ export const useGroupStore = defineStore('group', () => {
   const updateUserItem = (item: any) => {}
   const removeGroupDetail = () => { groupDetail.value = {} }
   const getGroupUserList = async () => []
+  const getUserInfo = (uid: string, roomId?: string) => ({})
 
-  return { list, groupDetail, updateUserItem, removeGroupDetail, getGroupUserList }
+  return { list, groupDetail, updateUserItem, removeGroupDetail, getGroupUserList, getUserInfo }
 })

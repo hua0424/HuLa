@@ -8,7 +8,8 @@ export enum WsResponseMessageType {
   FEED_SEND_MSG = 'feedSendMsg',
   FEED_NOTIFY = 'feedNotify',
   MSG_RECALL = 'msgRecall',
-  REQUEST_NEW_FRIEND = 'requestNewFriend'
+  REQUEST_NEW_FRIEND = 'requestNewFriend',
+  NO_INTERNET = 'noInternet'
 }
 
 export type LoginSuccessResType = {
