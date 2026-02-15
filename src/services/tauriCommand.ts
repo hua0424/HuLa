@@ -12,3 +12,4 @@ export const closeWindow = async () => {}
 export const setDecorations = async () => {}
 export const setAlwaysOnTop = async () => {}
 export const saveWindowSize = async () => {}
+export const getSettings = async () => ({})
