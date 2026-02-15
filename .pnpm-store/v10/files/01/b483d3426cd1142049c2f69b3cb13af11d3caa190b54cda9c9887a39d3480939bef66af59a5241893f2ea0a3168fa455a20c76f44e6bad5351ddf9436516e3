@@ -1,0 +1,1253 @@
+var G = Object.defineProperty;
+var _ = (e, a, n) => a in e ? G(e, a, { enumerable: !0, configurable: !0, writable: !0, value: n }) : e[a] = n;
+var M = (e, a, n) => (_(e, typeof a != "symbol" ? a + "" : a, n), n);
+import k, { onUnmounted as c, defineComponent as d, ref as I, onMounted as q, nextTick as $, watch as l, provide as z, toRaw as y, h as x, inject as f } from "vue";
+var Z = !0;
+k.util.warn;
+function O(e, a) {
+  const n = {};
+  Object.keys(a.listeners).forEach((t) => {
+    const i = t;
+    n[i] = (...r) => a.emit(i, ...r);
+  }), Object.keys(n).forEach((t) => {
+    e.on(t, n[t]);
+  }), c(() => {
+    Object.keys(n).forEach((t) => {
+      e.off(t, n[t]);
+    });
+  });
+}
+const m = "Tlbs", B = {
+  // 腾讯位置服务开发Key
+  apiKey: {
+    type: String,
+    default: ""
+  },
+  // 地图附加库
+  libraries: {
+    type: String,
+    default: "visualization,geometry,vector,tools"
+  },
+  // 地图中心点经纬度
+  center: {
+    type: Object,
+    default: () => ({ lat: 40.040452, lng: 116.273486 })
+  },
+  // 地图缩级别
+  zoom: {
+    type: Number,
+    default: 17
+  },
+  // 地图最小缩放级别
+  minZoom: {
+    type: Number,
+    default: 3
+  },
+  // 地图最大缩放级别
+  maxZoom: {
+    type: Number,
+    default: 20
+  },
+  // 地图控件配置
+  control: {
+    type: Object,
+    default: () => ({ zoom: !0, scale: !0, rotation: !0 })
+  },
+  // 除了上述属性其他初始化属性
+  options: {
+    type: Object,
+    default: () => ({})
+  }
+}, H = d({
+  name: `${m}Map`,
+  inheritAttrs: Z,
+  props: B,
+  emits: ["map_inited"],
+  setup(e, a) {
+    const n = I(null), t = I(null);
+    let i = null;
+    return q(async () => {
+      e.apiKey && await F(e.apiKey, e.libraries), n.value && (i = new TMap.Map(n.value, {
+        ...e.options,
+        center: new TMap.LatLng(e.center.lat, e.center.lng),
+        zoom: e.zoom,
+        minZoom: e.minZoom,
+        maxZoom: e.maxZoom
+      }), t.value = i, $(() => {
+        i && a.emit("map_inited", i);
+      }), O(i, a), Object.keys(e.control).forEach((r) => {
+        let u;
+        switch (r) {
+          case "rotation":
+            u = TMap.constants.DEFAULT_CONTROL_ID.ROTATION;
+            break;
+          case "scale":
+            u = TMap.constants.DEFAULT_CONTROL_ID.SCALE;
+            break;
+          case "zoom":
+            u = TMap.constants.DEFAULT_CONTROL_ID.ZOOM;
+            break;
+        }
+        if (!e.control[r]) {
+          i == null || i.removeControl(u);
+          return;
+        }
+        if (typeof e.control[r] == "object") {
+          const o = i == null ? void 0 : i.getControl(u), { position: h, className: s, numVisible: g } = e.control[r], T = {
+            topLeft: TMap.constants.CONTROL_POSITION.TOP_LEFT,
+            topCenter: TMap.constants.CONTROL_POSITION.TOP_CENTER,
+            topRight: TMap.constants.CONTROL_POSITION.TOP_RIGHT,
+            centerLeft: TMap.constants.CONTROL_POSITION.CENTER_LEFT,
+            center: TMap.constants.CONTROL_POSITION.CENTER,
+            centerRight: TMap.constants.CONTROL_POSITION.CENTER_RIGHT,
+            bottomLeft: TMap.constants.CONTROL_POSITION.BOTTOM_LEFT,
+            bottomCenter: TMap.constants.CONTROL_POSITION.BOTTOM_CENTER,
+            bottomRight: TMap.constants.CONTROL_POSITION.BOTTOM_RIGHT
+          };
+          T[h] && (o == null || o.setPosition(T[h])), s && (o == null || o.setClassName(s)), g && o.setNumVisible(g);
+        }
+      }));
+    }), c(() => {
+      i && i.destroy();
+    }), l(
+      () => e.center,
+      (r) => {
+        i && i.setCenter(r);
+      }
+    ), l(
+      () => e.zoom,
+      (r) => {
+        i && i.setZoom(r);
+      }
+    ), z("map", t), {
+      ele: n,
+      get map() {
+        return y(t);
+      },
+      mapRef: t
+    };
+  },
+  render() {
+    const e = { ref: "ele" };
+    let a = [];
+    return this.$slots.default && this.mapRef && (a = this.$slots.default), x(
+      "div",
+      e,
+      // @ts-ignore
+      a
+    );
+  }
+}), N = [];
+let p;
+function F(e, a) {
+  return new Promise((n) => {
+    if (window.TMap) {
+      n();
+      return;
+    }
+    if (N.push(n), window.initGLMap || (window.initGLMap = () => {
+      N.forEach((t) => {
+        t();
+      });
+    }), !p) {
+      p = document.createElement("script");
+      const t = a ? `https://map.qq.com/api/gljs?v=1.exp&key=${e}&libraries=${a}&callback=initGLMap` : `https://map.qq.com/api/gljs?v=1.exp&key=${e}&callback=initGLMap`;
+      p.type = "text/javascript", p.src = t, document.body.appendChild(p);
+    }
+  });
+}
+function b(e) {
+  return e.map((a) => ({
+    ...a,
+    position: new TMap.LatLng(a.position.lat, a.position.lng)
+  }));
+}
+const W = d({
+  name: `${m}MultiMarker`,
+  props: {
+    // 图层id
+    id: {
+      type: String,
+      default: "multiMarker"
+    },
+    // 点标注的相关样式
+    styles: {
+      type: Object,
+      required: !0
+    },
+    // 点标注数据数组
+    geometries: {
+      type: Array,
+      required: !0
+    },
+    // 其他初始化配置
+    options: {
+      type: Object,
+      default: () => ({})
+    }
+  },
+  setup(e, a) {
+    const n = f("map");
+    if (!n)
+      return;
+    const t = new TMap.MultiMarker({
+      ...e.options,
+      id: e.id,
+      map: y(n.value),
+      styles: j(e.styles),
+      geometries: b(e.geometries)
+    });
+    return O(t, a), c(() => {
+      t.setMap(null);
+    }), l(
+      () => e.styles,
+      (i) => {
+        t.setStyles(j(i));
+      }
+    ), l(
+      () => e.geometries,
+      (i) => {
+        t.setGeometries(b(i));
+      }
+    ), {
+      marker: t
+    };
+  },
+  render() {
+    return null;
+  }
+});
+function j(e) {
+  const a = {};
+  return Object.keys(e).forEach((n) => {
+    a[n] = new TMap.MarkerStyle(e[n]);
+  }), a;
+}
+const U = d({
+  name: `${m}MarkerCluster`,
+  props: {
+    id: {
+      type: String,
+      default: "markerCluster"
+    },
+    geometries: {
+      type: Array,
+      required: !0
+    },
+    gridSize: {
+      type: Number,
+      default: 60
+    },
+    maxZoom: {
+      type: Number,
+      default: 13
+    },
+    minimumClusterSize: {
+      type: Number,
+      default: 2
+    },
+    zoomOnClick: {
+      type: Boolean,
+      default: !0
+    },
+    averageCenter: {
+      type: Boolean,
+      default: !1
+    },
+    enableDefaultStyle: {
+      type: Boolean,
+      default: !0
+    },
+    options: {
+      type: Object,
+      default: () => ({})
+    }
+  },
+  emits: ["clusterchange"],
+  setup(e, a) {
+    const n = f("map");
+    if (!n)
+      return;
+    const t = new TMap.MarkerCluster({
+      ...e.options,
+      id: e.id,
+      // 图层id
+      map: y(n.value),
+      // 设置点聚合显示在哪个map对象中（创建map的段落省略）
+      enableDefaultStyle: e.enableDefaultStyle,
+      // 使用默认样式
+      minimumClusterSize: e.minimumClusterSize,
+      // 最小聚合点数：2个
+      geometries: b(e.geometries),
+      zoomOnClick: e.zoomOnClick,
+      // 点击聚合数字放大展开
+      gridSize: e.gridSize,
+      // 聚合算法的可聚合距离，即距离小于该值的点会聚合至一起，默认为60，以像素为单位
+      averageCenter: e.averageCenter,
+      // 每个聚和簇的中心是否应该是聚类中所有标记的平均值
+      maxZoom: e.maxZoom
+      // 采用聚合策略的最大缩放级别，若地图缩放级别大于该值，则不进行聚合，标点将全部被展开
+    });
+    let i = [], r = [];
+    return t.on("cluster_changed", () => {
+      i = [], r = [];
+      const u = t.getClusters();
+      let o = [];
+      u.forEach((s) => {
+        s.geometries.length > 1 && o.indexOf(s.geometries.length) === -1 && o.push(s.geometries.length);
+      }), o = o.sort((s, g) => s - g);
+      const h = n.value.getZoom();
+      u.forEach((s) => {
+        const g = s.geometries.length;
+        if (h >= e.maxZoom)
+          r.push({
+            center: s.center,
+            data: s
+          });
+        else if (s.geometries.length > 1) {
+          const T = o.indexOf(g), w = `${30 + T * 0.5 + String(g).length * 8}px`;
+          i.push({
+            center: s.center,
+            width: w,
+            height: w,
+            "line-height": w,
+            content: g,
+            sort: T,
+            data: s
+          });
+        } else
+          r.push({
+            center: s.center,
+            data: s
+          });
+      }), a.emit("clusterchange", r, i);
+    }), O(t, a), c(() => {
+      t.setMap(null);
+    }), l(
+      () => e.geometries,
+      (u) => {
+        t.setGeometries(b(u));
+      }
+    ), {
+      aggregationPoints: i,
+      scatteredPoints: r,
+      markerCluster: t
+    };
+  },
+  render() {
+    return null;
+  }
+}), V = (e) => {
+  const a = (n) => Array.isArray(n) ? n.map((t) => a(t)) : new TMap.LatLng(n.lat, n.lng);
+  return e.map((n) => a(n));
+}, C = (e) => e.map((a) => ({
+  ...a,
+  paths: V(a.paths)
+})), K = d({
+  name: `${m}MultiPolygon`,
+  props: {
+    // 图层id
+    id: {
+      type: String,
+      default: "multiPolygon"
+    },
+    // 多边形的相关样式
+    styles: {
+      type: Object,
+      required: !0
+    },
+    // 多边形数据数组
+    geometries: {
+      type: Array,
+      required: !0
+    },
+    // 其他初始化配置
+    options: {
+      type: Object,
+      default: () => ({})
+    }
+  },
+  setup(e, a) {
+    const n = f("map");
+    if (!n)
+      return;
+    const t = new TMap.MultiPolygon({
+      ...e.options,
+      id: e.id,
+      map: y(n.value),
+      styles: S(e.styles),
+      geometries: C(e.geometries)
+    });
+    return O(t, a), c(() => {
+      t.setMap(null);
+    }), l(
+      () => e.styles,
+      (i) => {
+        t.setStyles(S(i));
+      }
+    ), l(
+      () => e.geometries,
+      (i) => {
+        t.setGeometries(C(i));
+      }
+    ), {
+      polygon: t
+    };
+  },
+  render() {
+    return null;
+  }
+});
+function S(e) {
+  const a = {};
+  return Object.keys(e).forEach((n) => {
+    "extrudeHeight" in e[n] ? a[n] = new TMap.ExtrudablePolygonStyle(e[n]) : a[n] = new TMap.PolygonStyle(e[n]);
+  }), a;
+}
+const R = (e) => {
+  const a = (n) => Array.isArray(n) ? n.map((t) => a(t)) : new TMap.LatLng(n.lat, n.lng);
+  return e.map((n) => a(n));
+}, E = (e) => e.map((a) => a.rainbowPaths ? {
+  ...a,
+  rainbowPaths: a.rainbowPaths.map((n) => ({
+    ...n,
+    path: R(n.path)
+  }))
+} : {
+  ...a,
+  paths: R(a.paths)
+  // 坐标转换
+}), X = d({
+  name: `${m}MultiPolyline`,
+  props: {
+    // 图层id
+    id: {
+      type: String,
+      default: "multiPolyline"
+    },
+    // 折线的相关样式
+    styles: {
+      type: Object,
+      required: !0
+    },
+    // 折线数据数组
+    geometries: {
+      type: Array,
+      required: !0
+    },
+    // 其他初始化配置
+    options: {
+      type: Object,
+      default: () => ({})
+    }
+  },
+  setup(e, a) {
+    const n = f("map");
+    if (!n)
+      return;
+    const t = new TMap.MultiPolyline({
+      ...e.options,
+      id: e.id,
+      map: y(n.value),
+      styles: A(e.styles),
+      geometries: E(e.geometries)
+    });
+    return O(t, a), c(() => {
+      t.setMap(null);
+    }), l(
+      () => e.styles,
+      (i) => {
+        t.setStyles(A(i));
+      }
+    ), l(
+      () => e.geometries,
+      (i) => {
+        t.setGeometries(E(i));
+      }
+    ), {
+      polyline: t
+    };
+  },
+  render() {
+    return null;
+  }
+});
+function A(e) {
+  const a = {};
+  return Object.keys(e).forEach((n) => {
+    a[n] = new TMap.PolylineStyle(e[n]);
+  }), a;
+}
+const Y = d({
+  name: `${m}MultiCircle`,
+  props: {
+    // 图层id
+    id: {
+      type: String,
+      default: "multiCircle"
+    },
+    // 圆的相关样式
+    styles: {
+      type: Object,
+      required: !0
+    },
+    // 圆数据数组
+    geometries: {
+      type: Array,
+      required: !0
+    },
+    // 其他初始化配置
+    options: {
+      type: Object,
+      default: () => ({})
+    }
+  },
+  setup(e, a) {
+    const n = f("map");
+    if (!n)
+      return;
+    const t = new TMap.MultiCircle({
+      ...e.options,
+      id: e.id,
+      map: y(n.value),
+      styles: v(e.styles),
+      geometries: L(e.geometries)
+    });
+    return O(t, a), c(() => {
+      t.setMap(null);
+    }), l(
+      () => e.styles,
+      (i) => {
+        t.setStyles(v(i));
+      }
+    ), l(
+      () => e.geometries,
+      (i) => {
+        t.setGeometries(L(i));
+      }
+    ), {
+      circle: t
+    };
+  },
+  render() {
+    return null;
+  }
+});
+function v(e) {
+  const a = {};
+  return Object.keys(e).forEach((n) => {
+    a[n] = new TMap.CircleStyle(e[n]);
+  }), a;
+}
+function L(e) {
+  return e.map((a) => ({
+    ...a,
+    center: new TMap.LatLng(a.center.lat, a.center.lng)
+  }));
+}
+const J = d({
+  name: `${m}MultiLabel`,
+  props: {
+    // 图层id
+    id: {
+      type: String,
+      default: "multiLabel"
+    },
+    // 文本标注的相关样式
+    styles: {
+      type: Object,
+      required: !0
+    },
+    // 文本标注数据数组
+    geometries: {
+      type: Array,
+      required: !0
+    },
+    // 其他初始化配置
+    options: {
+      type: Object,
+      default: () => ({})
+    }
+  },
+  setup(e, a) {
+    const n = f("map");
+    if (!n)
+      return;
+    const t = new TMap.MultiLabel({
+      ...e.options,
+      id: e.id,
+      map: y(n.value),
+      styles: P(e.styles),
+      geometries: D(e.geometries)
+    });
+    return O(t, a), c(() => {
+      t.setMap(null);
+    }), l(
+      () => e.styles,
+      (i) => {
+        t.setStyles(P(i));
+      }
+    ), l(
+      () => e.geometries,
+      (i) => {
+        t.setGeometries(D(i));
+      }
+    ), {
+      label: t
+    };
+  },
+  render() {
+    return null;
+  }
+});
+function P(e) {
+  const a = {};
+  return Object.keys(e).forEach((n) => {
+    a[n] = new TMap.LabelStyle(e[n]);
+  }), a;
+}
+function D(e) {
+  return e.map((a) => ({
+    ...a,
+    position: new TMap.LatLng(a.position.lat, a.position.lng)
+  }));
+}
+const Q = d({
+  name: `${m}DomOverlay`,
+  props: {
+    // DOM覆盖物经纬度位置
+    position: {
+      type: Object,
+      required: !0
+    },
+    // DOM覆盖物相对中心点偏移量
+    offset: {
+      type: Object,
+      required: !1,
+      default: () => ({ x: 0, y: 0 })
+    },
+    // 额外参数支持事件是否冒泡
+    options: {
+      type: Object,
+      default: () => ({
+        enableBubble: !0
+      })
+    },
+    width: {
+      type: Number,
+      required: !1
+    },
+    height: {
+      type: Number,
+      required: !1
+    }
+  },
+  setup(e) {
+    const a = f("map");
+    if (!a)
+      return;
+    const n = I(null);
+    class t extends TMap.DOMOverlay {
+      constructor(o) {
+        super(o);
+        M(this, "map");
+        M(this, "position", null);
+        M(this, "offset", null);
+        this.map = o.map, this.onInit(o);
+      }
+      // 初始化DOMOverlay
+      onInit(o) {
+        this.position = o.position, this.offset = o.offset, this.dom = o.dom, this.dom.style.position = "absolute";
+      }
+      // 创建DOM
+      createDOM() {
+        return this.dom;
+      }
+      // 缩放地图或者移动地图触发
+      updateDOM() {
+        $(() => {
+          if (this.map && this.position && this.offset) {
+            const o = this.map.projectToContainer(new TMap.LatLng(this.position.lat, this.position.lng)), h = e.width || this.dom.clientWidth, s = e.height || this.dom.clientHeight, g = `${o.getX() - h / 2 + this.offset.x}px`, T = `${o.getY() - s / 2 + this.offset.y}px`;
+            this.dom.style.left = g, this.dom.style.top = T;
+          }
+        });
+      }
+      // 更新DOM位置
+      updatePosition() {
+        i.position = e.position, i.offset = e.offset, this.updateDOM();
+      }
+      // 销毁DOMOverlay实例
+      onDestroy() {
+        this.setMap(null);
+      }
+    }
+    let i;
+    return q(() => {
+      n.value && (i = new t({
+        ...e.options,
+        position: e.position,
+        offset: e.offset,
+        map: y(a.value),
+        dom: n.value
+      }), e.options.enableBubble || (n.value.addEventListener("click", (r) => r.stopPropagation()), n.value.addEventListener("dblclick", (r) => r.stopPropagation()), n.value.addEventListener("mousemove", (r) => r.stopPropagation())));
+    }), c(() => {
+      i.onDestroy();
+    }), l(() => [e.position, e.offset], () => {
+      i.updatePosition();
+    }), {
+      dom: n
+    };
+  },
+  render() {
+    return x(
+      "div",
+      { ref: "dom" },
+      this.$slots.default ? this.$slots.default : []
+    );
+  }
+}), ee = d({
+  name: `${m}Heat`,
+  props: {
+    // 热力数据
+    data: {
+      type: Array,
+      required: !0
+    },
+    // 最大辐射半径
+    radius: {
+      type: Number,
+      default: 50
+    },
+    // 峰值高度
+    height: {
+      type: Number,
+      default: 100
+    },
+    // 全局透明度
+    opacity: {
+      type: Number,
+      default: 0.8
+    },
+    // 热力最弱阈值
+    min: {
+      type: Number,
+      default: 0
+    },
+    // 热力最强阈值
+    max: {
+      type: Number,
+      required: !1
+    },
+    // 渐变颜色
+    gradientColor: {
+      type: Object,
+      required: !1
+    },
+    options: {
+      type: Object,
+      default: () => ({})
+    }
+  },
+  setup(e) {
+    const a = f("map");
+    if (!a)
+      return;
+    const n = new TMap.visualization.Heat({
+      ...e.options,
+      radius: e.radius,
+      height: e.height,
+      opacity: e.opacity,
+      min: e.min,
+      max: e.max
+    });
+    return n.addTo(y(a.value)), e.gradientColor && n.setGradientColor(new TMap.GradientColor(e.gradientColor)), e.max && n.setMax(e.max), n.setData(e.data), c(() => {
+      n.remove(), n.destroy();
+    }), l(() => e.gradientColor, (t) => {
+      t && n.setGradientColor(new TMap.GradientColor(t));
+    }), l(() => e.data, (t) => {
+      n.setData(t);
+    }), l(() => e.radius, (t) => {
+      n.setRadius(t);
+    }), l(() => e.height, (t) => {
+      n.setHeight(t);
+    }), l(() => e.opacity, (t) => {
+      n.setOpacity(t);
+    }), l(() => e.min, (t) => {
+      n.setMin(t);
+    }), l(() => e.max, (t) => {
+      t && n.setMax(t);
+    }), {
+      heat: n
+    };
+  },
+  render() {
+    return null;
+  }
+}), te = {
+  circleId: {
+    type: String,
+    default: "circle"
+  },
+  defaultCircleGeometries: {
+    type: Array
+  },
+  circleStyles: {
+    type: Object
+  },
+  circleDrawingStyleId: {
+    type: String,
+    default: "default"
+  },
+  circleSelectedStyleId: {
+    type: String,
+    default: "default"
+  },
+  polygonId: {
+    type: String,
+    default: "polygon"
+  },
+  defaultPolygonGeometries: {
+    type: Array
+  },
+  polygonStyles: {
+    type: Object
+  },
+  polygonDrawingStyleId: {
+    type: String,
+    default: "default"
+  },
+  polygonSelectedStyleId: {
+    type: String,
+    default: "default"
+  },
+  activeOverlayId: {
+    type: String,
+    default: "polygon"
+  },
+  actionMode: {
+    type: String,
+    default: "draw"
+  },
+  snappable: {
+    type: Boolean,
+    default: !1
+  },
+  selectable: {
+    type: Boolean,
+    default: !0
+  },
+  options: {
+    type: Object,
+    default: () => ({})
+  }
+}, ne = d({
+  name: `${m}GeometryEditor`,
+  props: te,
+  emits: ["select", "update:activeOverlayId"],
+  setup(e, a) {
+    const n = f("map");
+    if (!n)
+      return;
+    const t = y(n.value), i = new TMap.MultiCircle({
+      id: e.circleId,
+      map: t,
+      styles: e.circleStyles ? v(e.circleStyles) : {},
+      geometries: e.defaultCircleGeometries ? L(e.defaultCircleGeometries) : []
+    }), r = new TMap.MultiPolygon({
+      id: e.polygonId,
+      map: t,
+      styles: e.polygonStyles ? S(e.polygonStyles) : {},
+      geometries: e.defaultPolygonGeometries ? C(e.defaultPolygonGeometries) : []
+    });
+    i.on("click", (o) => {
+      e.actionMode !== "draw" && (a.emit("select", o.geometry), a.emit("update:activeOverlayId", e.circleId));
+    }), r.on("click", (o) => {
+      e.actionMode !== "draw" && (a.emit("select", o.geometry), a.emit("update:activeOverlayId", e.polygonId));
+    });
+    const u = new TMap.tools.GeometryEditor({
+      ...e.options,
+      map: t,
+      // 编辑器绑定的地图对象
+      overlayList: [
+        // 可编辑图层
+        {
+          overlay: r,
+          id: e.polygonId,
+          selectedStyleId: e.polygonSelectedStyleId,
+          drawingStyleId: e.polygonDrawingStyleId
+        },
+        {
+          overlay: i,
+          id: e.circleId,
+          selectedStyleId: e.circleSelectedStyleId,
+          drawingStyleId: e.circleDrawingStyleId
+        }
+      ],
+      actionMode: e.actionMode === "draw" ? TMap.tools.constants.EDITOR_ACTION.DRAW : TMap.tools.constants.EDITOR_ACTION.INTERACT,
+      // 编辑器的工作模式
+      activeOverlayId: e.activeOverlayId,
+      // 激活图层
+      selectable: e.selectable,
+      // 开启点选功能
+      snappable: e.snappable
+      // 开启吸附
+    });
+    return a.listeners.select && delete a.listeners.select, O(u, a), c(() => {
+      i.setMap(null), r.setMap(null);
+      try {
+        u.setMap(null);
+      } catch (o) {
+        console.error(o);
+      }
+    }), l(
+      () => e.circleStyles,
+      (o) => {
+        o && i.setStyles(v(o));
+      }
+    ), l(
+      () => e.polygonStyles,
+      (o) => {
+        o && r.setStyles(S(o));
+      }
+    ), l(() => e.activeOverlayId, (o) => o && u.setActiveOverlay(o)), l(() => e.actionMode, (o) => o && u.setActionMode(o === "draw" ? TMap.tools.constants.EDITOR_ACTION.DRAW : TMap.tools.constants.EDITOR_ACTION.INTERACT)), {
+      circle: i,
+      polygon: r,
+      editor: u
+    };
+  },
+  render() {
+    return null;
+  }
+}), ae = d({
+  name: `${m}Arc`,
+  props: {
+    // 弧线数据
+    data: {
+      type: Array,
+      required: !0
+    },
+    // 弧线图样式映射函数，接收ArcLine数据返回对应样式，样式对象规范详见TMap.visualization.ArcStyle
+    pickStyle: {
+      type: Function,
+      require: !1
+    },
+    // 弧线模式，horizontal 代表贴地的弧线，vertical 代表弧线所在平面会垂直于底图平面，默认为vertical。
+    mode: {
+      type: String,
+      default: "vertical"
+    },
+    options: {
+      type: Object,
+      default: () => ({})
+    }
+  },
+  setup(e) {
+    const a = f("map");
+    if (!a)
+      return;
+    const n = new TMap.visualization.Arc({
+      ...e.options,
+      mode: e.mode
+    });
+    return n.addTo(y(a.value)), e.pickStyle && n.setPickStyle(e.pickStyle), n.setData(e.data), c(() => {
+      n.remove(), n.destroy();
+    }), l(() => e.pickStyle, (t) => {
+      t && n.setPickStyle(t);
+    }), l(() => e.data, (t) => {
+      n.setData(t);
+    }), l(() => e.mode, (t) => {
+      n.setMode(t);
+    }), {
+      arc: n
+    };
+  },
+  render() {
+    return null;
+  }
+}), ie = d({
+  name: `${m}Grid`,
+  props: {
+    // 网格数据
+    data: {
+      type: Array,
+      required: !0
+    },
+    sideLength: {
+      type: Number,
+      required: !1,
+      default: 1e3
+    },
+    extrudable: {
+      type: Boolean,
+      required: !1,
+      default: !0
+    },
+    colorList: {
+      type: Array,
+      required: !1,
+      default: () => ["#D8AFA7", "#842610", "#641200"]
+    },
+    heightRange: {
+      type: Array,
+      required: !1,
+      default: () => [1, 100]
+    },
+    showRange: {
+      type: Array,
+      required: !1,
+      default: () => []
+    },
+    options: {
+      type: Object,
+      required: !1,
+      default: () => ({})
+    },
+    selectOptions: {
+      type: Object,
+      required: !1,
+      default: null
+    }
+  },
+  setup(e) {
+    const a = f("map");
+    if (!a)
+      return;
+    const n = new TMap.visualization.Grid({
+      ...e.options,
+      sideLength: e.sideLength,
+      // 设置网格边长
+      extrudable: e.extrudable,
+      // 网格是否可拔起
+      colorList: e.colorList,
+      // 颜色层级
+      heightRange: e.heightRange,
+      // 高度变化区间
+      showRange: e.showRange
+      // 聚合数据显示区间
+    });
+    return n.addTo(y(a.value)), n.setData(e.data), e.selectOptions && n.setSelectOptions(e.selectOptions), c(() => {
+      n.remove(), n.destroy();
+    }), l(() => e.showRange, (t) => {
+      n.setShowRange(t);
+    }), l(() => e.sideLength, (t) => {
+      n.setSideLength(t);
+    }), l(() => e.extrudable, (t) => {
+      n.setExtrudable(t);
+    }), l(() => e.colorList, (t) => {
+      n.setColorList(t);
+    }), l(() => e.heightRange, (t) => {
+      n.setHeightRange(t);
+    }), l(() => e.data, (t) => {
+      n.setData(t);
+    }), l(() => e.options.zIndex, (t) => {
+      t !== void 0 && n.setZIndex(t);
+    }), l(() => e.options.minZoom, (t) => {
+      t && n.setMinZoom(t);
+    }), l(() => e.options.maxZoom, (t) => {
+      t && n.setMaxZoom(t);
+    }), {
+      grid: n
+    };
+  },
+  render() {
+    return null;
+  }
+}), le = d({
+  name: `${m}Area`,
+  props: {
+    // 数据
+    data: {
+      type: Array,
+      required: !0
+    },
+    // 样式
+    styles: {
+      type: Object,
+      required: !0
+    },
+    selectOptions: {
+      type: Object,
+      required: !1,
+      default: () => null
+    },
+    options: {
+      type: Object,
+      default: () => ({})
+    }
+  },
+  setup(e) {
+    const a = f("map");
+    if (!a)
+      return;
+    const n = new TMap.visualization.Area({
+      ...e.options,
+      styles: e.styles
+      // 设置网格边长
+    });
+    return e.selectOptions && n.setSelectOptions(e.selectOptions), n.setData(e.data), n.addTo(y(a.value)), c(() => {
+      n.remove(), n.destroy();
+    }), l(() => e.styles, (t) => {
+      n.setStyles(t);
+    }), l(() => e.data, (t) => {
+      n.setData(t);
+    }), l(() => e.selectOptions, (t) => {
+      t && n.setSelectOptions(t);
+    }), l(() => e.options.zIndex, (t) => {
+      t !== void 0 && n.setZIndex(t);
+    }), l(() => e.options.minZoom, (t) => {
+      t && n.setMinZoom(t);
+    }), l(() => e.options.maxZoom, (t) => {
+      t && n.setMaxZoom(t);
+    }), {
+      area: n
+    };
+  },
+  render() {
+    return null;
+  }
+}), oe = d({
+  name: `${m}InfoWindow`,
+  props: {
+    visible: {
+      type: Boolean,
+      default: !0
+    },
+    position: {
+      type: Object,
+      required: !0
+    },
+    content: {
+      type: String,
+      required: !0
+    },
+    // 其他初始化配置
+    options: {
+      type: Object,
+      default: () => ({})
+    }
+  },
+  setup(e, a) {
+    const n = f("map");
+    if (!n)
+      return;
+    const t = new TMap.InfoWindow({
+      ...e.options,
+      map: y(n.value),
+      position: new TMap.LatLng(e.position.lat, e.position.lng),
+      content: e.content
+    });
+    return e.visible ? t.open() : t.close(), O(t, a), c(() => {
+      t.destroy();
+    }), l(() => e.visible, (i) => {
+      i ? t.open() : t.close();
+    }), l(() => e.position, (i) => {
+      t.setPosition(new TMap.LatLng(i.lat, i.lng));
+    }), l(() => e.content, (i) => {
+      t.setContent(i);
+    }), {
+      infoWindow: t
+    };
+  },
+  render() {
+    return null;
+  }
+}), re = d({
+  name: `${m}Dot`,
+  props: {
+    // 散点数据
+    data: {
+      type: Array,
+      required: !0
+    },
+    // 散点样式
+    styles: {
+      type: Object,
+      required: !0
+    },
+    // 散点固定朝向
+    faceTo: {
+      type: String,
+      default: "screen"
+    },
+    // 拾取配置
+    selectOptions: {
+      type: Object,
+      default: () => ({})
+    },
+    // 散点图呈现泛光效果
+    enableBloom: {
+      type: Boolean,
+      default: !1
+    },
+    options: {
+      type: Object,
+      default: () => ({})
+    }
+  },
+  setup(e, a) {
+    const n = f("map");
+    if (!n)
+      return;
+    const t = new TMap.visualization.Dot({
+      ...e.options,
+      styles: e.styles,
+      faceTo: e.faceTo,
+      enableBloom: e.enableBloom,
+      selectOptions: e.selectOptions
+    });
+    return t.addTo(y(n.value)), t.setData(e.data), O(t, a), c(() => {
+      t.remove(), t.destroy();
+    }), l(() => e.data, (i) => {
+      t.setData(i);
+    }), l(() => e.styles, (i) => {
+      t.setStyles(i);
+    }), l(() => e.faceTo, (i) => {
+      t.setFaceTo(i);
+    }), l(() => e.selectOptions, (i) => {
+      t.setSelectOptions(i);
+    }), {
+      dot: t
+    };
+  },
+  render() {
+    return null;
+  }
+}), se = [
+  H,
+  W,
+  K,
+  X,
+  Y,
+  Q,
+  J,
+  ee,
+  ne,
+  U,
+  ae,
+  ie,
+  le,
+  oe,
+  re
+], de = {
+  install(e) {
+    se.forEach((a) => e.component(a.name, a));
+  }
+};
+export {
+  ae as Arc,
+  le as Area,
+  H as BaseMap,
+  Q as DomOverlay,
+  re as Dot,
+  ne as GeometryEditor,
+  ie as Grid,
+  ee as Heat,
+  oe as InfoWindow,
+  U as MarkerCluster,
+  Y as MultiCircle,
+  J as MultiLabel,
+  W as MultiMarker,
+  K as MultiPolygon,
+  X as MultiPolyline,
+  de as default
+};

@@ -1,0 +1,136 @@
+import { PropType } from '../node_modules/vue-demi/lib/v3/index.mjs';
+declare const _default: import('../node_modules/vue-demi/lib/v3/index.mjs').DefineComponent<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    circleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    defaultCircleGeometries: {
+        type: PropType<TMap.CircleGeometry[]>;
+    };
+    circleStyles: {
+        type: PropType<TMap.MultiCircleStyleHash>;
+    };
+    circleDrawingStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    circleSelectedStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    polygonId: {
+        type: StringConstructor;
+        default: string;
+    };
+    defaultPolygonGeometries: {
+        type: PropType<TMap.PolygonGeometry[]>;
+    };
+    polygonStyles: {
+        type: PropType<TMap.MultiPolygonStyleHash>;
+    };
+    polygonDrawingStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    polygonSelectedStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    activeOverlayId: {
+        type: StringConstructor;
+        default: string;
+    };
+    actionMode: {
+        type: StringConstructor;
+        default: string;
+    };
+    snappable: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    selectable: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    options: {
+        type: PropType<TMap.tools.GeometryEditorOptions>;
+        default: () => {};
+    };
+}>, {
+    circle: any;
+    polygon: any;
+    editor: any;
+} | undefined, {}, {}, {}, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, ("select" | "update:activeOverlayId")[], "select" | "update:activeOverlayId", import('../node_modules/vue-demi/lib/v3/index.mjs').PublicProps, Readonly<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    circleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    defaultCircleGeometries: {
+        type: PropType<TMap.CircleGeometry[]>;
+    };
+    circleStyles: {
+        type: PropType<TMap.MultiCircleStyleHash>;
+    };
+    circleDrawingStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    circleSelectedStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    polygonId: {
+        type: StringConstructor;
+        default: string;
+    };
+    defaultPolygonGeometries: {
+        type: PropType<TMap.PolygonGeometry[]>;
+    };
+    polygonStyles: {
+        type: PropType<TMap.MultiPolygonStyleHash>;
+    };
+    polygonDrawingStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    polygonSelectedStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    activeOverlayId: {
+        type: StringConstructor;
+        default: string;
+    };
+    actionMode: {
+        type: StringConstructor;
+        default: string;
+    };
+    snappable: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    selectable: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    options: {
+        type: PropType<TMap.tools.GeometryEditorOptions>;
+        default: () => {};
+    };
+}>> & Readonly<{
+    onSelect?: ((...args: any[]) => any) | undefined;
+    "onUpdate:activeOverlayId"?: ((...args: any[]) => any) | undefined;
+}>, {
+    options: TMap.tools.GeometryEditorOptions;
+    circleId: string;
+    circleDrawingStyleId: string;
+    circleSelectedStyleId: string;
+    polygonId: string;
+    polygonDrawingStyleId: string;
+    polygonSelectedStyleId: string;
+    activeOverlayId: string;
+    actionMode: string;
+    snappable: boolean;
+    selectable: boolean;
+}, {}, {}, {}, string, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentProvideOptions, true, {}, any>;
+export default _default;

@@ -1,0 +1,44 @@
+import { PropType } from '../node_modules/vue-demi/lib/v2.7/index.mjs';
+declare const _default: import('../node_modules/vue-demi/lib/v2.7/index.mjs').DefineComponent<{
+    data: {
+        type: PropType<TMap.visualization.AreaPlane[]>;
+        required: true;
+    };
+    styles: {
+        type: PropType<TMap.visualization.AreaStyleHash>;
+        required: true;
+    };
+    selectOptions: {
+        type: PropType<TMap.visualization.VisualSelectOptions>;
+        required: false;
+        default: () => null;
+    };
+    options: {
+        type: PropType<TMap.visualization.AreaOptions>;
+        default: () => {};
+    };
+}, {
+    area: any;
+} | undefined, {}, {}, {}, import("vue2.7/types/v3-component-options").ComponentOptionsMixin, import("vue2.7/types/v3-component-options").ComponentOptionsMixin, {}, string, Readonly<import('../node_modules/vue-demi/lib/v2.7/index.mjs').ExtractPropTypes<{
+    data: {
+        type: PropType<TMap.visualization.AreaPlane[]>;
+        required: true;
+    };
+    styles: {
+        type: PropType<TMap.visualization.AreaStyleHash>;
+        required: true;
+    };
+    selectOptions: {
+        type: PropType<TMap.visualization.VisualSelectOptions>;
+        required: false;
+        default: () => null;
+    };
+    options: {
+        type: PropType<TMap.visualization.AreaOptions>;
+        default: () => {};
+    };
+}>>, {
+    options: TMap.visualization.AreaOptions;
+    selectOptions: TMap.visualization.VisualSelectOptions;
+}>;
+export default _default;

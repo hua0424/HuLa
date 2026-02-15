@@ -1,0 +1,31 @@
+export declare const COMMAND: {
+    START_RECORDING: string;
+    STOP_RECORDING: string;
+};
+/**
+ * Starts recording audio.
+ *
+ * @example
+ * ```
+ * import { startRecording } from 'tauri-plugin-mic-recorder-api';
+ *
+ * startRecording().then(() => {
+ *   console.log("Recording started");
+ * });
+ * ```
+ */
+export declare const startRecording: () => Promise<unknown>;
+/**
+ * Stops recording audio.
+ *
+ * @returns Returns the path where the recording file is stored.
+ *
+ * @example
+ * ```
+ * import { stopRecording } from 'tauri-plugin-mic-recorder-api';
+ *
+ * const savePath = await stopRecording();
+ * console.log("Recording saved at:", savePath);
+ * ```
+ */
+export declare const stopRecording: () => Promise<string>;

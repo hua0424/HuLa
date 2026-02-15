@@ -1,0 +1,389 @@
+import { MarkdownIt, MarkdownIt as MarkdownIt$1, Token } from "markdown-it-ts";
+
+//#region src/factory.d.ts
+interface FactoryOptions extends Record<string, unknown> {
+  markdownItOptions?: Record<string, unknown>;
+  enableMath?: boolean;
+  enableContainers?: boolean;
+  mathOptions?: {
+    commands?: string[];
+    escapeExclamation?: boolean;
+  };
+  /**
+   * Custom HTML-like tag names that should participate in streaming mid-state
+   * suppression and be emitted as custom nodes (e.g. ['thinking']).
+   */
+  customHtmlTags?: readonly string[];
+}
+//#endregion
+//#region src/types.d.ts
+interface BaseNode {
+  type: string;
+  raw: string;
+  loading?: boolean;
+  code?: string;
+  diff?: boolean;
+}
+interface TextNode extends BaseNode {
+  type: 'text';
+  content: string;
+  center?: boolean;
+}
+interface HeadingNode extends BaseNode {
+  type: 'heading';
+  level: number;
+  text: string;
+  children: ParsedNode[];
+}
+interface ParagraphNode extends BaseNode {
+  type: 'paragraph';
+  children: ParsedNode[];
+  maybeCheckbox?: boolean;
+}
+interface InlineNode extends BaseNode {
+  type: 'inline';
+  children: ParsedNode[];
+  content?: string;
+}
+interface ListNode extends BaseNode {
+  type: 'list';
+  ordered: boolean;
+  start?: number;
+  items: ListItemNode[];
+}
+interface ListItemNode extends BaseNode {
+  type: 'list_item';
+  children: ParsedNode[];
+}
+interface CodeBlockNode extends BaseNode {
+  type: 'code_block';
+  language: string;
+  code: string;
+  startLine?: number;
+  endLine?: number;
+  loading?: boolean;
+  diff?: boolean;
+  originalCode?: string;
+  updatedCode?: string;
+  raw: string;
+}
+interface HtmlBlockNode extends BaseNode {
+  type: 'html_block';
+  attrs?: [string, string][] | null;
+  tag: string;
+  content: string;
+}
+interface HtmlInlineNode extends BaseNode {
+  type: 'html_inline';
+  tag?: string;
+  content: string;
+  children: ParsedNode[];
+  /**
+   * True when the parser auto-appended a closing tag for streaming stability.
+   * The original source is still incomplete (no explicit close typed yet).
+   */
+  autoClosed?: boolean;
+}
+type CustomComponentAttrs = [string, string][] | Record<string, string | boolean> | Array<{
+  name: string;
+  value: string | boolean;
+}> | null;
+/**
+ * A generic node shape for custom HTML-like components.
+ * When a tag name is included in `customHtmlTags`, the parser emits a node
+ * whose `type` equals that tag name and carries the raw HTML `content`
+ * plus any extracted `attrs` from user transforms.
+ */
+interface CustomComponentNode extends BaseNode {
+  /** The custom tag name (same as `tag`) */
+  type: string;
+  tag: string;
+  content: string;
+  attrs?: CustomComponentAttrs;
+  children?: ParsedNode[];
+  autoClosed?: boolean;
+}
+interface InlineCodeNode extends BaseNode {
+  type: 'inline_code';
+  code: string;
+}
+interface LinkNode extends BaseNode {
+  type: 'link';
+  href: string;
+  title: string | null;
+  text: string;
+  children: ParsedNode[];
+}
+interface ImageNode extends BaseNode {
+  type: 'image';
+  src: string;
+  alt: string;
+  title: string | null;
+}
+interface ThematicBreakNode extends BaseNode {
+  type: 'thematic_break';
+}
+interface MermaidBlockNode {
+  node: {
+    type: 'code_block';
+    language: string;
+    code: string;
+    loading?: boolean;
+  };
+}
+type MarkdownRender = {
+  content: string;
+  nodes?: undefined;
+} | {
+  content?: undefined;
+  nodes: BaseNode[];
+};
+interface BlockquoteNode extends BaseNode {
+  type: 'blockquote';
+  children: ParsedNode[];
+}
+interface TableNode extends BaseNode {
+  type: 'table';
+  header: TableRowNode;
+  rows: TableRowNode[];
+}
+interface TableRowNode extends BaseNode {
+  type: 'table_row';
+  cells: TableCellNode[];
+}
+interface TableCellNode extends BaseNode {
+  type: 'table_cell';
+  header: boolean;
+  children: ParsedNode[];
+  align?: 'left' | 'right' | 'center';
+}
+interface DefinitionListNode extends BaseNode {
+  type: 'definition_list';
+  items: DefinitionItemNode[];
+}
+interface DefinitionItemNode extends BaseNode {
+  type: 'definition_item';
+  term: ParsedNode[];
+  definition: ParsedNode[];
+}
+interface FootnoteNode extends BaseNode {
+  type: 'footnote';
+  id: string;
+  children: ParsedNode[];
+}
+interface FootnoteReferenceNode extends BaseNode {
+  type: 'footnote_reference';
+  id: string;
+}
+interface FootnoteAnchorNode extends BaseNode {
+  type: 'footnote_anchor';
+  id: string;
+}
+interface AdmonitionNode extends BaseNode {
+  type: 'admonition';
+  kind: string;
+  title: string;
+  children: ParsedNode[];
+}
+interface StrongNode extends BaseNode {
+  type: 'strong';
+  children: ParsedNode[];
+}
+interface EmphasisNode extends BaseNode {
+  type: 'emphasis';
+  children: ParsedNode[];
+}
+interface StrikethroughNode extends BaseNode {
+  type: 'strikethrough';
+  children: ParsedNode[];
+}
+interface HighlightNode extends BaseNode {
+  type: 'highlight';
+  children: ParsedNode[];
+}
+interface InsertNode extends BaseNode {
+  type: 'insert';
+  children: ParsedNode[];
+}
+interface SubscriptNode extends BaseNode {
+  type: 'subscript';
+  children: ParsedNode[];
+}
+interface SuperscriptNode extends BaseNode {
+  type: 'superscript';
+  children: ParsedNode[];
+}
+interface CheckboxNode extends BaseNode {
+  type: 'checkbox';
+  checked: boolean;
+}
+interface CheckboxInputNode extends BaseNode {
+  type: 'checkbox_input';
+  checked: boolean;
+}
+interface EmojiNode extends BaseNode {
+  type: 'emoji';
+  name: string;
+  markup: string;
+}
+interface HardBreakNode extends BaseNode {
+  type: 'hardbreak';
+}
+interface MathInlineNode extends BaseNode {
+  type: 'math_inline';
+  content: string;
+}
+interface MathBlockNode extends BaseNode {
+  type: 'math_block';
+  content: string;
+}
+interface ReferenceNode extends BaseNode {
+  type: 'reference';
+  id: string;
+}
+interface MarkdownTokenLite {
+  type: string;
+  tag?: string;
+  content?: string;
+  info?: string;
+  markup?: string;
+  meta?: unknown;
+  map?: [number, number] | number[] | null;
+  block?: boolean;
+  hidden?: boolean;
+  attrs?: [string, string][] | null;
+  nesting?: number;
+  level?: number;
+  children?: MarkdownToken[] | null;
+  loading?: boolean;
+  raw?: string;
+}
+type MarkdownToken = (Token & {
+  loading?: boolean;
+  raw?: string;
+}) | MarkdownTokenLite;
+type ParsedNode = TextNode | HeadingNode | ParagraphNode | ListNode | ListItemNode | CodeBlockNode | InlineCodeNode | LinkNode | ImageNode | ThematicBreakNode | BlockquoteNode | TableNode | TableRowNode | TableCellNode | StrongNode | EmphasisNode | StrikethroughNode | HighlightNode | InsertNode | SubscriptNode | SuperscriptNode | CheckboxNode | CheckboxInputNode | EmojiNode | DefinitionListNode | DefinitionItemNode | FootnoteNode | FootnoteReferenceNode | AdmonitionNode | HardBreakNode | MathInlineNode | MathBlockNode | ReferenceNode | HtmlBlockNode | HtmlInlineNode | CustomComponentNode | Record<string, unknown>;
+interface CustomComponents {
+  text: unknown;
+  paragraph: unknown;
+  heading: unknown;
+  code_block: unknown;
+  list: unknown;
+  blockquote: unknown;
+  table: unknown;
+  definition_list: unknown;
+  footnote: unknown;
+  footnote_reference: unknown;
+  admonition: unknown;
+  hardbreak: unknown;
+  link: unknown;
+  image: unknown;
+  thematic_break: unknown;
+  math_inline: unknown;
+  math_block: unknown;
+  strong: unknown;
+  emphasis: unknown;
+  strikethrough: unknown;
+  highlight: unknown;
+  insert: unknown;
+  subscript: unknown;
+  superscript: unknown;
+  emoji: unknown;
+  checkbox: unknown;
+  inline_code: unknown;
+  html_inline: unknown;
+  reference: unknown;
+  mermaid: unknown;
+  [key: string]: unknown;
+}
+type TransformTokensHook = (tokens: MarkdownToken[]) => MarkdownToken[];
+interface ParseOptions {
+  preTransformTokens?: TransformTokensHook;
+  postTransformTokens?: TransformTokensHook;
+  requireClosingStrong?: boolean;
+  /**
+   * Custom HTML-like tag names that should be emitted as custom nodes
+   * instead of `html_inline` when encountered (e.g. ['thinking']).
+   * Used by inline parsing; pair with `getMarkdown({ customHtmlTags })`
+   * to enable mid-state suppression for the same tags during streaming.
+   */
+  customHtmlTags?: string[];
+  debug?: boolean;
+}
+type PostTransformNodesHook = (nodes: ParsedNode[]) => ParsedNode[];
+//#endregion
+//#region src/parser/inline-parsers/index.d.ts
+declare function parseInlineTokens(tokens: MarkdownToken[], raw?: string, pPreToken?: MarkdownToken, options?: {
+  requireClosingStrong?: boolean;
+  customHtmlTags?: readonly string[];
+}): ParsedNode[];
+//#endregion
+//#region src/parser/index.d.ts
+declare function parseMarkdownToStructure(markdown: string, md: MarkdownIt$1, options?: ParseOptions): ParsedNode[];
+declare function processTokens(tokens: MarkdownToken[], options?: ParseOptions): ParsedNode[];
+//#endregion
+//#region src/config.d.ts
+/**
+ * MathOptions control how the math plugin normalizes content before
+ * handing it to KaTeX (or other math renderers).
+ *
+ * - commands: list of command words that should be auto-prefixed with a
+ *   backslash if not already escaped (e.g. 'infty' -> '\\infty'). Use a
+ *   conservative list to avoid false positives in prose.
+ * - escapeExclamation: whether to escape standalone '!' to '\\!' (default true).
+ */
+interface MathOptions {
+  /** List of command words to auto-escape. */
+  commands?: readonly string[];
+  /** Whether to escape standalone '!' (default: true). */
+  escapeExclamation?: boolean;
+  /**
+   * Strict delimiter mode.
+   * - When true, only explicit TeX delimiters are recognized as math:
+   *   inline: `$...$` and `\\(...\\)`; block: `$$...$$` and `\\[...\\]`.
+   *
+   * Important: authors should write explicit TeX delimiters with escaped
+   * backslashes in source (for example, write `\\(...\\)` rather than
+   * an unescaped `\(...\)`). Unescaped `\(...\)` cannot be reliably
+   * distinguished from ordinary parentheses and may not be parsed as math.
+   * - Heuristics and mid-state (unclosed) math detection are disabled.
+   */
+  strictDelimiters?: boolean;
+}
+declare function setDefaultMathOptions(opts: MathOptions | undefined): void;
+//#endregion
+//#region src/findMatchingClose.d.ts
+declare function findMatchingClose(src: string, startIdx: number, open: string, close: string): number;
+//#endregion
+//#region src/parser/inline-parsers/fence-parser.d.ts
+declare function parseFenceToken(token: MarkdownToken): CodeBlockNode;
+//#endregion
+//#region src/plugins/containers.d.ts
+declare function applyContainers(md: MarkdownIt$1): void;
+//#endregion
+//#region src/plugins/isMathLike.d.ts
+declare const TEX_BRACE_COMMANDS: string[];
+declare const ESCAPED_TEX_BRACE_COMMANDS: string;
+declare function isMathLike(s: string): boolean;
+//#endregion
+//#region src/plugins/math.d.ts
+declare const KATEX_COMMANDS: string[];
+declare function normalizeStandaloneBackslashT(s: string, opts?: MathOptions): string;
+declare function applyMath(md: MarkdownIt$1, mathOpts?: MathOptions): void;
+//#endregion
+//#region src/index.d.ts
+declare function registerMarkdownPlugin(plugin: unknown): void;
+declare function clearRegisteredMarkdownPlugins(): void;
+interface GetMarkdownOptions extends FactoryOptions {
+  plugin?: Array<unknown>;
+  apply?: Array<(md: MarkdownIt) => void>;
+  /**
+   * Custom translation function or translation map for UI texts
+   * @default { 'common.copy': 'Copy' }
+   */
+  i18n?: ((key: string) => string) | Record<string, string>;
+}
+declare function getMarkdown(msgId?: string, options?: GetMarkdownOptions): MarkdownIt;
+//#endregion
+export { AdmonitionNode, BaseNode, BlockquoteNode, CheckboxInputNode, CheckboxNode, CodeBlockNode, CustomComponentAttrs, CustomComponentNode, CustomComponents, DefinitionItemNode, DefinitionListNode, ESCAPED_TEX_BRACE_COMMANDS, EmojiNode, EmphasisNode, FootnoteAnchorNode, FootnoteNode, FootnoteReferenceNode, GetMarkdownOptions, HardBreakNode, HeadingNode, HighlightNode, HtmlBlockNode, HtmlInlineNode, ImageNode, InlineCodeNode, InlineNode, InsertNode, KATEX_COMMANDS, LinkNode, ListItemNode, ListNode, type MarkdownIt, MarkdownRender, MarkdownToken, MarkdownTokenLite, MathBlockNode, MathInlineNode, type MathOptions, MermaidBlockNode, ParagraphNode, ParseOptions, ParsedNode, PostTransformNodesHook, ReferenceNode, StrikethroughNode, StrongNode, SubscriptNode, SuperscriptNode, TEX_BRACE_COMMANDS, TableCellNode, TableNode, TableRowNode, TextNode, ThematicBreakNode, TransformTokensHook, applyContainers, applyMath, clearRegisteredMarkdownPlugins, findMatchingClose, getMarkdown, isMathLike, normalizeStandaloneBackslashT, parseFenceToken, parseInlineTokens, parseMarkdownToStructure, processTokens, registerMarkdownPlugin, setDefaultMathOptions };
+//# sourceMappingURL=index.d.ts.map

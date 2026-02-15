@@ -1,0 +1,2851 @@
+//#region rolldown:runtime
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+	for (var name in all) __defProp(target, name, {
+		get: all[name],
+		enumerable: true
+	});
+};
+var __copyProps = (to, from, except, desc) => {
+	if (from && typeof from === "object" || typeof from === "function") for (var keys = __getOwnPropNames(from), i = 0, n = keys.length, key; i < n; i++) {
+		key = keys[i];
+		if (!__hasOwnProp.call(to, key) && key !== except) __defProp(to, key, {
+			get: ((k) => from[k]).bind(null, key),
+			enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable
+		});
+	}
+	return to;
+};
+var __reExport = (target, mod, secondTarget) => (__copyProps(target, mod, "default"), secondTarget && __copyProps(secondTarget, mod, "default"));
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", {
+	value: mod,
+	enumerable: true
+}) : target, mod));
+
+//#endregion
+const monaco_editor = __toESM(require("monaco-editor"));
+const alien_signals = __toESM(require("alien-signals"));
+const __shikijs_monaco = __toESM(require("@shikijs/monaco"));
+const shiki = __toESM(require("shiki"));
+
+//#region src/code.detect.ts
+/**
+* Language detection definitions
+*/
+const languages = [
+	[
+		"bash",
+		[/#!(\/usr)?\/bin\/bash/g, 500],
+		[/\b(if|elif|then|fi|echo)\b|\$/g, 10]
+	],
+	[
+		"html",
+		[/<\/?[a-z-][^\n>]*>/g, 10],
+		[/^\s+<!DOCTYPE\s+html/g, 500]
+	],
+	["http", [/^(GET|HEAD|POST|PUT|DELETE|PATCH|HTTP)\b/g, 500]],
+	["js", [/\b(console|await|async|function|export|import|this|class|for|let|const|map|join|require)\b/g, 10]],
+	["ts", [/\b(console|await|async|function|export|import|this|class|for|let|const|map|join|require|implements|interface|namespace)\b/g, 10]],
+	["py", [/\b(def|print|class|and|or|lambda)\b/g, 10]],
+	["sql", [/\b(SELECT|INSERT|FROM)\b/g, 50]],
+	[
+		"pl",
+		[/#!(\/usr)?\/bin\/perl/g, 500],
+		[/\b(use|print)\b|\$/g, 10]
+	],
+	["lua", [/#!(\/usr)?\/bin\/lua/g, 500]],
+	["make", [/\b(ifneq|endif|if|elif|then|fi|echo|.PHONY|^[a-z]+ ?:$)\b|\$/gm, 10]],
+	["uri", [/https?:|mailto:|tel:|ftp:/g, 30]],
+	["css", [/^(@import|@page|@media|(\.|#)[a-z]+)/gm, 20]],
+	[
+		"diff",
+		[/^[+><-]/gm, 10],
+		[/^@@[-+,0-9 ]+@@/gm, 25]
+	],
+	[
+		"md",
+		[/^(>|\t\*|\t\d+.|#{1,6} |-\s+|\*\s+)/gm, 25],
+		[/\[.*\](.*)/g, 10]
+	],
+	["docker", [/^(FROM|ENTRYPOINT|RUN)/gm, 500]],
+	[
+		"xml",
+		[/<\/?[a-z-][^\n>]*>/g, 10],
+		[/^<\?xml/g, 500]
+	],
+	["c", [/#include\b|\bprintf\s+\(/g, 100]],
+	["rs", [/^\s+(use|fn|mut|match)\b/gm, 100]],
+	["go", [/\b(func|fmt|package)\b/g, 100]],
+	["java", [/^import\s+java/gm, 500]],
+	["asm", [/^(section|global main|extern|\t(call|mov|ret))/gm, 100]],
+	["css", [/^(@import|@page|@media|(\.|#)[a-z]+)/gm, 20]],
+	["json", [/\b(true|false|null|\{\})\b|"[^"]+":/g, 10]],
+	["yaml", [/^(\s+)?[a-z][a-z0-9]*:/gim, 10]],
+	[
+		"toml",
+		[/^\s*\[.*\]\s*$/gm, 100],
+		[/^\s*[\w-]+ *= */gm, 20]
+	],
+	[
+		"mermaid",
+		[/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|mindmap)/gm, 500],
+		[/\b(-->|--o|--x|=>|\[\]|[{}])\b/g, 10]
+	]
+];
+/**
+* Try to find the language the given code belongs to
+*
+* @param {string} code The code to analyze
+* @param {LanguageDefinition[]} [additionalLanguages] Additional language definitions to supplement the built-in ones
+* @returns {CodeLanguage} The detected language of the code
+*/
+function detectLanguage(code, additionalLanguages) {
+	var _allLanguages$map$fil;
+	const allLanguages = additionalLanguages ? [...languages, ...additionalLanguages] : languages;
+	return ((_allLanguages$map$fil = allLanguages.map(([lang, ...features]) => [lang, features.reduce((acc, [match, score]) => acc + [...code.matchAll(match)].length * score, 0)]).filter(([, score]) => score > 20).sort((a, b) => b[1] - a[1])[0]) === null || _allLanguages$map$fil === void 0 ? void 0 : _allLanguages$map$fil[0]) || "plain";
+}
+function processedLanguage(language) {
+	if (/^(?:shellscript|bash|sh|shell|zsh)/i.test(language)) return "shell";
+	if (/^(?:powershell|ps1?)/i.test(language)) return "powershell";
+	return language.split(":")[0];
+}
+/**
+* 使用示例:
+*
+* // 基本用法
+* const language1 = detectLanguage('console.log("hello")') // 'js'
+*
+* // 使用自定义语言检测规则
+* const customLanguages: LanguageDefinition[] = [
+*   ['vue', [/<template>/g, 100], [/<script>/g, 50], [/<style>/g, 50]],
+*   ['kotlin', [/\b(fun|class|val|var)\b/g, 20]]
+* ]
+*
+* const language2 = detectLanguage(`
+*   <template>
+*     <div>Hello Vue</div>
+*   </template>
+* `, customLanguages) // 'vue'
+*
+* const language3 = detectLanguage(`
+*   fun main() {
+*     val name = "Kotlin"
+*     println("Hello $name")
+*   }
+* `, customLanguages) // 'kotlin'
+*/
+
+//#endregion
+//#region src/constant.ts
+const defaultLanguages = [
+	"jsx",
+	"tsx",
+	"vue",
+	"csharp",
+	"python",
+	"java",
+	"c",
+	"cpp",
+	"rust",
+	"go",
+	"powershell",
+	"sql",
+	"json",
+	"html",
+	"javascript",
+	"typescript",
+	"css",
+	"markdown",
+	"xml",
+	"yaml",
+	"toml",
+	"dockerfile",
+	"kotlin",
+	"objective-c",
+	"objective-cpp",
+	"php",
+	"ruby",
+	"scala",
+	"svelte",
+	"swift",
+	"erlang",
+	"angular-html",
+	"angular-ts",
+	"dart",
+	"lua",
+	"mermaid",
+	"cmake",
+	"nginx"
+];
+const defaultThemes = ["vitesse-dark", "vitesse-light"];
+const defaultScrollbar = {
+	verticalScrollbarSize: 8,
+	horizontalScrollbarSize: 8,
+	handleMouseWheel: true,
+	alwaysConsumeMouseWheel: false
+};
+const padding = 16;
+const defaultRevealDebounceMs = 75;
+const defaultRevealBatchOnIdleMs = 200;
+const minimalEditMaxChars = 2e5;
+const minimalEditMaxChangeRatio = .5;
+
+//#endregion
+//#region src/minimalEdit.ts
+/**
+* Compute the minimal middle replacement between two UTF-16 strings.
+* Returns null when prev === next (no edits required).
+*/
+function computeMinimalEdit(prev, next) {
+	if (prev === next) return null;
+	let start = 0;
+	const minLen = Math.min(prev.length, next.length);
+	while (start < minLen && prev.charCodeAt(start) === next.charCodeAt(start)) start++;
+	let endPrev = prev.length - 1;
+	let endNext = next.length - 1;
+	while (endPrev >= start && endNext >= start && prev.charCodeAt(endPrev) === next.charCodeAt(endNext)) {
+		endPrev--;
+		endNext--;
+	}
+	return {
+		start,
+		endPrevIncl: endPrev,
+		endNextIncl: endNext,
+		replaceText: next.slice(start, endNext + 1)
+	};
+}
+
+//#endregion
+//#region src/monaco-shim.ts
+var monaco_shim_exports = {};
+__export(monaco_shim_exports, { default: () => monaco });
+__reExport(monaco_shim_exports, require("monaco-editor"));
+const monaco = monaco_editor;
+
+//#endregion
+//#region src/utils/logger.ts
+let seq = 0;
+const DEBUG = (() => {
+	if (typeof window !== "undefined" && window.__STREAM_MONACO_DEBUG__ !== void 0) return Boolean(window.__STREAM_MONACO_DEBUG__);
+	return false;
+})();
+function log(tag, ...args) {
+	if (!DEBUG) return;
+	seq += 1;
+	const id = `#${seq}`;
+	const ts = typeof performance !== "undefined" && performance.now ? performance.now().toFixed(1) : Date.now();
+	console.warn(`${id} [${tag}] @${ts}ms`, ...args);
+}
+function error(tag, ...args) {
+	if (!DEBUG) return;
+	console.error(`[${tag}]`, ...args);
+}
+
+//#endregion
+//#region src/utils/height.ts
+function createHeightManager(container, computeNext) {
+	let raf = null;
+	let debounceTimer = null;
+	let lastApplied = -1;
+	let suppressed = false;
+	const HYSTERESIS_PX = 12;
+	const DEBOUNCE_MS = 0;
+	function apply() {
+		const next = computeNext();
+		if (next == null) return;
+		log("heightManager", "computeNext ->", {
+			next,
+			lastApplied
+		});
+		if (!Number.isFinite(next) || next <= 0) {
+			log("heightManager", "invalid next height, ignoring", next);
+			return;
+		}
+		if (lastApplied !== -1 && Math.abs(next - lastApplied) <= HYSTERESIS_PX) return;
+		if (next === lastApplied) return;
+		suppressed = true;
+		container.style.height = `${next}px`;
+		lastApplied = next;
+		log("heightManager", "applied height ->", next);
+		queueMicrotask(() => {
+			suppressed = false;
+		});
+	}
+	function scheduleApply() {
+		if (debounceTimer != null) {
+			clearTimeout(debounceTimer);
+			debounceTimer = null;
+		}
+		if (DEBOUNCE_MS === 0) {
+			if (raf != null) return;
+			raf = requestAnimationFrame(() => {
+				raf = null;
+				apply();
+			});
+			return;
+		}
+		debounceTimer = setTimeout(() => {
+			debounceTimer = null;
+			if (raf != null) return;
+			raf = requestAnimationFrame(() => {
+				raf = null;
+				apply();
+			});
+		}, DEBOUNCE_MS);
+	}
+	function update() {
+		scheduleApply();
+	}
+	function dispose() {
+		if (raf != null) {
+			cancelAnimationFrame(raf);
+			raf = null;
+		}
+		if (debounceTimer != null) {
+			clearTimeout(debounceTimer);
+			debounceTimer = null;
+		}
+	}
+	function isSuppressed() {
+		return suppressed;
+	}
+	function getLastApplied() {
+		return lastApplied;
+	}
+	return {
+		update,
+		dispose,
+		isSuppressed,
+		getLastApplied
+	};
+}
+
+//#endregion
+//#region src/utils/raf.ts
+/**
+* Create a per-instance RAF scheduler that coalesces tasks by "kind" within
+* the same instance. Instances are isolated so different editors won't
+* cancel each other's scheduled work.
+*/
+function createRafScheduler(timeSource) {
+	const ids = {};
+	const ts = timeSource ?? {
+		requestAnimationFrame: (cb) => requestAnimationFrame(cb),
+		cancelAnimationFrame: (id) => cancelAnimationFrame(id)
+	};
+	function schedule(kind, cb) {
+		const existing = ids[kind];
+		if (existing != null) ts.cancelAnimationFrame(existing);
+		ids[kind] = ts.requestAnimationFrame((t) => {
+			ids[kind] = null;
+			cb(t);
+		});
+	}
+	function cancel(kind) {
+		const id = ids[kind];
+		if (id != null) {
+			ts.cancelAnimationFrame(id);
+			ids[kind] = null;
+		}
+	}
+	return {
+		schedule,
+		cancel
+	};
+}
+
+//#endregion
+//#region src/utils/scroll.ts
+function createScrollWatcherForEditor(ed, opts) {
+	var _ed$getScrollTop, _ed$onDidScrollChange;
+	const initial = ((_ed$getScrollTop = ed.getScrollTop) === null || _ed$getScrollTop === void 0 ? void 0 : _ed$getScrollTop.call(ed)) ?? 0;
+	opts.setLast(initial);
+	log("scrollWatcher", "initial scrollTop=", initial);
+	let suppressedExternally = false;
+	const THRESHOLD_PX = 6;
+	let domNode = null;
+	let interactionListener = null;
+	const listener = (e) => {
+		var _ed$getScrollTop2;
+		if (suppressedExternally) {
+			log("scrollWatcher", "suppressedExternally, ignoring event");
+			return;
+		}
+		const currentTop = e && typeof e.scrollTop === "number" ? e.scrollTop : ((_ed$getScrollTop2 = ed.getScrollTop) === null || _ed$getScrollTop2 === void 0 ? void 0 : _ed$getScrollTop2.call(ed)) ?? 0;
+		const delta = currentTop - opts.getLast();
+		opts.setLast(currentTop);
+		if (Math.abs(delta) < THRESHOLD_PX) {
+			log("scrollWatcher", "small delta ignored", delta);
+			try {
+				const scrollHeight = typeof ed.getScrollHeight === "function" ? ed.getScrollHeight() : void 0;
+				const li = typeof ed.getLayoutInfo === "function" ? ed.getLayoutInfo() : void 0;
+				const viewportH = (li === null || li === void 0 ? void 0 : li.height) ?? void 0;
+				if (typeof scrollHeight === "number" && typeof viewportH === "number") {
+					const distance = scrollHeight - (currentTop + viewportH);
+					if (distance <= Math.max(THRESHOLD_PX, 0)) {
+						log("scrollWatcher", "small delta but at bottom, maybe resume", { distance });
+						opts.onMaybeResume();
+					}
+				}
+			} catch {}
+			return;
+		}
+		log("scrollWatcher", "delta=", delta, "currentTop=", currentTop);
+		if (delta < 0) {
+			log("scrollWatcher", "pause detected delta=", delta);
+			opts.onPause();
+			return;
+		}
+		log("scrollWatcher", "maybe resume delta=", delta);
+		opts.onMaybeResume();
+	};
+	const disp = ((_ed$onDidScrollChange = ed.onDidScrollChange) === null || _ed$onDidScrollChange === void 0 ? void 0 : _ed$onDidScrollChange.call(ed, listener)) ?? null;
+	const api = {
+		dispose() {
+			try {
+				if (disp && typeof disp.dispose === "function") disp.dispose();
+				else if (typeof disp === "function") disp();
+			} catch {}
+			log("scrollWatcher", "dispose");
+		},
+		setSuppressed(v) {
+			const newVal = !!v;
+			if (newVal === suppressedExternally) return;
+			suppressedExternally = newVal;
+			log("scrollWatcher", "setSuppressed =>", suppressedExternally);
+			try {
+				if (!domNode && typeof ed.getDomNode === "function") domNode = ed.getDomNode();
+				if (suppressedExternally && domNode) {
+					if (!interactionListener) {
+						interactionListener = () => {
+							try {
+								var _ed$getScrollTop3;
+								log("scrollWatcher", "user interaction detected while suppressed, cancelling suppression");
+								opts.onPause();
+								suppressedExternally = false;
+								const cur = ((_ed$getScrollTop3 = ed.getScrollTop) === null || _ed$getScrollTop3 === void 0 ? void 0 : _ed$getScrollTop3.call(ed)) ?? 0;
+								opts.setLast(cur);
+								try {
+									const scrollHeight = typeof ed.getScrollHeight === "function" ? ed.getScrollHeight() : void 0;
+									const li = typeof ed.getLayoutInfo === "function" ? ed.getLayoutInfo() : void 0;
+									const viewportH = (li === null || li === void 0 ? void 0 : li.height) ?? void 0;
+									if (typeof scrollHeight === "number" && typeof viewportH === "number") {
+										const distance = scrollHeight - (cur + viewportH);
+										if (distance <= Math.max(THRESHOLD_PX, 0)) {
+											log("scrollWatcher", "interaction moved to bottom, maybe resume", { distance });
+											opts.onMaybeResume();
+										}
+									}
+								} catch {}
+								if (domNode && interactionListener) {
+									domNode.removeEventListener("wheel", interactionListener, { passive: true });
+									domNode.removeEventListener("pointerdown", interactionListener);
+									domNode.removeEventListener("touchstart", interactionListener);
+								}
+								interactionListener = null;
+							} catch {}
+						};
+						domNode.addEventListener("wheel", interactionListener, { passive: true });
+						domNode.addEventListener("pointerdown", interactionListener);
+						domNode.addEventListener("touchstart", interactionListener);
+					}
+				} else if (domNode && interactionListener) {
+					domNode.removeEventListener("wheel", interactionListener, { passive: true });
+					domNode.removeEventListener("pointerdown", interactionListener);
+					domNode.removeEventListener("touchstart", interactionListener);
+					interactionListener = null;
+				}
+			} catch {}
+		}
+	};
+	return api;
+}
+
+//#endregion
+//#region src/core/DiffEditorManager.ts
+var DiffEditorManager = class {
+	diffEditorView = null;
+	originalModel = null;
+	modifiedModel = null;
+	lastContainer = null;
+	lastKnownOriginalCode = null;
+	lastKnownModifiedCode = null;
+	lastKnownModifiedLineCount = null;
+	pendingDiffUpdate = null;
+	shouldAutoScrollDiff = true;
+	diffScrollWatcher = null;
+	lastScrollTopDiff = 0;
+	_hasScrollBar = false;
+	cachedScrollHeightDiff = null;
+	cachedLineHeightDiff = null;
+	cachedComputedHeightDiff = null;
+	lastKnownModifiedDirty = false;
+	measureViewportDiff() {
+		var _me$getLayoutInfo, _me$getScrollTop, _me$getScrollHeight;
+		if (!this.diffEditorView) return null;
+		const me = this.diffEditorView.getModifiedEditor();
+		const li = ((_me$getLayoutInfo = me.getLayoutInfo) === null || _me$getLayoutInfo === void 0 ? void 0 : _me$getLayoutInfo.call(me)) ?? null;
+		const lineHeight = this.cachedLineHeightDiff ?? me.getOption(monaco_shim_exports.editor.EditorOption.lineHeight);
+		const scrollTop = ((_me$getScrollTop = me.getScrollTop) === null || _me$getScrollTop === void 0 ? void 0 : _me$getScrollTop.call(me)) ?? this.lastScrollTopDiff ?? 0;
+		const scrollHeight = ((_me$getScrollHeight = me.getScrollHeight) === null || _me$getScrollHeight === void 0 ? void 0 : _me$getScrollHeight.call(me)) ?? this.cachedScrollHeightDiff ?? (li === null || li === void 0 ? void 0 : li.height) ?? 0;
+		const computedHeight = this.cachedComputedHeightDiff ?? this.computedHeight();
+		this.cachedLineHeightDiff = lineHeight;
+		this.cachedScrollHeightDiff = scrollHeight;
+		this.cachedComputedHeightDiff = computedHeight;
+		this.lastScrollTopDiff = scrollTop;
+		return {
+			me,
+			li,
+			lineHeight,
+			scrollTop,
+			scrollHeight,
+			computedHeight
+		};
+	}
+	lastRevealLineDiff = null;
+	revealTicketDiff = 0;
+	revealDebounceIdDiff = null;
+	revealDebounceMs = defaultRevealDebounceMs;
+	revealIdleTimerIdDiff = null;
+	revealStrategyOption;
+	revealBatchOnIdleMsOption;
+	scrollWatcherSuppressionMs = 500;
+	diffScrollWatcherSuppressionTimer = null;
+	appendBufferOriginalDiff = [];
+	appendBufferModifiedDiff = [];
+	appendBufferDiffScheduled = false;
+	diffUpdateThrottleMs = 50;
+	lastAppendFlushTimeDiff = 0;
+	appendFlushThrottleTimerDiff = null;
+	rafScheduler = createRafScheduler();
+	diffHeightManager = null;
+	constructor(options, maxHeightValue, maxHeightCSS, autoScrollOnUpdate, autoScrollInitial, autoScrollThresholdPx, autoScrollThresholdLines, diffAutoScroll, revealDebounceMsOption, diffUpdateThrottleMsOption) {
+		this.options = options;
+		this.maxHeightValue = maxHeightValue;
+		this.maxHeightCSS = maxHeightCSS;
+		this.autoScrollOnUpdate = autoScrollOnUpdate;
+		this.autoScrollInitial = autoScrollInitial;
+		this.autoScrollThresholdPx = autoScrollThresholdPx;
+		this.autoScrollThresholdLines = autoScrollThresholdLines;
+		this.diffAutoScroll = diffAutoScroll;
+		this.revealDebounceMsOption = revealDebounceMsOption;
+	}
+	scheduleFlushAppendBufferDiff() {
+		if (this.appendBufferDiffScheduled) return;
+		this.appendBufferDiffScheduled = true;
+		const schedule = () => {
+			this.rafScheduler.schedule("appendDiff", () => this.flushAppendBufferDiff());
+		};
+		const throttle = this.diffUpdateThrottleMs;
+		if (!throttle) {
+			schedule();
+			return;
+		}
+		const now = Date.now();
+		const since = now - this.lastAppendFlushTimeDiff;
+		if (since >= throttle) {
+			schedule();
+			return;
+		}
+		if (this.appendFlushThrottleTimerDiff != null) return;
+		const wait = throttle - since;
+		this.appendFlushThrottleTimerDiff = setTimeout(() => {
+			this.appendFlushThrottleTimerDiff = null;
+			schedule();
+		}, wait);
+	}
+	flushOriginalAppendBufferSync() {
+		if (!this.originalModel) return;
+		if (this.appendBufferOriginalDiff.length === 0) return;
+		this.rafScheduler.cancel("appendDiff");
+		this.appendBufferDiffScheduled = false;
+		const text = this.appendBufferOriginalDiff.join("");
+		this.appendBufferOriginalDiff.length = 0;
+		if (!text) return;
+		this.appendToModel(this.originalModel, text);
+	}
+	computedHeight() {
+		var _originalEditor$getMo, _modifiedEditor$getMo, _originalEditor$getSc, _modifiedEditor$getSc;
+		if (!this.diffEditorView) return Math.min(1 * 18 + padding, this.maxHeightValue);
+		const modifiedEditor = this.diffEditorView.getModifiedEditor();
+		const originalEditor = this.diffEditorView.getOriginalEditor();
+		const lineHeight = modifiedEditor.getOption(monaco_shim_exports.editor.EditorOption.lineHeight);
+		const oCount = ((_originalEditor$getMo = originalEditor.getModel()) === null || _originalEditor$getMo === void 0 ? void 0 : _originalEditor$getMo.getLineCount()) ?? 1;
+		const mCount = ((_modifiedEditor$getMo = modifiedEditor.getModel()) === null || _modifiedEditor$getMo === void 0 ? void 0 : _modifiedEditor$getMo.getLineCount()) ?? 1;
+		const lineCount = Math.max(oCount, mCount);
+		const fromLines = lineCount * lineHeight + padding;
+		const scrollH = Math.max(((_originalEditor$getSc = originalEditor.getScrollHeight) === null || _originalEditor$getSc === void 0 ? void 0 : _originalEditor$getSc.call(originalEditor)) ?? 0, ((_modifiedEditor$getSc = modifiedEditor.getScrollHeight) === null || _modifiedEditor$getSc === void 0 ? void 0 : _modifiedEditor$getSc.call(modifiedEditor)) ?? 0);
+		const desired = Math.max(fromLines, scrollH);
+		return Math.min(desired, this.maxHeightValue);
+	}
+	isOverflowAutoDiff() {
+		return !!this.lastContainer && this.lastContainer.style.overflow === "auto";
+	}
+	shouldPerformImmediateRevealDiff() {
+		return this.autoScrollOnUpdate && this.shouldAutoScrollDiff && this.hasVerticalScrollbarModified() && this.isOverflowAutoDiff();
+	}
+	suppressScrollWatcherDiff(ms) {
+		if (!this.diffScrollWatcher || typeof this.diffScrollWatcher.setSuppressed !== "function") return;
+		if (this.diffScrollWatcherSuppressionTimer != null) {
+			clearTimeout(this.diffScrollWatcherSuppressionTimer);
+			this.diffScrollWatcherSuppressionTimer = null;
+		}
+		this.diffScrollWatcher.setSuppressed(true);
+		this.diffScrollWatcherSuppressionTimer = setTimeout(() => {
+			try {
+				this.diffScrollWatcher.setSuppressed(false);
+			} catch {}
+			this.diffScrollWatcherSuppressionTimer = null;
+		}, ms);
+	}
+	hasVerticalScrollbarModified() {
+		if (!this.diffEditorView) return false;
+		if (this._hasScrollBar) return true;
+		const m = this.measureViewportDiff();
+		if (!m) return false;
+		const epsilon = Math.max(2, Math.round(m.lineHeight / 8));
+		return this._hasScrollBar = m.scrollHeight > m.computedHeight + Math.max(padding / 2, epsilon);
+	}
+	userIsNearBottomDiff() {
+		if (!this.diffEditorView) return true;
+		const m = this.measureViewportDiff();
+		if (!m || !m.li) return true;
+		const lineThreshold = (this.autoScrollThresholdLines ?? 0) * m.lineHeight;
+		const threshold = Math.max(lineThreshold || 0, this.autoScrollThresholdPx || 0);
+		const distance = m.scrollHeight - (m.scrollTop + m.li.height);
+		return distance <= threshold;
+	}
+	maybeScrollDiffToBottom(targetLine, prevLineOverride) {
+		this.rafScheduler.schedule("maybe-scroll-diff", () => {
+			log("diff", "maybeScrollDiffToBottom called", {
+				targetLine,
+				prevLineOverride,
+				diffAutoScroll: this.diffAutoScroll,
+				autoScrollOnUpdate: this.autoScrollOnUpdate,
+				shouldAutoScrollDiff: this.shouldAutoScrollDiff
+			});
+			if (!this.diffEditorView) return;
+			const hasV = this.hasVerticalScrollbarModified();
+			log("diff", "hasVerticalScrollbarModified ->", hasV);
+			if (!(this.diffAutoScroll && this.autoScrollOnUpdate && this.shouldAutoScrollDiff && hasV)) return;
+			const me = this.diffEditorView.getModifiedEditor();
+			const model = me.getModel();
+			const currentLine = (model === null || model === void 0 ? void 0 : model.getLineCount()) ?? 1;
+			const line = targetLine ?? currentLine;
+			const prevLine = typeof prevLineOverride === "number" ? prevLineOverride : this.lastKnownModifiedLineCount ?? -1;
+			log("diff", "scroll metrics", {
+				prevLine,
+				currentLine,
+				line,
+				lastRevealLineDiff: this.lastRevealLineDiff
+			});
+			if (prevLine !== -1 && prevLine === currentLine && line === currentLine) return;
+			if (this.lastRevealLineDiff !== null && this.lastRevealLineDiff === line) return;
+			const batchMs = this.revealBatchOnIdleMsOption ?? this.options.revealBatchOnIdleMs ?? defaultRevealBatchOnIdleMs;
+			log("diff", "reveal timing", {
+				batchMs,
+				revealDebounceMs: this.revealDebounceMs,
+				revealDebounceMsOption: this.revealDebounceMsOption
+			});
+			if (typeof batchMs === "number" && batchMs > 0) {
+				if (hasV) {
+					const ticket$1 = ++this.revealTicketDiff;
+					log("diff", "has scrollbar -> immediate ticketed reveal", {
+						ticket: ticket$1,
+						line
+					});
+					this.performRevealDiffTicketed(line, ticket$1);
+					return;
+				}
+				if (this.revealIdleTimerIdDiff != null) clearTimeout(this.revealIdleTimerIdDiff);
+				const ticket = ++this.revealTicketDiff;
+				log("diff", "scheduling idle reveal", {
+					ticket,
+					batchMs,
+					line
+				});
+				this.revealIdleTimerIdDiff = setTimeout(() => {
+					this.revealIdleTimerIdDiff = null;
+					this.performRevealDiffTicketed(line, ticket);
+				}, batchMs);
+				return;
+			}
+			if (this.revealDebounceIdDiff != null) {
+				clearTimeout(this.revealDebounceIdDiff);
+				this.revealDebounceIdDiff = null;
+			}
+			const ms = typeof this.revealDebounceMs === "number" && this.revealDebounceMs > 0 ? this.revealDebounceMs : typeof this.revealDebounceMsOption === "number" && this.revealDebounceMsOption > 0 ? this.revealDebounceMsOption : this.revealDebounceMs;
+			this.revealDebounceIdDiff = setTimeout(() => {
+				this.revealDebounceIdDiff = null;
+				const ticket = ++this.revealTicketDiff;
+				log("diff", "debounced reveal firing", {
+					ticket,
+					line
+				});
+				this.performRevealDiffTicketed(line, ticket);
+			}, ms);
+			this.lastKnownModifiedLineCount = currentLine;
+		});
+	}
+	performRevealDiffTicketed(line, ticket) {
+		this.rafScheduler.schedule("revealDiff", () => {
+			var _editor;
+			if (this.diffScrollWatcher) {
+				log("diff", "performRevealDiffTicketed - suppressing watcher", {
+					ticket,
+					line,
+					ms: this.scrollWatcherSuppressionMs
+				});
+				this.suppressScrollWatcherDiff(this.scrollWatcherSuppressionMs);
+			}
+			if (ticket !== this.revealTicketDiff) return;
+			log("diff", "performRevealDiffTicketed - performing reveal", {
+				ticket,
+				line
+			});
+			const strategy = this.revealStrategyOption ?? this.options.revealStrategy ?? "centerIfOutside";
+			const ScrollType = monaco_shim_exports.ScrollType || ((_editor = monaco_shim_exports.editor) === null || _editor === void 0 ? void 0 : _editor.ScrollType);
+			const smooth = ScrollType && typeof ScrollType.Smooth !== "undefined" ? ScrollType.Smooth : void 0;
+			try {
+				const me = this.diffEditorView.getModifiedEditor();
+				if (strategy === "bottom") if (typeof smooth !== "undefined") me.revealLine(line, smooth);
+				else me.revealLine(line);
+				else if (strategy === "center") if (typeof smooth !== "undefined") me.revealLineInCenter(line, smooth);
+				else me.revealLineInCenter(line);
+				else if (typeof smooth !== "undefined") me.revealLineInCenterIfOutsideViewport(line, smooth);
+				else me.revealLineInCenterIfOutsideViewport(line);
+			} catch {
+				try {
+					this.diffEditorView.getModifiedEditor().revealLine(line);
+				} catch {}
+			}
+			this.lastRevealLineDiff = line;
+			log("diff", "performRevealDiffTicketed - revealed", {
+				line,
+				lastRevealLineDiff: this.lastRevealLineDiff
+			});
+			try {
+				var _this$diffEditorView, _this$diffEditorView$, _this$diffEditorView$2;
+				this.shouldAutoScrollDiff = true;
+				this.lastScrollTopDiff = ((_this$diffEditorView = this.diffEditorView) === null || _this$diffEditorView === void 0 || (_this$diffEditorView$2 = (_this$diffEditorView$ = _this$diffEditorView.getModifiedEditor()).getScrollTop) === null || _this$diffEditorView$2 === void 0 ? void 0 : _this$diffEditorView$2.call(_this$diffEditorView$)) ?? this.lastScrollTopDiff;
+			} catch {}
+		});
+	}
+	performImmediateRevealDiff(line, ticket) {
+		var _editor2;
+		if (!this.diffEditorView) return;
+		if (ticket !== this.revealTicketDiff) return;
+		const ScrollType = monaco_shim_exports.ScrollType || ((_editor2 = monaco_shim_exports.editor) === null || _editor2 === void 0 ? void 0 : _editor2.ScrollType);
+		const immediate = ScrollType && typeof ScrollType.Immediate !== "undefined" ? ScrollType.Immediate : void 0;
+		const me = this.diffEditorView.getModifiedEditor();
+		if (typeof immediate !== "undefined") me.revealLine(line, immediate);
+		else me.revealLine(line);
+		this.measureViewportDiff();
+		log("diff", "performImmediateRevealDiff", {
+			line,
+			ticket
+		});
+		try {
+			var _this$diffEditorView2, _this$diffEditorView3, _this$diffEditorView4;
+			this.shouldAutoScrollDiff = true;
+			this.lastScrollTopDiff = ((_this$diffEditorView2 = this.diffEditorView) === null || _this$diffEditorView2 === void 0 || (_this$diffEditorView4 = (_this$diffEditorView3 = _this$diffEditorView2.getModifiedEditor()).getScrollTop) === null || _this$diffEditorView4 === void 0 ? void 0 : _this$diffEditorView4.call(_this$diffEditorView3)) ?? this.lastScrollTopDiff;
+		} catch {}
+	}
+	scheduleImmediateRevealAfterLayoutDiff(line) {
+		const ticket = ++this.revealTicketDiff;
+		this.rafScheduler.schedule("immediate-reveal-diff", async () => {
+			const target = this.diffEditorView && this.diffHeightManager ? Math.min(this.computedHeight(), this.maxHeightValue) : -1;
+			if (target !== -1 && this.diffHeightManager) {
+				if (this.lastContainer) this.lastContainer.style.height = `${target}px`;
+				await this.waitForHeightAppliedDiff(target);
+			}
+			this.performImmediateRevealDiff(line, ticket);
+		});
+	}
+	waitForHeightAppliedDiff(target, timeoutMs = 500) {
+		return new Promise((resolve) => {
+			const start = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+			const check = () => {
+				const applied = this.lastContainer ? Number.parseFloat((this.lastContainer.style.height || "").replace("px", "")) || 0 : -1;
+				if (applied >= target - 1) {
+					resolve();
+					return;
+				}
+				if ((typeof performance !== "undefined" && performance.now ? performance.now() : Date.now()) - start > timeoutMs) {
+					resolve();
+					return;
+				}
+				requestAnimationFrame(check);
+			};
+			check();
+		});
+	}
+	async createDiffEditor(container, originalCode, modifiedCode, language, currentTheme) {
+		var _me$getScrollHeight2, _me$getOption, _oEditor$onDidContent, _mEditor$onDidContent;
+		this.cleanup();
+		this.lastContainer = container;
+		container.style.overflow = "hidden";
+		container.style.maxHeight = this.maxHeightCSS;
+		const lang = processedLanguage(language) || language;
+		this.originalModel = monaco_shim_exports.editor.createModel(originalCode, lang);
+		this.modifiedModel = monaco_shim_exports.editor.createModel(modifiedCode, lang);
+		this.diffEditorView = monaco_shim_exports.editor.createDiffEditor(container, {
+			automaticLayout: true,
+			scrollBeyondLastLine: false,
+			renderSideBySide: true,
+			originalEditable: false,
+			readOnly: this.options.readOnly ?? true,
+			minimap: { enabled: false },
+			theme: currentTheme,
+			contextmenu: false,
+			scrollbar: {
+				...defaultScrollbar,
+				...this.options.scrollbar || {}
+			},
+			...this.options
+		});
+		monaco_shim_exports.editor.setTheme(currentTheme);
+		this.diffEditorView.setModel({
+			original: this.originalModel,
+			modified: this.modifiedModel
+		});
+		this.lastKnownOriginalCode = originalCode;
+		this.lastKnownModifiedCode = modifiedCode;
+		this.diffUpdateThrottleMs = this.options.diffUpdateThrottleMs ?? 50;
+		this.shouldAutoScrollDiff = !!(this.autoScrollInitial && this.diffAutoScroll);
+		if (this.diffScrollWatcher) {
+			this.diffScrollWatcher.dispose();
+			this.diffScrollWatcher = null;
+		}
+		if (this.diffAutoScroll) {
+			const me$1 = this.diffEditorView.getModifiedEditor();
+			this.diffScrollWatcher = createScrollWatcherForEditor(me$1, {
+				onPause: () => {
+					this.shouldAutoScrollDiff = false;
+				},
+				onMaybeResume: () => {
+					this.rafScheduler.schedule("maybe-resume-diff", () => {
+						this.shouldAutoScrollDiff = this.userIsNearBottomDiff();
+					});
+				},
+				getLast: () => this.lastScrollTopDiff,
+				setLast: (v) => {
+					this.lastScrollTopDiff = v;
+				}
+			});
+		}
+		log("diff", "createDiffEditor", {
+			autoScrollInitial: this.autoScrollInitial,
+			diffAutoScroll: this.diffAutoScroll
+		});
+		const MIN_VISIBLE_HEIGHT = Math.min(120, this.maxHeightValue);
+		container.style.minHeight = `${MIN_VISIBLE_HEIGHT}px`;
+		if (this.diffHeightManager) {
+			this.diffHeightManager.dispose();
+			this.diffHeightManager = null;
+		}
+		this.diffHeightManager = createHeightManager(container, () => this.computedHeight());
+		this.diffHeightManager.update();
+		const initialComputed = this.computedHeight();
+		if (initialComputed >= this.maxHeightValue - 1) {
+			container.style.height = `${this.maxHeightValue}px`;
+			container.style.overflow = "auto";
+		}
+		const me = this.diffEditorView.getModifiedEditor();
+		this.cachedScrollHeightDiff = ((_me$getScrollHeight2 = me.getScrollHeight) === null || _me$getScrollHeight2 === void 0 ? void 0 : _me$getScrollHeight2.call(me)) ?? null;
+		this.cachedLineHeightDiff = ((_me$getOption = me.getOption) === null || _me$getOption === void 0 ? void 0 : _me$getOption.call(me, monaco_shim_exports.editor.EditorOption.lineHeight)) ?? null;
+		this.cachedComputedHeightDiff = this.computedHeight();
+		const oEditor = this.diffEditorView.getOriginalEditor();
+		const mEditor = this.diffEditorView.getModifiedEditor();
+		(_oEditor$onDidContent = oEditor.onDidContentSizeChange) === null || _oEditor$onDidContent === void 0 || _oEditor$onDidContent.call(oEditor, () => {
+			this._hasScrollBar = false;
+			this.rafScheduler.schedule("content-size-change-diff", () => {
+				var _oEditor$getScrollHei, _oEditor$getOption, _this$diffHeightManag, _this$diffHeightManag2;
+				this.cachedScrollHeightDiff = ((_oEditor$getScrollHei = oEditor.getScrollHeight) === null || _oEditor$getScrollHei === void 0 ? void 0 : _oEditor$getScrollHei.call(oEditor)) ?? this.cachedScrollHeightDiff;
+				this.cachedLineHeightDiff = ((_oEditor$getOption = oEditor.getOption) === null || _oEditor$getOption === void 0 ? void 0 : _oEditor$getOption.call(oEditor, monaco_shim_exports.editor.EditorOption.lineHeight)) ?? this.cachedLineHeightDiff;
+				this.cachedComputedHeightDiff = this.computedHeight();
+				if ((_this$diffHeightManag = this.diffHeightManager) === null || _this$diffHeightManag === void 0 ? void 0 : _this$diffHeightManag.isSuppressed()) return;
+				(_this$diffHeightManag2 = this.diffHeightManager) === null || _this$diffHeightManag2 === void 0 || _this$diffHeightManag2.update();
+				const computed$1 = this.computedHeight();
+				if (this.lastContainer) {
+					const prevOverflow = this.lastContainer.style.overflow;
+					const newOverflow = computed$1 >= this.maxHeightValue - 1 ? "auto" : "hidden";
+					if (prevOverflow !== newOverflow) {
+						this.lastContainer.style.overflow = newOverflow;
+						if (newOverflow === "auto" && this.shouldAutoScrollDiff) {
+							var _this$modifiedModel;
+							this.maybeScrollDiffToBottom((_this$modifiedModel = this.modifiedModel) === null || _this$modifiedModel === void 0 ? void 0 : _this$modifiedModel.getLineCount());
+						}
+					}
+				}
+			});
+		});
+		(_mEditor$onDidContent = mEditor.onDidContentSizeChange) === null || _mEditor$onDidContent === void 0 || _mEditor$onDidContent.call(mEditor, () => {
+			this._hasScrollBar = false;
+			this.rafScheduler.schedule("content-size-change-diff", () => {
+				var _mEditor$getScrollHei, _mEditor$getOption, _this$diffHeightManag3, _this$diffHeightManag4;
+				this.cachedScrollHeightDiff = ((_mEditor$getScrollHei = mEditor.getScrollHeight) === null || _mEditor$getScrollHei === void 0 ? void 0 : _mEditor$getScrollHei.call(mEditor)) ?? this.cachedScrollHeightDiff;
+				this.cachedLineHeightDiff = ((_mEditor$getOption = mEditor.getOption) === null || _mEditor$getOption === void 0 ? void 0 : _mEditor$getOption.call(mEditor, monaco_shim_exports.editor.EditorOption.lineHeight)) ?? this.cachedLineHeightDiff;
+				this.cachedComputedHeightDiff = this.computedHeight();
+				if ((_this$diffHeightManag3 = this.diffHeightManager) === null || _this$diffHeightManag3 === void 0 ? void 0 : _this$diffHeightManag3.isSuppressed()) return;
+				(_this$diffHeightManag4 = this.diffHeightManager) === null || _this$diffHeightManag4 === void 0 || _this$diffHeightManag4.update();
+				const computed$1 = this.computedHeight();
+				if (this.lastContainer) {
+					const prevOverflow = this.lastContainer.style.overflow;
+					const newOverflow = computed$1 >= this.maxHeightValue - 1 ? "auto" : "hidden";
+					if (prevOverflow !== newOverflow) {
+						this.lastContainer.style.overflow = newOverflow;
+						if (newOverflow === "auto" && this.shouldAutoScrollDiff) {
+							var _this$modifiedModel2;
+							this.maybeScrollDiffToBottom((_this$modifiedModel2 = this.modifiedModel) === null || _this$modifiedModel2 === void 0 ? void 0 : _this$modifiedModel2.getLineCount());
+						}
+					}
+				}
+			});
+		});
+		mEditor.onDidChangeModelContent(() => {
+			this.lastKnownModifiedDirty = true;
+			this.rafScheduler.schedule("sync-last-known-modified", () => this.syncLastKnownModified());
+		});
+		this.maybeScrollDiffToBottom(this.modifiedModel.getLineCount(), this.lastKnownModifiedLineCount ?? void 0);
+		return this.diffEditorView;
+	}
+	updateDiff(originalCode, modifiedCode, codeLanguage) {
+		if (!this.diffEditorView || !this.originalModel || !this.modifiedModel) return;
+		const plang = codeLanguage ? processedLanguage(codeLanguage) : void 0;
+		if (plang && (this.originalModel.getLanguageId() !== plang || this.modifiedModel.getLanguageId() !== plang)) {
+			this.pendingDiffUpdate = {
+				original: originalCode,
+				modified: modifiedCode,
+				lang: codeLanguage
+			};
+			this.rafScheduler.schedule("diff", () => this.flushPendingDiffUpdate());
+			return;
+		}
+		if (this.lastKnownOriginalCode == null) this.lastKnownOriginalCode = this.originalModel.getValue();
+		if (this.lastKnownModifiedCode == null) this.lastKnownModifiedCode = this.modifiedModel.getValue();
+		const prevO = this.lastKnownOriginalCode;
+		const prevM = this.lastKnownModifiedCode;
+		let didImmediate = false;
+		if (originalCode !== prevO && originalCode.startsWith(prevO)) {
+			this.appendOriginal(originalCode.slice(prevO.length));
+			this.lastKnownOriginalCode = originalCode;
+			didImmediate = true;
+		}
+		if (modifiedCode !== prevM && modifiedCode.startsWith(prevM)) {
+			this.appendModified(modifiedCode.slice(prevM.length));
+			this.lastKnownModifiedCode = modifiedCode;
+			didImmediate = true;
+		}
+		if (originalCode !== this.lastKnownOriginalCode || modifiedCode !== this.lastKnownModifiedCode) {
+			this.pendingDiffUpdate = {
+				original: originalCode,
+				modified: modifiedCode
+			};
+			this.rafScheduler.schedule("diff", () => this.flushPendingDiffUpdate());
+		} else if (didImmediate) {}
+	}
+	updateOriginal(newCode, codeLanguage) {
+		if (!this.diffEditorView || !this.originalModel) return;
+		if (codeLanguage) {
+			const lang = processedLanguage(codeLanguage);
+			if (lang && this.originalModel.getLanguageId() !== lang) monaco_shim_exports.editor.setModelLanguage(this.originalModel, lang);
+		}
+		const prev = this.lastKnownOriginalCode ?? this.originalModel.getValue();
+		if (prev === newCode) return;
+		if (newCode.startsWith(prev) && prev.length < newCode.length) this.appendOriginal(newCode.slice(prev.length), codeLanguage);
+		else {
+			this.flushOriginalAppendBufferSync();
+			this.applyMinimalEditToModel(this.originalModel, prev, newCode);
+		}
+		this.lastKnownOriginalCode = newCode;
+	}
+	updateModified(newCode, codeLanguage) {
+		if (!this.diffEditorView || !this.modifiedModel) return;
+		if (codeLanguage) {
+			const lang = processedLanguage(codeLanguage);
+			if (lang && this.modifiedModel.getLanguageId() !== lang) monaco_shim_exports.editor.setModelLanguage(this.modifiedModel, lang);
+		}
+		const prev = this.lastKnownModifiedCode ?? this.modifiedModel.getValue();
+		if (prev === newCode) return;
+		if (newCode.startsWith(prev) && prev.length < newCode.length) this.appendModified(newCode.slice(prev.length), codeLanguage);
+		else {
+			this.flushModifiedAppendBufferSync();
+			const prevAfterFlush = this.modifiedModel.getValue();
+			const prevLine = this.modifiedModel.getLineCount();
+			this.applyMinimalEditToModel(this.modifiedModel, prevAfterFlush, newCode);
+			const newLine = this.modifiedModel.getLineCount();
+			if (newLine !== prevLine) {
+				const shouldImmediate = this.shouldPerformImmediateRevealDiff();
+				if (shouldImmediate) this.suppressScrollWatcherDiff(this.scrollWatcherSuppressionMs + 800);
+				const computed$1 = this.computedHeight();
+				if (computed$1 >= this.maxHeightValue - 1 && this.lastContainer) {
+					this.lastContainer.style.height = `${this.maxHeightValue}px`;
+					this.lastContainer.style.overflow = "auto";
+				}
+				if (shouldImmediate) this.scheduleImmediateRevealAfterLayoutDiff(newLine);
+				else this.maybeScrollDiffToBottom(newLine, prevLine);
+				if (this.autoScrollOnUpdate && this.shouldAutoScrollDiff) try {
+					var _editor3, _me2$getModel, _me2$getScrollTop;
+					const ScrollType = monaco_shim_exports.ScrollType || ((_editor3 = monaco_shim_exports.editor) === null || _editor3 === void 0 ? void 0 : _editor3.ScrollType);
+					const immediate = ScrollType && typeof ScrollType.Immediate !== "undefined" ? ScrollType.Immediate : void 0;
+					const me2 = this.diffEditorView.getModifiedEditor();
+					const targetLine = ((_me2$getModel = me2.getModel()) === null || _me2$getModel === void 0 ? void 0 : _me2$getModel.getLineCount()) ?? newLine;
+					if (typeof immediate !== "undefined") me2.revealLine(targetLine, immediate);
+					else me2.revealLine(targetLine);
+					this.lastRevealLineDiff = targetLine;
+					this.shouldAutoScrollDiff = true;
+					this.lastScrollTopDiff = ((_me2$getScrollTop = me2.getScrollTop) === null || _me2$getScrollTop === void 0 ? void 0 : _me2$getScrollTop.call(me2)) ?? this.lastScrollTopDiff;
+				} catch {}
+			}
+		}
+		this.lastKnownModifiedCode = newCode;
+	}
+	appendOriginal(appendText, codeLanguage) {
+		if (!this.diffEditorView || !this.originalModel || !appendText) return;
+		if (codeLanguage) {
+			const lang = processedLanguage(codeLanguage);
+			if (lang && this.originalModel.getLanguageId() !== lang) monaco_shim_exports.editor.setModelLanguage(this.originalModel, lang);
+		}
+		this.appendBufferOriginalDiff.push(appendText);
+		this.scheduleFlushAppendBufferDiff();
+	}
+	appendModified(appendText, codeLanguage) {
+		if (!this.diffEditorView || !this.modifiedModel || !appendText) return;
+		if (codeLanguage) {
+			const lang = processedLanguage(codeLanguage);
+			if (lang && this.modifiedModel.getLanguageId() !== lang) monaco_shim_exports.editor.setModelLanguage(this.modifiedModel, lang);
+		}
+		this.appendBufferModifiedDiff.push(appendText);
+		this.scheduleFlushAppendBufferDiff();
+	}
+	setLanguage(language, languages$1) {
+		if (!languages$1.includes(language)) {
+			console.warn(`Language "${language}" is not registered. Available languages: ${languages$1.join(", ")}`);
+			return;
+		}
+		if (this.originalModel && this.originalModel.getLanguageId() !== language) monaco_shim_exports.editor.setModelLanguage(this.originalModel, language);
+		if (this.modifiedModel && this.modifiedModel.getLanguageId() !== language) monaco_shim_exports.editor.setModelLanguage(this.modifiedModel, language);
+	}
+	getDiffEditorView() {
+		return this.diffEditorView;
+	}
+	getDiffModels() {
+		return {
+			original: this.originalModel,
+			modified: this.modifiedModel
+		};
+	}
+	cleanup() {
+		this.rafScheduler.cancel("diff");
+		this.pendingDiffUpdate = null;
+		this.rafScheduler.cancel("appendDiff");
+		this.appendBufferDiffScheduled = false;
+		this.appendBufferOriginalDiff.length = 0;
+		this.appendBufferModifiedDiff.length = 0;
+		if (this.appendFlushThrottleTimerDiff != null) {
+			clearTimeout(this.appendFlushThrottleTimerDiff);
+			this.appendFlushThrottleTimerDiff = null;
+		}
+		this.rafScheduler.cancel("content-size-change-diff");
+		this.rafScheduler.cancel("sync-last-known-modified");
+		if (this.diffScrollWatcher) {
+			this.diffScrollWatcher.dispose();
+			this.diffScrollWatcher = null;
+		}
+		if (this.diffHeightManager) {
+			this.diffHeightManager.dispose();
+			this.diffHeightManager = null;
+		}
+		if (this.diffEditorView) {
+			this.diffEditorView.dispose();
+			this.diffEditorView = null;
+		}
+		if (this.originalModel) {
+			this.originalModel.dispose();
+			this.originalModel = null;
+		}
+		if (this.modifiedModel) {
+			this.modifiedModel.dispose();
+			this.modifiedModel = null;
+		}
+		this.lastKnownOriginalCode = null;
+		this.lastKnownModifiedCode = null;
+		if (this.lastContainer) {
+			this.lastContainer.innerHTML = "";
+			this.lastContainer = null;
+		}
+		if (this.revealDebounceIdDiff != null) {
+			clearTimeout(this.revealDebounceIdDiff);
+			this.revealDebounceIdDiff = null;
+		}
+		if (this.revealIdleTimerIdDiff != null) {
+			clearTimeout(this.revealIdleTimerIdDiff);
+			this.revealIdleTimerIdDiff = null;
+		}
+		if (this.diffScrollWatcherSuppressionTimer != null) {
+			clearTimeout(this.diffScrollWatcherSuppressionTimer);
+			this.diffScrollWatcherSuppressionTimer = null;
+		}
+		this.revealTicketDiff = 0;
+		this.lastRevealLineDiff = null;
+	}
+	safeClean() {
+		this.rafScheduler.cancel("diff");
+		this.pendingDiffUpdate = null;
+		this.rafScheduler.cancel("appendDiff");
+		this.appendBufferDiffScheduled = false;
+		this.appendBufferOriginalDiff.length = 0;
+		this.appendBufferModifiedDiff.length = 0;
+		if (this.appendFlushThrottleTimerDiff != null) {
+			clearTimeout(this.appendFlushThrottleTimerDiff);
+			this.appendFlushThrottleTimerDiff = null;
+		}
+		if (this.diffScrollWatcher) {
+			this.diffScrollWatcher.dispose();
+			this.diffScrollWatcher = null;
+		}
+		this._hasScrollBar = false;
+		this.shouldAutoScrollDiff = !!(this.autoScrollInitial && this.diffAutoScroll);
+		this.lastScrollTopDiff = 0;
+		if (this.diffHeightManager) {
+			this.diffHeightManager.dispose();
+			this.diffHeightManager = null;
+		}
+		if (this.revealDebounceIdDiff != null) {
+			clearTimeout(this.revealDebounceIdDiff);
+			this.revealDebounceIdDiff = null;
+		}
+		if (this.revealIdleTimerIdDiff != null) {
+			clearTimeout(this.revealIdleTimerIdDiff);
+			this.revealIdleTimerIdDiff = null;
+		}
+		if (this.diffScrollWatcherSuppressionTimer != null) {
+			clearTimeout(this.diffScrollWatcherSuppressionTimer);
+			this.diffScrollWatcherSuppressionTimer = null;
+		}
+		this.revealTicketDiff = 0;
+		this.lastRevealLineDiff = null;
+		this.rafScheduler.cancel("content-size-change-diff");
+		this.rafScheduler.cancel("sync-last-known-modified");
+	}
+	syncLastKnownModified() {
+		if (!this.diffEditorView || !this.lastKnownModifiedDirty) return;
+		try {
+			const me = this.diffEditorView.getModifiedEditor();
+			const model = me.getModel();
+			if (model) {
+				this.lastKnownModifiedCode = model.getValue();
+				this.lastKnownModifiedLineCount = model.getLineCount();
+			}
+		} finally {
+			this.lastKnownModifiedDirty = false;
+		}
+	}
+	flushPendingDiffUpdate() {
+		if (!this.pendingDiffUpdate || !this.diffEditorView) return;
+		const o = this.originalModel;
+		const m = this.modifiedModel;
+		if (!o || !m) {
+			this.pendingDiffUpdate = null;
+			return;
+		}
+		const { original, modified, lang } = this.pendingDiffUpdate;
+		this.pendingDiffUpdate = null;
+		this.flushOriginalAppendBufferSync();
+		this.flushModifiedAppendBufferSync();
+		if (lang) {
+			const plang = processedLanguage(lang);
+			if (plang) {
+				if (o.getLanguageId() !== plang) {
+					monaco_shim_exports.editor.setModelLanguage(o, plang);
+					monaco_shim_exports.editor.setModelLanguage(m, plang);
+				}
+			}
+		}
+		if (this.lastKnownOriginalCode == null) this.lastKnownOriginalCode = o.getValue();
+		if (this.lastKnownModifiedCode == null) this.lastKnownModifiedCode = m.getValue();
+		const prevO = this.lastKnownOriginalCode;
+		if (prevO !== original) {
+			if (original.startsWith(prevO) && prevO.length < original.length) this.appendToModel(o, original.slice(prevO.length));
+			else this.applyMinimalEditToModel(o, prevO, original);
+			this.lastKnownOriginalCode = original;
+		}
+		const prevM = m.getValue();
+		const prevMLineCount = m.getLineCount();
+		if (prevM !== modified) {
+			if (modified.startsWith(prevM) && prevM.length < modified.length) this.appendToModel(m, modified.slice(prevM.length));
+			else this.applyMinimalEditToModel(m, prevM, modified);
+			this.lastKnownModifiedCode = modified;
+			const newMLineCount = m.getLineCount();
+			if (newMLineCount !== prevMLineCount) {
+				const shouldImmediate = this.shouldPerformImmediateRevealDiff();
+				if (shouldImmediate) this.suppressScrollWatcherDiff(this.scrollWatcherSuppressionMs + 800);
+				const computed$1 = this.computedHeight();
+				if (computed$1 >= this.maxHeightValue - 1 && this.lastContainer) {
+					this.lastContainer.style.height = `${this.maxHeightValue}px`;
+					this.lastContainer.style.overflow = "auto";
+				}
+				if (shouldImmediate) this.scheduleImmediateRevealAfterLayoutDiff(newMLineCount);
+				else this.maybeScrollDiffToBottom(newMLineCount, prevMLineCount);
+			}
+		}
+	}
+	flushModifiedAppendBufferSync() {
+		if (!this.modifiedModel) return;
+		if (this.appendBufferModifiedDiff.length === 0) return;
+		this.rafScheduler.cancel("appendDiff");
+		this.appendBufferDiffScheduled = false;
+		const text = this.appendBufferModifiedDiff.join("");
+		this.appendBufferModifiedDiff.length = 0;
+		if (!text) return;
+		this.appendToModel(this.modifiedModel, text);
+	}
+	async flushAppendBufferDiff() {
+		if (!this.diffEditorView) return;
+		if (this.appendBufferOriginalDiff.length === 0 && this.appendBufferModifiedDiff.length === 0) return;
+		this.lastAppendFlushTimeDiff = Date.now();
+		this.appendBufferDiffScheduled = false;
+		if (this.originalModel && this.appendBufferOriginalDiff.length > 0) {
+			const oText = this.appendBufferOriginalDiff.join("");
+			this.appendBufferOriginalDiff.length = 0;
+			if (oText) this.appendToModel(this.originalModel, oText);
+		}
+		const me = this.diffEditorView.getModifiedEditor();
+		const model = me.getModel();
+		if (!model) {
+			this.appendBufferModifiedDiff.length = 0;
+			return;
+		}
+		let parts = this.appendBufferModifiedDiff.splice(0);
+		const prevLineInit = model.getLineCount();
+		const totalText = parts.join("");
+		const totalChars = totalText.length;
+		if (parts.length === 1 && totalChars > 5e3) {
+			const lines = totalText.split(/\r?\n/);
+			const chunkSize = 200;
+			const chunks = [];
+			for (let i = 0; i < lines.length; i += chunkSize) chunks.push(`${lines.slice(i, i + chunkSize).join("\n")}\n`);
+			if (chunks.length > 1) parts = chunks;
+		}
+		const applyChunked = parts.length > 1 && (totalChars > 2e3 || model.getLineCount && model.getLineCount() + 0 - prevLineInit > 50);
+		log("diff", "flushAppendBufferDiff start", {
+			partsCount: parts.length,
+			totalChars,
+			applyChunked
+		});
+		let prevLine = prevLineInit;
+		const watcherApi = this.diffScrollWatcher;
+		let suppressedByFlush = false;
+		if (watcherApi && typeof watcherApi.setSuppressed === "function") try {
+			if (this.diffScrollWatcherSuppressionTimer != null) {
+				clearTimeout(this.diffScrollWatcherSuppressionTimer);
+				this.diffScrollWatcherSuppressionTimer = null;
+			}
+			watcherApi.setSuppressed(true);
+			suppressedByFlush = true;
+		} catch {}
+		if (applyChunked) {
+			log("diff", "flushAppendBufferDiff applying chunked", { partsLen: parts.length });
+			let idx = 0;
+			for (const part of parts) {
+				if (!part) continue;
+				idx += 1;
+				log("diff", "flushAppendBufferDiff chunk", {
+					idx,
+					partLen: part.length,
+					prevLine
+				});
+				const lastColumn$1 = model.getLineMaxColumn(prevLine);
+				const range$1 = new monaco_shim_exports.Range(prevLine, lastColumn$1, prevLine, lastColumn$1);
+				model.applyEdits([{
+					range: range$1,
+					text: part,
+					forceMoveMarkers: true
+				}]);
+				this.lastKnownModifiedCode = model.getValue();
+				const newLine$1 = model.getLineCount();
+				this.lastKnownModifiedLineCount = newLine$1;
+				await new Promise((resolve) => typeof requestAnimationFrame !== "undefined" ? requestAnimationFrame(resolve) : setTimeout(resolve, 0));
+				const shouldImmediate$1 = this.shouldPerformImmediateRevealDiff();
+				log("diff", "flushAppendBufferDiff chunk metrics", {
+					idx,
+					newLine: newLine$1,
+					prevLine,
+					shouldImmediate: shouldImmediate$1
+				});
+				if (shouldImmediate$1) this.suppressScrollWatcherDiff(this.scrollWatcherSuppressionMs + 800);
+				const computed$2 = this.computedHeight();
+				if (computed$2 >= this.maxHeightValue - 1 && this.lastContainer) {
+					this.lastContainer.style.height = `${this.maxHeightValue}px`;
+					this.lastContainer.style.overflow = "auto";
+				}
+				if (shouldImmediate$1) this.scheduleImmediateRevealAfterLayoutDiff(newLine$1);
+				else this.maybeScrollDiffToBottom(newLine$1, prevLine);
+				prevLine = newLine$1;
+				log("diff", "flushAppendBufferDiff chunk applied", {
+					idx,
+					newLine: newLine$1
+				});
+			}
+			if (suppressedByFlush) watcherApi.setSuppressed(false);
+			return;
+		}
+		const text = totalText;
+		this.appendBufferModifiedDiff.length = 0;
+		prevLine = model.getLineCount();
+		const lastColumn = model.getLineMaxColumn(prevLine);
+		const range = new monaco_shim_exports.Range(prevLine, lastColumn, prevLine, lastColumn);
+		model.applyEdits([{
+			range,
+			text,
+			forceMoveMarkers: true
+		}]);
+		this.lastKnownModifiedCode = model.getValue();
+		const newLine = model.getLineCount();
+		this.lastKnownModifiedLineCount = newLine;
+		const shouldImmediate = this.shouldPerformImmediateRevealDiff();
+		if (shouldImmediate) this.suppressScrollWatcherDiff(this.scrollWatcherSuppressionMs + 800);
+		const computed$1 = this.computedHeight();
+		if (computed$1 >= this.maxHeightValue - 1 && this.lastContainer) this.lastContainer.style.height = `${this.maxHeightValue}px`;
+		if (shouldImmediate) this.scheduleImmediateRevealAfterLayoutDiff(newLine);
+		else this.maybeScrollDiffToBottom(newLine, prevLine);
+		if (this.autoScrollOnUpdate && this.shouldAutoScrollDiff) try {
+			var _editor4, _me2$getModel2, _me2$getScrollTop2;
+			const ScrollType = monaco_shim_exports.ScrollType || ((_editor4 = monaco_shim_exports.editor) === null || _editor4 === void 0 ? void 0 : _editor4.ScrollType);
+			const immediate = ScrollType && typeof ScrollType.Immediate !== "undefined" ? ScrollType.Immediate : void 0;
+			const me2 = this.diffEditorView.getModifiedEditor();
+			const targetLine = ((_me2$getModel2 = me2.getModel()) === null || _me2$getModel2 === void 0 ? void 0 : _me2$getModel2.getLineCount()) ?? newLine;
+			if (typeof immediate !== "undefined") me2.revealLine(targetLine, immediate);
+			else me2.revealLine(targetLine);
+			this.lastRevealLineDiff = targetLine;
+			this.shouldAutoScrollDiff = true;
+			this.lastScrollTopDiff = ((_me2$getScrollTop2 = me2.getScrollTop) === null || _me2$getScrollTop2 === void 0 ? void 0 : _me2$getScrollTop2.call(me2)) ?? this.lastScrollTopDiff;
+		} catch {}
+		if (suppressedByFlush) watcherApi.setSuppressed(false);
+		try {
+			var _this$diffEditorView5, _this$diffEditorView6, _this$diffEditorView7;
+			this.shouldAutoScrollDiff = true;
+			this.lastScrollTopDiff = ((_this$diffEditorView5 = this.diffEditorView) === null || _this$diffEditorView5 === void 0 || (_this$diffEditorView7 = (_this$diffEditorView6 = _this$diffEditorView5.getModifiedEditor()).getScrollTop) === null || _this$diffEditorView7 === void 0 ? void 0 : _this$diffEditorView7.call(_this$diffEditorView6)) ?? this.lastScrollTopDiff;
+		} catch {}
+	}
+	applyMinimalEditToModel(model, prev, next) {
+		const maxChars = minimalEditMaxChars;
+		const ratio = minimalEditMaxChangeRatio;
+		const maxLen = Math.max(prev.length, next.length);
+		const changeRatio = maxLen > 0 ? Math.abs(next.length - prev.length) / maxLen : 0;
+		if (prev.length + next.length > maxChars || changeRatio > ratio) {
+			model.setValue(next);
+			if (model === this.modifiedModel) this.lastKnownModifiedLineCount = model.getLineCount();
+			return;
+		}
+		const res = computeMinimalEdit(prev, next);
+		if (!res) return;
+		const { start, endPrevIncl, replaceText } = res;
+		const rangeStart = model.getPositionAt(start);
+		const rangeEnd = model.getPositionAt(endPrevIncl + 1);
+		const range = new monaco_shim_exports.Range(rangeStart.lineNumber, rangeStart.column, rangeEnd.lineNumber, rangeEnd.column);
+		model.applyEdits([{
+			range,
+			text: replaceText,
+			forceMoveMarkers: true
+		}]);
+		if (model === this.modifiedModel) this.lastKnownModifiedLineCount = model.getLineCount();
+	}
+	appendToModel(model, appendText) {
+		if (!appendText) return;
+		const lastLine = model.getLineCount();
+		const lastColumn = model.getLineMaxColumn(lastLine);
+		const range = new monaco_shim_exports.Range(lastLine, lastColumn, lastLine, lastColumn);
+		model.applyEdits([{
+			range,
+			text: appendText,
+			forceMoveMarkers: true
+		}]);
+		if (model === this.modifiedModel) this.lastKnownModifiedLineCount = model.getLineCount();
+	}
+};
+
+//#endregion
+//#region src/core/EditorManager.ts
+var EditorManager = class {
+	editorView = null;
+	lastContainer = null;
+	lastKnownCode = null;
+	pendingUpdate = null;
+	_hasScrollBar = false;
+	shouldAutoScroll = true;
+	scrollWatcher = null;
+	scrollWatcherSuppressionTimer = null;
+	lastScrollTop = 0;
+	cachedScrollHeight = null;
+	cachedLineHeight = null;
+	cachedComputedHeight = null;
+	cachedLineCount = null;
+	lastKnownCodeDirty = false;
+	debug = false;
+	measureViewport() {
+		var _this$editorView$getL, _this$editorView, _this$editorView$getS, _this$editorView2, _this$editorView$getS2, _this$editorView3;
+		if (!this.editorView) return null;
+		const li = ((_this$editorView$getL = (_this$editorView = this.editorView).getLayoutInfo) === null || _this$editorView$getL === void 0 ? void 0 : _this$editorView$getL.call(_this$editorView)) ?? null;
+		const lineHeight = this.cachedLineHeight ?? this.editorView.getOption(monaco_shim_exports.editor.EditorOption.lineHeight);
+		const scrollTop = ((_this$editorView$getS = (_this$editorView2 = this.editorView).getScrollTop) === null || _this$editorView$getS === void 0 ? void 0 : _this$editorView$getS.call(_this$editorView2)) ?? this.lastScrollTop ?? 0;
+		const scrollHeight = ((_this$editorView$getS2 = (_this$editorView3 = this.editorView).getScrollHeight) === null || _this$editorView$getS2 === void 0 ? void 0 : _this$editorView$getS2.call(_this$editorView3)) ?? this.cachedScrollHeight ?? (li === null || li === void 0 ? void 0 : li.height) ?? 0;
+		const computedHeight = this.cachedComputedHeight ?? this.computedHeight(this.editorView);
+		this.cachedLineHeight = lineHeight;
+		this.cachedScrollHeight = scrollHeight;
+		this.cachedComputedHeight = computedHeight;
+		this.lastScrollTop = scrollTop;
+		return {
+			li,
+			lineHeight,
+			scrollTop,
+			scrollHeight,
+			computedHeight
+		};
+	}
+	appendBuffer = [];
+	appendBufferScheduled = false;
+	rafScheduler = createRafScheduler();
+	editorHeightManager = null;
+	revealDebounceId = null;
+	revealDebounceMs = defaultRevealDebounceMs;
+	revealIdleTimerId = null;
+	revealTicket = 0;
+	revealStrategyOption;
+	revealBatchOnIdleMsOption;
+	scrollWatcherSuppressionMs = 500;
+	constructor(options, maxHeightValue, maxHeightCSS, autoScrollOnUpdate, autoScrollInitial, autoScrollThresholdPx, autoScrollThresholdLines, revealDebounceMsOption) {
+		this.options = options;
+		this.maxHeightValue = maxHeightValue;
+		this.maxHeightCSS = maxHeightCSS;
+		this.autoScrollOnUpdate = autoScrollOnUpdate;
+		this.autoScrollInitial = autoScrollInitial;
+		this.autoScrollThresholdPx = autoScrollThresholdPx;
+		this.autoScrollThresholdLines = autoScrollThresholdLines;
+		this.revealDebounceMsOption = revealDebounceMsOption;
+	}
+	initDebugFlag() {
+		if (typeof window !== "undefined" && window.__STREAM_MONACO_DEBUG__ !== void 0) {
+			this.debug = Boolean(window.__STREAM_MONACO_DEBUG__);
+			return;
+		}
+		if (this.options && this.options.debug !== void 0) {
+			this.debug = Boolean(this.options.debug);
+			return;
+		}
+		this.debug = false;
+	}
+	dlog(...args) {
+		if (!this.debug) return;
+		log("EditorManager", ...args);
+	}
+	hasVerticalScrollbar() {
+		if (!this.editorView) return false;
+		if (this._hasScrollBar) return true;
+		const m = this.measureViewport();
+		if (!m) return false;
+		return this._hasScrollBar = m.scrollHeight > m.computedHeight + padding / 2;
+	}
+	userIsNearBottom() {
+		if (!this.editorView) return true;
+		const m = this.measureViewport();
+		if (!m || !m.li) return true;
+		const lineThreshold = (this.autoScrollThresholdLines ?? 0) * m.lineHeight;
+		const threshold = Math.max(lineThreshold || 0, this.autoScrollThresholdPx || 0);
+		const distance = m.scrollHeight - (m.scrollTop + m.li.height);
+		return distance <= threshold;
+	}
+	computedHeight(editorView) {
+		var _editorView$getModel;
+		const lineCount = this.cachedLineCount ?? ((_editorView$getModel = editorView.getModel()) === null || _editorView$getModel === void 0 ? void 0 : _editorView$getModel.getLineCount()) ?? 1;
+		const lineHeight = editorView.getOption(monaco_shim_exports.editor.EditorOption.lineHeight);
+		const height = Math.min(lineCount * lineHeight + padding, this.maxHeightValue);
+		log("EditorManager.computedHeight", {
+			lineCount,
+			lineHeight,
+			computed: height,
+			maxHeightValue: this.maxHeightValue
+		});
+		return height;
+	}
+	maybeScrollToBottom(targetLine) {
+		this.rafScheduler.schedule("maybe-scroll", () => {
+			const hasVS = this.hasVerticalScrollbar();
+			this.dlog("maybeScrollToBottom called", {
+				autoScrollOnUpdate: this.autoScrollOnUpdate,
+				shouldAutoScroll: this.shouldAutoScroll,
+				hasVerticalScrollbar: hasVS,
+				targetLine
+			});
+			if (!(this.autoScrollOnUpdate && this.shouldAutoScroll && this.hasVerticalScrollbar())) {
+				this.dlog("maybeScrollToBottom skipped (auto-scroll conditions not met)");
+				return;
+			}
+			const model = this.editorView.getModel();
+			const line = targetLine ?? (model === null || model === void 0 ? void 0 : model.getLineCount()) ?? 1;
+			const batchMs = this.revealBatchOnIdleMsOption ?? this.options.revealBatchOnIdleMs ?? defaultRevealBatchOnIdleMs;
+			if (typeof batchMs === "number" && batchMs > 0) {
+				if (this.revealIdleTimerId != null) clearTimeout(this.revealIdleTimerId);
+				const ticket = ++this.revealTicket;
+				this.dlog("scheduled idle reveal ticket=", ticket, "line=", line, "batchMs=", batchMs);
+				this.revealIdleTimerId = setTimeout(() => {
+					this.revealIdleTimerId = null;
+					this.dlog("idle reveal timer firing, ticket=", ticket, "line=", line);
+					this.performReveal(line, ticket);
+				}, batchMs);
+				return;
+			}
+			if (this.revealDebounceId != null) {
+				clearTimeout(this.revealDebounceId);
+				this.revealDebounceId = null;
+			}
+			const ms = typeof this.revealDebounceMs === "number" && this.revealDebounceMs > 0 ? this.revealDebounceMs : typeof this.revealDebounceMsOption === "number" && this.revealDebounceMsOption > 0 ? this.revealDebounceMsOption : this.revealDebounceMs;
+			this.revealDebounceId = setTimeout(() => {
+				this.revealDebounceId = null;
+				const ticket = ++this.revealTicket;
+				this.dlog("scheduled debounce reveal ticket=", ticket, "line=", line, "ms=", ms);
+				this.performReveal(line, ticket);
+			}, ms);
+		});
+	}
+	performReveal(line, ticket) {
+		this.rafScheduler.schedule("reveal", () => {
+			var _editor;
+			if (ticket !== this.revealTicket) {
+				this.dlog("performReveal skipped, stale ticket", ticket, "current", this.revealTicket);
+				return;
+			}
+			this.dlog("performReveal executing, ticket=", ticket, "line=", line);
+			const strategy = this.revealStrategyOption ?? this.options.revealStrategy ?? "centerIfOutside";
+			this.dlog("performReveal strategy=", strategy);
+			const ScrollType = monaco_shim_exports.ScrollType || ((_editor = monaco_shim_exports.editor) === null || _editor === void 0 ? void 0 : _editor.ScrollType);
+			const smooth = ScrollType && typeof ScrollType.Smooth !== "undefined" ? ScrollType.Smooth : void 0;
+			try {
+				if (strategy === "bottom") if (typeof smooth !== "undefined") this.editorView.revealLine(line, smooth);
+				else this.editorView.revealLine(line);
+				else if (strategy === "center") if (typeof smooth !== "undefined") this.editorView.revealLineInCenter(line, smooth);
+				else this.editorView.revealLineInCenter(line);
+				else if (typeof smooth !== "undefined") this.editorView.revealLineInCenterIfOutsideViewport(line, smooth);
+				else this.editorView.revealLineInCenterIfOutsideViewport(line);
+			} catch {
+				try {
+					this.editorView.revealLine(line);
+				} catch {}
+			}
+		});
+	}
+	performImmediateReveal(line, ticket) {
+		this.dlog("performImmediateReveal line=", line, "ticket=", ticket);
+		try {
+			var _editor2;
+			if (!this.editorView) return;
+			if (ticket !== this.revealTicket) {
+				this.dlog("performImmediateReveal skipped, stale ticket", ticket, "current", this.revealTicket);
+				return;
+			}
+			const ScrollType = monaco_shim_exports.ScrollType || ((_editor2 = monaco_shim_exports.editor) === null || _editor2 === void 0 ? void 0 : _editor2.ScrollType);
+			const immediate = ScrollType && typeof ScrollType.Immediate !== "undefined" ? ScrollType.Immediate : void 0;
+			if (typeof immediate !== "undefined") this.editorView.revealLine(line, immediate);
+			else this.editorView.revealLine(line);
+		} catch {}
+		try {
+			this.measureViewport();
+		} catch {}
+	}
+	forceReveal(line) {
+		try {
+			var _editor3;
+			if (!this.editorView) return;
+			const ScrollType = monaco_shim_exports.ScrollType || ((_editor3 = monaco_shim_exports.editor) === null || _editor3 === void 0 ? void 0 : _editor3.ScrollType);
+			const immediate = ScrollType && typeof ScrollType.Immediate !== "undefined" ? ScrollType.Immediate : void 0;
+			if (typeof immediate !== "undefined") this.editorView.revealLine(line, immediate);
+			else this.editorView.revealLine(line);
+		} catch {}
+		try {
+			this.measureViewport();
+		} catch {}
+		try {
+			var _this$editorView4, _this$editorView4$get;
+			this.shouldAutoScroll = true;
+			this.lastScrollTop = ((_this$editorView4 = this.editorView) === null || _this$editorView4 === void 0 || (_this$editorView4$get = _this$editorView4.getScrollTop) === null || _this$editorView4$get === void 0 ? void 0 : _this$editorView4$get.call(_this$editorView4)) ?? this.lastScrollTop;
+		} catch {}
+	}
+	isOverflowAuto() {
+		try {
+			return !!this.lastContainer && this.lastContainer.style.overflow === "auto";
+		} catch {
+			return false;
+		}
+	}
+	shouldPerformImmediateReveal() {
+		return this.autoScrollOnUpdate && this.shouldAutoScroll && this.hasVerticalScrollbar() && this.isOverflowAuto();
+	}
+	async createEditor(container, code, language, currentTheme) {
+		var _this$editorView$getS3, _this$editorView5, _this$editorView$getO, _this$editorView6, _this$editorView$getM, _this$editorView$onDi, _this$editorView7;
+		this.cleanup();
+		this.lastContainer = container;
+		this.initDebugFlag();
+		this.dlog("createEditor container, maxHeight", this.maxHeightValue);
+		container.style.overflow = "hidden";
+		container.style.maxHeight = this.maxHeightCSS;
+		this.editorView = monaco_shim_exports.editor.create(container, {
+			value: code,
+			language: processedLanguage(language) || language,
+			theme: currentTheme,
+			scrollBeyondLastLine: false,
+			minimap: { enabled: false },
+			automaticLayout: true,
+			readOnly: this.options.readOnly ?? true,
+			contextmenu: false,
+			scrollbar: {
+				...defaultScrollbar,
+				...this.options.scrollbar || {}
+			},
+			...this.options
+		});
+		monaco_shim_exports.editor.setTheme(currentTheme);
+		this.lastKnownCode = this.editorView.getValue();
+		if (this.editorHeightManager) {
+			try {
+				this.editorHeightManager.dispose();
+			} catch {}
+			this.editorHeightManager = null;
+		}
+		if (this.revealDebounceId != null) {
+			clearTimeout(this.revealDebounceId);
+			this.revealDebounceId = null;
+		}
+		if (this.revealIdleTimerId != null) clearTimeout(this.revealIdleTimerId);
+		this.revealIdleTimerId = null;
+		const MIN_VISIBLE_HEIGHT = Math.min(120, this.maxHeightValue);
+		container.style.minHeight = `${MIN_VISIBLE_HEIGHT}px`;
+		this.editorHeightManager = createHeightManager(container, () => {
+			const computed$1 = this.computedHeight(this.editorView);
+			const clamped = Math.min(computed$1, this.maxHeightValue);
+			return Math.max(clamped, MIN_VISIBLE_HEIGHT);
+		});
+		this.editorHeightManager.update();
+		const initialComputed = this.computedHeight(this.editorView);
+		if (initialComputed >= this.maxHeightValue - 1) {
+			container.style.height = `${this.maxHeightValue}px`;
+			container.style.overflow = "auto";
+			this.dlog("applied immediate maxHeight on createEditor", this.maxHeightValue);
+		}
+		this.cachedScrollHeight = ((_this$editorView$getS3 = (_this$editorView5 = this.editorView).getScrollHeight) === null || _this$editorView$getS3 === void 0 ? void 0 : _this$editorView$getS3.call(_this$editorView5)) ?? null;
+		this.cachedLineHeight = ((_this$editorView$getO = (_this$editorView6 = this.editorView).getOption) === null || _this$editorView$getO === void 0 ? void 0 : _this$editorView$getO.call(_this$editorView6, monaco_shim_exports.editor.EditorOption.lineHeight)) ?? null;
+		this.cachedComputedHeight = this.computedHeight(this.editorView);
+		this.cachedLineCount = ((_this$editorView$getM = this.editorView.getModel()) === null || _this$editorView$getM === void 0 ? void 0 : _this$editorView$getM.getLineCount()) ?? null;
+		(_this$editorView$onDi = (_this$editorView7 = this.editorView).onDidContentSizeChange) === null || _this$editorView$onDi === void 0 || _this$editorView$onDi.call(_this$editorView7, () => {
+			this._hasScrollBar = false;
+			this.rafScheduler.schedule("content-size-change", () => {
+				try {
+					var _this$editorView8, _this$editorHeightMan, _this$editorHeightMan2;
+					this.dlog("content-size-change frame");
+					const m = this.measureViewport();
+					this.dlog("content-size-change measure", m);
+					this.cachedLineCount = ((_this$editorView8 = this.editorView) === null || _this$editorView8 === void 0 || (_this$editorView8 = _this$editorView8.getModel()) === null || _this$editorView8 === void 0 ? void 0 : _this$editorView8.getLineCount()) ?? this.cachedLineCount;
+					if ((_this$editorHeightMan = this.editorHeightManager) === null || _this$editorHeightMan === void 0 ? void 0 : _this$editorHeightMan.isSuppressed()) {
+						this.dlog("content-size-change skipped height update (suppressed)");
+						return;
+					}
+					this.dlog("content-size-change calling heightManager.update");
+					(_this$editorHeightMan2 = this.editorHeightManager) === null || _this$editorHeightMan2 === void 0 || _this$editorHeightMan2.update();
+					const computed$1 = this.computedHeight(this.editorView);
+					if (this.lastContainer) {
+						const prevOverflow = this.lastContainer.style.overflow;
+						const newOverflow = computed$1 >= this.maxHeightValue - 1 ? "auto" : "hidden";
+						if (prevOverflow !== newOverflow) {
+							this.lastContainer.style.overflow = newOverflow;
+							if (newOverflow === "auto" && this.shouldAutoScroll) this.maybeScrollToBottom();
+						}
+					}
+				} catch (err) {
+					error("EditorManager", "content-size-change error", err);
+				}
+			});
+		});
+		this.editorView.onDidChangeModelContent(() => {
+			this.lastKnownCodeDirty = true;
+			this.rafScheduler.schedule("sync-last-known", () => this.syncLastKnownCode());
+		});
+		this.shouldAutoScroll = !!this.autoScrollInitial;
+		if (this.scrollWatcher) {
+			this.scrollWatcher.dispose();
+			this.scrollWatcher = null;
+		}
+		this.scrollWatcher = createScrollWatcherForEditor(this.editorView, {
+			onPause: () => {
+				this.shouldAutoScroll = false;
+			},
+			onMaybeResume: () => {
+				this.rafScheduler.schedule("maybe-resume", () => {
+					this.shouldAutoScroll = this.userIsNearBottom();
+				});
+			},
+			getLast: () => this.lastScrollTop,
+			setLast: (v) => {
+				this.lastScrollTop = v;
+			}
+		});
+		this.maybeScrollToBottom();
+		return this.editorView;
+	}
+	syncLastKnownCode() {
+		if (!this.editorView || !this.lastKnownCodeDirty) return;
+		const model = this.editorView.getModel();
+		if (model) {
+			this.lastKnownCode = model.getValue();
+			this.cachedLineCount = model.getLineCount() ?? this.cachedLineCount;
+		}
+		this.lastKnownCodeDirty = false;
+	}
+	suppressScrollWatcher(ms) {
+		if (!this.scrollWatcher || typeof this.scrollWatcher.setSuppressed !== "function") return;
+		this.dlog("suppressScrollWatcher", ms);
+		if (this.scrollWatcherSuppressionTimer != null) {
+			clearTimeout(this.scrollWatcherSuppressionTimer);
+			this.scrollWatcherSuppressionTimer = null;
+		}
+		this.scrollWatcher.setSuppressed(true);
+		this.scrollWatcherSuppressionTimer = setTimeout(() => {
+			if (this.scrollWatcher && typeof this.scrollWatcher.setSuppressed === "function") {
+				this.scrollWatcher.setSuppressed(false);
+				this.dlog("suppressScrollWatcher cleared");
+			}
+			this.scrollWatcherSuppressionTimer = null;
+		}, ms);
+	}
+	scheduleImmediateRevealAfterLayout(line) {
+		const ticket = ++this.revealTicket;
+		this.dlog("scheduleImmediateRevealAfterLayout ticket=", ticket, "line=", line);
+		this.rafScheduler.schedule("immediate-reveal", async () => {
+			try {
+				const target = this.editorView && this.editorHeightManager ? Math.min(this.computedHeight(this.editorView), this.maxHeightValue) : -1;
+				if (target !== -1 && this.editorHeightManager) await this.waitForHeightApplied(target, 500);
+				else await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+				this.dlog("running delayed immediate reveal", "ticket=", ticket, "line=", line);
+				this.performImmediateReveal(line, ticket);
+			} catch (err) {
+				error("EditorManager", "scheduleImmediateRevealAfterLayout error", err);
+			}
+		});
+	}
+	waitForHeightApplied(target, timeoutMs = 500) {
+		return new Promise((resolve) => {
+			const start = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+			const check = () => {
+				try {
+					var _this$editorHeightMan3, _this$editorHeightMan4;
+					const last = ((_this$editorHeightMan3 = this.editorHeightManager) === null || _this$editorHeightMan3 === void 0 || (_this$editorHeightMan4 = _this$editorHeightMan3.getLastApplied) === null || _this$editorHeightMan4 === void 0 ? void 0 : _this$editorHeightMan4.call(_this$editorHeightMan3)) ?? -1;
+					if (last !== -1 && Math.abs(last - target) <= 12) {
+						this.dlog("waitForHeightApplied satisfied", last, "target=", target);
+						resolve();
+						return;
+					}
+					const now = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+					if (now - start > timeoutMs) {
+						log("EditorManager", "waitForHeightApplied timeout", last, "target=", target);
+						resolve();
+						return;
+					}
+				} catch {}
+				requestAnimationFrame(check);
+			};
+			check();
+		});
+	}
+	updateCode(newCode, codeLanguage) {
+		this.pendingUpdate = {
+			code: newCode,
+			lang: codeLanguage
+		};
+		this.rafScheduler.schedule("update", () => this.flushPendingUpdate());
+	}
+	flushPendingUpdate() {
+		if (!this.pendingUpdate || !this.editorView) return;
+		const model = this.editorView.getModel();
+		if (!model) return;
+		const { code: newCode, lang: codeLanguage } = this.pendingUpdate;
+		this.pendingUpdate = null;
+		const processedCodeLanguage = processedLanguage(codeLanguage);
+		const languageId = model.getLanguageId();
+		if (languageId !== processedCodeLanguage) {
+			if (processedCodeLanguage) monaco_shim_exports.editor.setModelLanguage(model, processedCodeLanguage);
+			const prevLineCount$1 = model.getLineCount();
+			model.setValue(newCode);
+			this.lastKnownCode = newCode;
+			const newLineCount$1 = model.getLineCount();
+			this.cachedLineCount = newLineCount$1;
+			if (newLineCount$1 !== prevLineCount$1) {
+				const shouldImmediate = this.shouldPerformImmediateReveal();
+				if (shouldImmediate) this.suppressScrollWatcher(this.scrollWatcherSuppressionMs);
+				const computed$1 = this.computedHeight(this.editorView);
+				if (computed$1 >= this.maxHeightValue - 1 && this.lastContainer) this.lastContainer.style.height = `${this.maxHeightValue}px`;
+				this.forceReveal(newLineCount$1);
+			}
+			return;
+		}
+		const buffered = this.appendBuffer.length > 0 ? this.appendBuffer.join("") : "";
+		const prevCode = this.appendBuffer.length > 0 ? this.editorView.getValue() + buffered : this.lastKnownCode ?? this.editorView.getValue();
+		if (prevCode === newCode) return;
+		if (newCode.startsWith(prevCode) && prevCode.length < newCode.length) {
+			const suffix = newCode.slice(prevCode.length);
+			if (suffix) this.appendCode(suffix, codeLanguage);
+			this.lastKnownCode = newCode;
+			return;
+		}
+		const prevLineCount = model.getLineCount();
+		this.applyMinimalEdit(prevCode, newCode);
+		this.lastKnownCode = newCode;
+		const newLineCount = model.getLineCount();
+		this.cachedLineCount = newLineCount;
+		if (newLineCount !== prevLineCount) {
+			const shouldImmediate = this.shouldPerformImmediateReveal();
+			if (shouldImmediate) this.suppressScrollWatcher(this.scrollWatcherSuppressionMs);
+			if (shouldImmediate) this.scheduleImmediateRevealAfterLayout(newLineCount);
+			else this.maybeScrollToBottom(newLineCount);
+		}
+	}
+	appendCode(appendText, codeLanguage) {
+		if (!this.editorView) return;
+		const model = this.editorView.getModel();
+		if (!model) return;
+		const processedCodeLanguage = codeLanguage ? processedLanguage(codeLanguage) : model.getLanguageId();
+		if (processedCodeLanguage && model.getLanguageId() !== processedCodeLanguage) monaco_shim_exports.editor.setModelLanguage(model, processedCodeLanguage);
+		if (appendText) {
+			this.appendBuffer.push(appendText);
+			if (!this.appendBufferScheduled) {
+				this.appendBufferScheduled = true;
+				this.rafScheduler.schedule("append", () => this.flushAppendBuffer());
+			}
+		}
+	}
+	applyMinimalEdit(prev, next) {
+		if (!this.editorView) return;
+		const model = this.editorView.getModel();
+		if (!model) return;
+		const maxChars = minimalEditMaxChars;
+		const ratio = minimalEditMaxChangeRatio;
+		const maxLen = Math.max(prev.length, next.length);
+		const changeRatio = maxLen > 0 ? Math.abs(next.length - prev.length) / maxLen : 0;
+		if (prev.length + next.length > maxChars || changeRatio > ratio) {
+			const prevLineCount = model.getLineCount();
+			model.setValue(next);
+			this.lastKnownCode = next;
+			const newLineCount = model.getLineCount();
+			this.cachedLineCount = newLineCount;
+			if (newLineCount !== prevLineCount) this.maybeScrollToBottom(newLineCount);
+			return;
+		}
+		const res = computeMinimalEdit(prev, next);
+		if (!res) return;
+		const { start, endPrevIncl, replaceText } = res;
+		const rangeStart = model.getPositionAt(start);
+		const rangeEnd = model.getPositionAt(endPrevIncl + 1);
+		const range = new monaco_shim_exports.Range(rangeStart.lineNumber, rangeStart.column, rangeEnd.lineNumber, rangeEnd.column);
+		const isReadOnly = this.editorView.getOption(monaco_shim_exports.editor.EditorOption.readOnly);
+		const edit = [{
+			range,
+			text: replaceText,
+			forceMoveMarkers: true
+		}];
+		if (isReadOnly) model.applyEdits(edit);
+		else this.editorView.executeEdits("minimal-replace", edit);
+	}
+	flushAppendBuffer() {
+		if (!this.editorView) return;
+		if (this.appendBuffer.length === 0) return;
+		this.appendBufferScheduled = false;
+		const model = this.editorView.getModel();
+		if (!model) {
+			this.appendBuffer.length = 0;
+			return;
+		}
+		const text = this.appendBuffer.join("");
+		this.appendBuffer.length = 0;
+		const lastLine = model.getLineCount();
+		const lastColumn = model.getLineMaxColumn(lastLine);
+		const range = new monaco_shim_exports.Range(lastLine, lastColumn, lastLine, lastColumn);
+		const isReadOnly = this.editorView.getOption(monaco_shim_exports.editor.EditorOption.readOnly);
+		if (isReadOnly) model.applyEdits([{
+			range,
+			text,
+			forceMoveMarkers: true
+		}]);
+		else this.editorView.executeEdits("append", [{
+			range,
+			text,
+			forceMoveMarkers: true
+		}]);
+		try {
+			this.lastKnownCode = model.getValue();
+		} catch {}
+		const newLineCount = model.getLineCount();
+		if (lastLine !== newLineCount) {
+			this.cachedLineCount = newLineCount;
+			const shouldImmediate = this.shouldPerformImmediateReveal();
+			if (shouldImmediate) this.suppressScrollWatcher(this.scrollWatcherSuppressionMs);
+			const computed$1 = this.computedHeight(this.editorView);
+			if (computed$1 >= this.maxHeightValue - 1 && this.lastContainer) this.lastContainer.style.height = `${this.maxHeightValue}px`;
+			if (shouldImmediate) try {
+				this.forceReveal(newLineCount);
+			} catch {}
+			else this.maybeScrollToBottom(newLineCount);
+		}
+	}
+	setLanguage(language, languages$1) {
+		if (languages$1.includes(language)) {
+			if (this.editorView) {
+				const model = this.editorView.getModel();
+				if (model && model.getLanguageId() !== language) monaco_shim_exports.editor.setModelLanguage(model, language);
+			}
+		} else console.warn(`Language "${language}" is not registered. Available languages: ${languages$1.join(", ")}`);
+	}
+	getEditorView() {
+		return this.editorView;
+	}
+	cleanup() {
+		this.rafScheduler.cancel("update");
+		this.rafScheduler.cancel("sync-last-known");
+		this.rafScheduler.cancel("content-size-change");
+		this.rafScheduler.cancel("maybe-scroll");
+		this.rafScheduler.cancel("reveal");
+		this.rafScheduler.cancel("immediate-reveal");
+		this.rafScheduler.cancel("maybe-resume");
+		this.pendingUpdate = null;
+		this.rafScheduler.cancel("append");
+		this.appendBufferScheduled = false;
+		this.appendBuffer.length = 0;
+		if (this.revealDebounceId != null) {
+			clearTimeout(this.revealDebounceId);
+			this.revealDebounceId = null;
+		}
+		if (this.revealIdleTimerId != null) {
+			clearTimeout(this.revealIdleTimerId);
+			this.revealIdleTimerId = null;
+		}
+		if (this.scrollWatcherSuppressionTimer != null) {
+			clearTimeout(this.scrollWatcherSuppressionTimer);
+			this.scrollWatcherSuppressionTimer = null;
+		}
+		if (this.editorView) {
+			this.editorView.dispose();
+			this.editorView = null;
+		}
+		this.lastKnownCode = null;
+		if (this.lastContainer) {
+			this.lastContainer.style.minHeight = "";
+			this.lastContainer.innerHTML = "";
+			this.lastContainer = null;
+		}
+		if (this.scrollWatcher) {
+			this.scrollWatcher.dispose();
+			this.scrollWatcher = null;
+		}
+		if (this.editorHeightManager) {
+			this.editorHeightManager.dispose();
+			this.editorHeightManager = null;
+		}
+	}
+	safeClean() {
+		this.rafScheduler.cancel("update");
+		this.pendingUpdate = null;
+		this.rafScheduler.cancel("sync-last-known");
+		if (this.scrollWatcher) {
+			try {
+				this.scrollWatcher.dispose();
+			} catch {}
+			this.scrollWatcher = null;
+		}
+		if (this.revealDebounceId != null) {
+			clearTimeout(this.revealDebounceId);
+			this.revealDebounceId = null;
+		}
+		if (this.revealIdleTimerId != null) {
+			clearTimeout(this.revealIdleTimerId);
+			this.revealIdleTimerId = null;
+		}
+		if (this.scrollWatcherSuppressionTimer != null) {
+			clearTimeout(this.scrollWatcherSuppressionTimer);
+			this.scrollWatcherSuppressionTimer = null;
+		}
+		this.rafScheduler.cancel("maybe-scroll");
+		this.rafScheduler.cancel("reveal");
+		this.rafScheduler.cancel("immediate-reveal");
+		this.rafScheduler.cancel("maybe-resume");
+		this._hasScrollBar = false;
+		this.shouldAutoScroll = !!this.autoScrollInitial;
+		this.lastScrollTop = 0;
+		if (this.editorHeightManager) {
+			this.editorHeightManager.dispose();
+			this.editorHeightManager = null;
+		}
+	}
+};
+
+//#endregion
+//#region src/preloadMonacoWorkers.ts
+async function preloadMonacoWorkers() {
+	if (typeof window === "undefined" || typeof document === "undefined") return;
+	const workerUrlJson = new URL("monaco-editor/esm/vs/language/json/json.worker.js", require("url").pathToFileURL(__filename).href);
+	const workerUrlCss = new URL("monaco-editor/esm/vs/language/css/css.worker.js", require("url").pathToFileURL(__filename).href);
+	const workerUrlHtml = new URL("monaco-editor/esm/vs/language/html/html.worker.js", require("url").pathToFileURL(__filename).href);
+	const workerUrlTs = new URL("monaco-editor/esm/vs/language/typescript/ts.worker.js", require("url").pathToFileURL(__filename).href);
+	const workerUrlEditor = new URL("monaco-editor/esm/vs/editor/editor.worker.js", require("url").pathToFileURL(__filename).href);
+	const unique = Array.from(new Set([
+		String(workerUrlJson),
+		String(workerUrlCss),
+		String(workerUrlHtml),
+		String(workerUrlTs),
+		String(workerUrlEditor)
+	]));
+	const workerUrlByLabel = {
+		json: workerUrlJson,
+		css: workerUrlCss,
+		scss: workerUrlCss,
+		less: workerUrlCss,
+		html: workerUrlHtml,
+		handlebars: workerUrlHtml,
+		razor: workerUrlHtml,
+		typescript: workerUrlTs,
+		javascript: workerUrlTs
+	};
+	try {
+		self.MonacoEnvironment = { getWorker(_, label) {
+			const url = workerUrlByLabel[label] ?? workerUrlEditor;
+			return new Worker(url, { type: "module" });
+		} };
+	} catch {}
+	try {
+		await Promise.all(unique.map((u) => fetch(u, {
+			method: "GET",
+			cache: "force-cache"
+		}).catch(() => void 0)));
+	} catch {}
+}
+
+//#endregion
+//#region src/reactivity.ts
+function computed(getter) {
+	const c = (0, alien_signals.computed)(() => getter());
+	return Object.defineProperty({}, "value", {
+		get() {
+			return c();
+		},
+		set(_) {},
+		enumerable: true,
+		configurable: false
+	});
+}
+
+//#endregion
+//#region src/utils/arraysEqual.ts
+function arraysEqual(a, b) {
+	if (a === b) return true;
+	if (!a || !b) return false;
+	if (a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+	return true;
+}
+
+//#endregion
+//#region src/utils/registerMonacoThemes.ts
+let languagesRegistered = false;
+let currentLanguages = [];
+let themeRegisterPromise = null;
+let registrationQueue = Promise.resolve();
+function enqueueRegistration(task) {
+	const next = registrationQueue.then(task, task);
+	registrationQueue = next.then(() => void 0, () => void 0);
+	return next;
+}
+function setThemeRegisterPromise(p) {
+	return themeRegisterPromise = p;
+}
+const highlighterCache = /* @__PURE__ */ new Map();
+let monacoHighlighterPromise = null;
+let lastPatchedHighlighter = null;
+const monacoThemeByKey = /* @__PURE__ */ new Map();
+const monacoLanguageSet = /* @__PURE__ */ new Set();
+function themeKey(t) {
+	return typeof t === "string" ? t : t.name ?? JSON.stringify(t);
+}
+async function ensureMonacoHighlighter(themes, languages$1) {
+	for (const t of themes) monacoThemeByKey.set(themeKey(t), t);
+	for (const l of languages$1) monacoLanguageSet.add(l);
+	if (!monacoHighlighterPromise) {
+		const initialThemes = Array.from(monacoThemeByKey.values());
+		const initialLangs = Array.from(monacoLanguageSet.values());
+		monacoHighlighterPromise = (0, shiki.createHighlighter)({
+			themes: initialThemes,
+			langs: initialLangs
+		}).then((h$1) => h$1);
+	}
+	const h = await monacoHighlighterPromise;
+	const wantsThemes = Array.from(monacoThemeByKey.values());
+	const wantsLangs = Array.from(monacoLanguageSet.values());
+	const canLoadTheme = typeof h.loadTheme === "function";
+	const canLoadLanguage = typeof h.loadLanguage === "function";
+	if (canLoadTheme || canLoadLanguage) {
+		if (canLoadTheme) for (const t of themes) {
+			const k = themeKey(t);
+			if (!h.__streamMonacoLoadedThemes) h.__streamMonacoLoadedThemes = /* @__PURE__ */ new Set();
+			const loaded = h.__streamMonacoLoadedThemes;
+			if (loaded.has(k)) continue;
+			await h.loadTheme(t);
+			loaded.add(k);
+		}
+		if (canLoadLanguage) for (const l of languages$1) {
+			if (!h.__streamMonacoLoadedLangs) h.__streamMonacoLoadedLangs = /* @__PURE__ */ new Set();
+			const loaded = h.__streamMonacoLoadedLangs;
+			if (loaded.has(l)) continue;
+			await h.loadLanguage(l);
+			loaded.add(l);
+		}
+		return h;
+	}
+	const p = (0, shiki.createHighlighter)({
+		themes: wantsThemes,
+		langs: wantsLangs
+	}).then((hh) => hh);
+	monacoHighlighterPromise = p;
+	return p;
+}
+/**
+* Clear all cached shiki highlighters.
+*
+* Useful for long-running apps that dynamically create many theme combinations,
+* or in tests to ensure a clean state. Call this when you know the highlighters
+* are no longer needed (for example on app shutdown) to free memory.
+*/
+function clearHighlighterCache() {
+	highlighterCache.clear();
+}
+function serializeThemes(themes) {
+	return JSON.stringify(themes.map((t) => typeof t === "string" ? t : t.name ?? JSON.stringify(t)).sort());
+}
+async function getOrCreateHighlighter(themes, languages$1) {
+	const key = serializeThemes(themes);
+	const requestedSet = new Set(languages$1);
+	let existing = highlighterCache.get(key);
+	if (existing) {
+		let allIncluded = true;
+		for (const l of requestedSet) if (!existing.languages.has(l)) {
+			allIncluded = false;
+			break;
+		}
+		if (allIncluded) return existing.promise;
+		const prev = existing;
+		const current = highlighterCache.get(key);
+		if (current && current !== prev) {
+			let allIncludedCurrent = true;
+			for (const l of requestedSet) if (!current.languages.has(l)) {
+				allIncludedCurrent = false;
+				break;
+			}
+			if (allIncludedCurrent) return current.promise;
+			existing = current;
+		}
+		const union = new Set([...existing.languages, ...requestedSet]);
+		const langsArray = Array.from(union);
+		const p$1 = (0, shiki.createHighlighter)({
+			themes,
+			langs: langsArray
+		});
+		const newEntry = {
+			promise: p$1,
+			languages: union
+		};
+		highlighterCache.set(key, newEntry);
+		p$1.catch(() => {
+			if (highlighterCache.get(key) === newEntry && prev) highlighterCache.set(key, prev);
+		});
+		return p$1;
+	}
+	const p = (0, shiki.createHighlighter)({
+		themes,
+		langs: Array.from(requestedSet)
+	});
+	const entry = {
+		promise: p,
+		languages: requestedSet
+	};
+	highlighterCache.set(key, entry);
+	p.catch(() => {
+		if (highlighterCache.get(key) === entry) highlighterCache.delete(key);
+	});
+	return p;
+}
+/**
+* Update the theme used by the shiki highlighter for a given themes+languages
+* combination. Useful when Monaco themes are already registered (so switching
+* Monaco only requires `monaco.editor.setTheme`) but you also want shiki's
+* standalone renderer to use the new theme without recreating everything.
+*/
+async function registerMonacoThemes(themes, languages$1) {
+	return enqueueRegistration(async () => {
+		registerMonacoLanguages(languages$1);
+		const p = (async () => {
+			const highlighter = await ensureMonacoHighlighter(themes, languages$1);
+			if (lastPatchedHighlighter !== highlighter) {
+				(0, __shikijs_monaco.shikiToMonaco)(highlighter, monaco_shim_exports);
+				lastPatchedHighlighter = highlighter;
+			}
+			currentLanguages = languages$1.slice();
+			return highlighter;
+		})();
+		setThemeRegisterPromise(p);
+		try {
+			const res = await p;
+			return res;
+		} catch (e) {
+			setThemeRegisterPromise(null);
+			throw e;
+		}
+	});
+}
+function registerMonacoLanguages(languages$1) {
+	if (languagesRegistered && arraysEqual(languages$1, currentLanguages)) return;
+	const existing = new Set(monaco_shim_exports.languages.getLanguages().map((l) => l.id));
+	for (const lang of languages$1) if (!existing.has(lang)) try {
+		monaco_shim_exports.languages.register({ id: lang });
+	} catch {}
+	languagesRegistered = true;
+	currentLanguages = languages$1;
+}
+
+//#endregion
+//#region src/type.ts
+let RevealStrategy = /* @__PURE__ */ function(RevealStrategy$1) {
+	RevealStrategy$1["Bottom"] = "bottom";
+	RevealStrategy$1["CenterIfOutside"] = "centerIfOutside";
+	RevealStrategy$1["Center"] = "center";
+	return RevealStrategy$1;
+}({});
+
+//#endregion
+//#region src/index.ts
+let globalRequestedThemeName = null;
+let globalThemeRequestSeq = 0;
+let globalAppliedThemeName = null;
+/**
+* useMonaco 组合式函数
+*
+* 提供 Monaco 编辑器的创建、销毁、内容/主题/语言更新等能力。
+* 支持主题自动切换、语言高亮、代码更新等功能。
+*
+* @param {MonacoOptions} [monacoOptions] - 编辑器初始化配置，支持 Monaco 原生配置及扩展项
+* @param {number | string} [monacoOptions.MAX_HEIGHT] - 编辑器最大高度，可以是数字（像素）或 CSS 字符串（如 '100%', 'calc(100vh - 100px)'）
+* @param {boolean} [monacoOptions.readOnly] - 是否为只读模式
+* @param {MonacoTheme[]} [monacoOptions.themes] - 主题数组，至少包含两个主题：[暗色主题, 亮色主题]
+* @param {MonacoLanguage[]} [monacoOptions.languages] - 支持的编程语言数组
+* @param {string} [monacoOptions.theme] - 初始主题名称
+* @param {boolean} [monacoOptions.isCleanOnBeforeCreate] - 是否在创建前清理之前注册的资源, 默认为 true
+* @param {(monaco: typeof import('monaco-editor')) => monaco.IDisposable[]} [monacoOptions.onBeforeCreate] - 编辑器创建前的钩子函数
+*
+* @returns {{
+*   createEditor: (container: HTMLElement, code: string, language: string) => Promise<monaco.editor.IStandaloneCodeEditor>,
+*   createDiffEditor: (
+*     container: HTMLElement,
+*     originalCode: string,
+*     modifiedCode: string,
+*     language: string,
+*   ) => Promise<monaco.editor.IStandaloneDiffEditor>,
+*   cleanupEditor: () => void,
+*   updateCode: (newCode: string, codeLanguage: string) => void,
+*   appendCode: (appendText: string, codeLanguage?: string) => void,
+*   updateDiff: (
+*     originalCode: string,
+*     modifiedCode: string,
+*     codeLanguage?: string,
+*   ) => void,
+*   updateOriginal: (newCode: string, codeLanguage?: string) => void,
+*   updateModified: (newCode: string, codeLanguage?: string) => void,
+*   appendOriginal: (appendText: string, codeLanguage?: string) => void,
+*   appendModified: (appendText: string, codeLanguage?: string) => void,
+*   setTheme: (theme: MonacoTheme) => Promise<void>,
+*   setLanguage: (language: MonacoLanguage) => void,
+*   getCurrentTheme: () => string,
+*   getEditor: () => typeof monaco.editor,
+*   getEditorView: () => monaco.editor.IStandaloneCodeEditor | null,
+*   getDiffEditorView: () => monaco.editor.IStandaloneDiffEditor | null,
+*   getDiffModels: () => { original: monaco.editor.ITextModel | null, modified: monaco.editor.ITextModel | null },
+*   getCode: () => string | { original: string, modified: string } | null,
+* }} 返回对象包含以下方法和属性：
+*
+* @property {Function} createEditor - 创建并挂载 Monaco 编辑器到指定容器
+* @property {Function} cleanupEditor - 销毁编辑器并清理容器
+* @property {Function} updateCode - 更新编辑器内容和语言，必要时滚动到底部
+* @property {Function} appendCode - 在编辑器末尾追加文本，必要时滚动到底部
+* @property {Function} createDiffEditor - 创建并挂载 Diff 编辑器
+* @property {Function} updateDiff - 更新 Diff 编辑器的 original/modified 内容（RAF 合并、增量更新）
+* @property {Function} updateOriginal - 仅更新 Diff 的 original 内容（增量更新）
+* @property {Function} updateModified - 仅更新 Diff 的 modified 内容（增量更新）
+* @property {Function} appendOriginal - 在 Diff 的 original 末尾追加（显式流式场景）
+* @property {Function} appendModified - 在 Diff 的 modified 末尾追加（显式流式场景）
+* @property {Function} setTheme - 切换编辑器主题，返回 Promise，在主题应用完成时 resolve
+* @property {Function} setLanguage - 切换编辑器语言
+* @property {Function} getCurrentTheme - 获取当前主题名称
+* @property {Function} getEditor - 获取 Monaco 的静态 editor 对象（用于静态方法调用）
+* @property {Function} getEditorView - 获取当前编辑器实例
+* @property {Function} getDiffEditorView - 获取当前 Diff 编辑器实例
+* @property {Function} getDiffModels - 获取 Diff 的 original/modified 两个模型
+* @property {Function} getCode - 获取当前编辑器或 Diff 编辑器中的代码内容
+*
+* @throws {Error} 当主题数组不是数组或长度小于2时抛出错误
+*
+* @example
+* ```typescript
+* import { useMonaco } from 'stream-monaco'
+*
+* const { createEditor, updateCode, setTheme } = useMonaco({
+*   themes: ['vitesse-dark', 'vitesse-light'],
+*   languages: ['javascript', 'typescript'],
+*   readOnly: false
+* })
+*
+* // 创建编辑器
+* const editor = await createEditor(containerRef.value, 'console.log("hello")', 'javascript')
+*
+* // 更新代码
+* updateCode('console.log("world")', 'javascript')
+*
+* // 切换主题
+* setTheme('vitesse-light')
+* ```
+*/
+function useMonaco(monacoOptions = {}) {
+	var _monacoOptions$themes;
+	const disposals = [];
+	if (monacoOptions.isCleanOnBeforeCreate ?? true) disposals.forEach((d) => d.dispose());
+	if (monacoOptions.isCleanOnBeforeCreate ?? true) disposals.length = 0;
+	let editorView = null;
+	let editorMgr = null;
+	let diffEditorView = null;
+	let diffMgr = null;
+	let originalModel = null;
+	let modifiedModel = null;
+	let _hasScrollBar = false;
+	const themes = monacoOptions.themes && ((_monacoOptions$themes = monacoOptions.themes) === null || _monacoOptions$themes === void 0 ? void 0 : _monacoOptions$themes.length) ? monacoOptions.themes : defaultThemes;
+	if (!Array.isArray(themes) || themes.length < 2) throw new Error("Monaco themes must be an array with at least two themes: [darkTheme, lightTheme]");
+	const languages$1 = monacoOptions.languages ?? defaultLanguages;
+	const MAX_HEIGHT = monacoOptions.MAX_HEIGHT ?? 500;
+	const autoScrollOnUpdate = monacoOptions.autoScrollOnUpdate ?? true;
+	const autoScrollInitial = monacoOptions.autoScrollInitial ?? true;
+	const autoScrollThresholdPx = monacoOptions.autoScrollThresholdPx ?? 32;
+	const autoScrollThresholdLines = monacoOptions.autoScrollThresholdLines ?? 2;
+	const diffAutoScroll = monacoOptions.diffAutoScroll ?? true;
+	const getMaxHeightValue = () => {
+		if (typeof MAX_HEIGHT === "number") return MAX_HEIGHT;
+		const match = MAX_HEIGHT.match(/^(\d+(?:\.\d+)?)/);
+		return match ? Number.parseFloat(match[1]) : 500;
+	};
+	const getMaxHeightCSS = () => {
+		if (typeof MAX_HEIGHT === "number") return `${MAX_HEIGHT}px`;
+		return MAX_HEIGHT;
+	};
+	const maxHeightValue = getMaxHeightValue();
+	const maxHeightCSS = getMaxHeightCSS();
+	let lastContainer = null;
+	let lastKnownCode = null;
+	const minimalEditMaxCharsLocal = monacoOptions.minimalEditMaxChars ?? minimalEditMaxChars;
+	const minimalEditMaxChangeRatioLocal = monacoOptions.minimalEditMaxChangeRatio ?? minimalEditMaxChangeRatio;
+	let updateThrottleMs = monacoOptions.updateThrottleMs ?? 50;
+	let lastFlushTime = 0;
+	let updateThrottleTimer = null;
+	let pendingUpdate = null;
+	let shouldAutoScroll = true;
+	const cachedComputedHeight = null;
+	const appendBuffer = [];
+	let appendBufferScheduled = false;
+	const currentTheme = computed(() => monacoOptions.theme ?? (typeof themes[0] === "string" ? themes[0] : themes[0].name));
+	let requestedThemeName = monacoOptions.theme ?? globalRequestedThemeName ?? currentTheme.value;
+	let themeWatcher = null;
+	const rafScheduler = createRafScheduler();
+	async function tryLoadAndSetShikiTheme(highlighter, themeName) {
+		if (!highlighter || typeof highlighter.setTheme !== "function") return;
+		try {
+			await highlighter.setTheme(themeName);
+		} catch (err) {
+			const message = (err === null || err === void 0 ? void 0 : err.message) ? String(err.message) : String(err);
+			const lower = message.toLowerCase();
+			const looksLikeMissingThemeError = lower.includes("theme") && lower.includes("not found");
+			if (typeof highlighter.loadTheme === "function" && looksLikeMissingThemeError) {
+				await highlighter.loadTheme(themeName);
+				await highlighter.setTheme(themeName);
+				return;
+			}
+			throw err;
+		}
+	}
+	async function setThemeInternal(theme, force = false) {
+		const themeName = typeof theme === "string" ? theme : theme.name;
+		globalThemeRequestSeq += 1;
+		const token = globalThemeRequestSeq;
+		requestedThemeName = themeName;
+		globalRequestedThemeName = themeName;
+		if (!force && themeName === globalAppliedThemeName) return;
+		if (token !== globalThemeRequestSeq) return;
+		await registerMonacoThemes(themes, languages$1).catch(() => void 0);
+		if (token !== globalThemeRequestSeq) return;
+		const availableNames = themes.map((t) => typeof t === "string" ? t : t.name);
+		if (!availableNames.includes(themeName)) try {
+			const extended = availableNames.concat(themeName);
+			const maybeHighlighter = await registerMonacoThemes(extended, languages$1);
+			await tryLoadAndSetShikiTheme(maybeHighlighter, themeName).catch(() => void 0);
+		} catch {
+			console.warn(`Theme "${themeName}" is not registered and automatic registration failed. Available themes: ${availableNames.join(", ")}`);
+			return;
+		}
+		if (token !== globalThemeRequestSeq) return;
+		try {
+			monaco_shim_exports.editor.setTheme(themeName);
+			globalAppliedThemeName = themeName;
+		} catch {
+			try {
+				const maybeHighlighter = await registerMonacoThemes(themes, languages$1);
+				if (token !== globalThemeRequestSeq) return;
+				monaco_shim_exports.editor.setTheme(themeName);
+				globalAppliedThemeName = themeName;
+				await tryLoadAndSetShikiTheme(maybeHighlighter, themeName).catch(() => void 0);
+			} catch (err2) {
+				console.warn(`Failed to set theme "${themeName}":`, err2);
+				return;
+			}
+		}
+		if (token !== globalThemeRequestSeq) return;
+		try {
+			if (typeof monacoOptions.onThemeChange === "function") await monacoOptions.onThemeChange(themeName);
+		} catch (err) {
+			console.warn("onThemeChange callback threw an error:", err);
+		}
+	}
+	async function ensureThemeRegistered(themeName) {
+		const availableNames = themes.map((t) => typeof t === "string" ? t : t.name);
+		const list = availableNames.includes(themeName) ? themes : themes.concat(themeName);
+		await registerMonacoThemes(list, languages$1);
+	}
+	function hasVerticalScrollbar() {
+		if (!editorView) return false;
+		if (_hasScrollBar) return true;
+		const ch = cachedComputedHeight ?? computedHeight(editorView);
+		return _hasScrollBar = editorView.getScrollHeight() > ch + padding / 2;
+	}
+	let revealDebounceId = null;
+	const revealDebounceMs = 75;
+	function maybeScrollToBottom(targetLine) {
+		if (autoScrollOnUpdate && shouldAutoScroll && hasVerticalScrollbar()) {
+			const model = editorView.getModel();
+			const line = targetLine ?? (model === null || model === void 0 ? void 0 : model.getLineCount()) ?? 1;
+			if (revealDebounceId != null) {
+				clearTimeout(revealDebounceId);
+				revealDebounceId = null;
+			}
+			revealDebounceId = setTimeout(() => {
+				revealDebounceId = null;
+				rafScheduler.schedule("reveal", () => {
+					try {
+						var _editor;
+						const ScrollType = monaco_shim_exports.ScrollType || ((_editor = monaco_shim_exports.editor) === null || _editor === void 0 ? void 0 : _editor.ScrollType);
+						if (ScrollType && typeof ScrollType.Smooth !== "undefined") editorView.revealLineInCenterIfOutsideViewport(line, ScrollType.Smooth);
+						else editorView.revealLineInCenterIfOutsideViewport(line);
+					} catch {}
+				});
+			}, revealDebounceMs);
+		}
+	}
+	async function createEditor(container, code, language) {
+		cleanupEditor();
+		lastContainer = container;
+		if (monacoOptions.isCleanOnBeforeCreate ?? true) {
+			disposals.forEach((d) => d.dispose());
+			disposals.length = 0;
+		}
+		if (monacoOptions.onBeforeCreate) {
+			const ds = monacoOptions.onBeforeCreate(monaco_shim_exports);
+			if (ds) disposals.push(...ds);
+		}
+		const initialThemeName = requestedThemeName ?? monacoOptions.theme ?? globalRequestedThemeName ?? currentTheme.value;
+		await ensureThemeRegistered(initialThemeName);
+		editorMgr = new EditorManager(monacoOptions, maxHeightValue, maxHeightCSS, autoScrollOnUpdate, autoScrollInitial, autoScrollThresholdPx, autoScrollThresholdLines, monacoOptions.revealDebounceMs);
+		editorView = await editorMgr.createEditor(container, code, language, initialThemeName);
+		if (pendingUpdate && editorMgr) {
+			const { code: queuedCode, lang: queuedLang } = pendingUpdate;
+			pendingUpdate = null;
+			editorMgr.updateCode(queuedCode, queuedLang);
+		}
+		if (typeof monacoOptions.onThemeChange === "function") monacoOptions.onThemeChange(initialThemeName);
+		if (editorView) lastKnownCode = editorView.getValue();
+		return editorView;
+	}
+	function computedHeight(editorView$1) {
+		var _getModel;
+		const lineCount = ((_getModel = editorView$1.getModel()) === null || _getModel === void 0 ? void 0 : _getModel.getLineCount()) ?? 1;
+		const lineHeight = editorView$1.getOption(monaco_shim_exports.editor.EditorOption.lineHeight);
+		const height = Math.min(lineCount * lineHeight + padding, maxHeightValue);
+		return height;
+	}
+	async function createDiffEditor(container, originalCode, modifiedCode, language) {
+		cleanupEditor();
+		lastContainer = container;
+		if (monacoOptions.isCleanOnBeforeCreate ?? true) {
+			disposals.forEach((d) => d.dispose());
+			disposals.length = 0;
+		}
+		if (monacoOptions.onBeforeCreate) {
+			const ds = monacoOptions.onBeforeCreate(monaco_shim_exports);
+			if (ds) disposals.push(...ds);
+		}
+		const initialThemeName = requestedThemeName ?? monacoOptions.theme ?? globalRequestedThemeName ?? currentTheme.value;
+		await ensureThemeRegistered(initialThemeName);
+		try {
+			monaco_shim_exports.editor.setTheme(initialThemeName);
+		} catch {}
+		diffMgr = new DiffEditorManager(monacoOptions, maxHeightValue, maxHeightCSS, autoScrollOnUpdate, autoScrollInitial, autoScrollThresholdPx, autoScrollThresholdLines, diffAutoScroll, monacoOptions.revealDebounceMs, monacoOptions.diffUpdateThrottleMs);
+		diffEditorView = await diffMgr.createDiffEditor(container, originalCode, modifiedCode, language, initialThemeName);
+		if (typeof monacoOptions.onThemeChange === "function") monacoOptions.onThemeChange(initialThemeName);
+		const models = diffMgr.getDiffModels();
+		originalModel = models.original;
+		modifiedModel = models.modified;
+		return diffEditorView;
+	}
+	function cleanupEditor() {
+		if (editorMgr) {
+			editorMgr.cleanup();
+			editorMgr = null;
+		}
+		if (diffMgr) {
+			diffMgr.cleanup();
+			diffMgr = null;
+		}
+		rafScheduler.cancel("update");
+		pendingUpdate = null;
+		rafScheduler.cancel("append");
+		appendBufferScheduled = false;
+		appendBuffer.length = 0;
+		if (!editorMgr && editorView) {
+			editorView.dispose();
+			editorView = null;
+		}
+		lastKnownCode = null;
+		if (lastContainer) {
+			lastContainer.innerHTML = "";
+			lastContainer = null;
+		}
+		if (themeWatcher) {
+			themeWatcher();
+			themeWatcher = null;
+		}
+		if (updateThrottleTimer != null) {
+			clearTimeout(updateThrottleTimer);
+			updateThrottleTimer = null;
+		}
+		diffEditorView = null;
+		originalModel = null;
+		modifiedModel = null;
+	}
+	function appendCode(appendText, codeLanguage) {
+		if (editorMgr) editorMgr.appendCode(appendText, codeLanguage);
+		else {
+			if (!editorView) return;
+			const model = editorView.getModel();
+			if (!model) return;
+			const processedCodeLanguage = codeLanguage ? processedLanguage(codeLanguage) : model.getLanguageId();
+			if (processedCodeLanguage && model.getLanguageId() !== processedCodeLanguage) monaco_shim_exports.editor.setModelLanguage(model, processedCodeLanguage);
+			if (appendText && lastKnownCode != null) lastKnownCode = lastKnownCode + appendText;
+			if (appendText) {
+				appendBuffer.push(appendText);
+				if (!appendBufferScheduled) {
+					appendBufferScheduled = true;
+					rafScheduler.schedule("append", flushAppendBuffer);
+				}
+			}
+		}
+	}
+	function applyMinimalEdit(prev, next) {
+		if (!editorView) return;
+		const model = editorView.getModel();
+		if (!model) return;
+		try {
+			const maxChars = minimalEditMaxCharsLocal;
+			const ratio = minimalEditMaxChangeRatioLocal;
+			const maxLen = Math.max(prev.length, next.length);
+			const changeRatio = maxLen > 0 ? Math.abs(next.length - prev.length) / maxLen : 0;
+			if (prev.length + next.length > maxChars || changeRatio > ratio) {
+				const prevLineCount = model.getLineCount();
+				model.setValue(next);
+				lastKnownCode = next;
+				const newLineCount = model.getLineCount();
+				if (newLineCount !== prevLineCount) maybeScrollToBottom(newLineCount);
+				return;
+			}
+		} catch {}
+		const res = computeMinimalEdit(prev, next);
+		if (!res) return;
+		const { start, endPrevIncl, replaceText } = res;
+		const rangeStart = model.getPositionAt(start);
+		const rangeEnd = model.getPositionAt(endPrevIncl + 1);
+		const range = new monaco_shim_exports.Range(rangeStart.lineNumber, rangeStart.column, rangeEnd.lineNumber, rangeEnd.column);
+		const isReadOnly = editorView.getOption(monaco_shim_exports.editor.EditorOption.readOnly);
+		const edit = [{
+			range,
+			text: replaceText,
+			forceMoveMarkers: true
+		}];
+		if (isReadOnly) model.applyEdits(edit);
+		else editorView.executeEdits("minimal-replace", edit);
+	}
+	function flushPendingUpdate() {
+		if (!pendingUpdate) return;
+		lastFlushTime = Date.now();
+		if (!editorView) return;
+		const model = editorView.getModel();
+		if (!model) return;
+		const { code: newCode, lang: codeLanguage } = pendingUpdate;
+		pendingUpdate = null;
+		const processedCodeLanguage = processedLanguage(codeLanguage);
+		let prevCode = null;
+		if (appendBuffer.length > 0) try {
+			prevCode = model.getValue();
+			lastKnownCode = prevCode;
+		} catch {
+			prevCode = "";
+		}
+		else {
+			prevCode = lastKnownCode;
+			if (prevCode == null) try {
+				prevCode = model.getValue();
+				lastKnownCode = prevCode;
+			} catch {
+				prevCode = "";
+			}
+		}
+		if (prevCode === newCode) return;
+		const languageId = model.getLanguageId();
+		if (languageId !== processedCodeLanguage) {
+			if (processedCodeLanguage) monaco_shim_exports.editor.setModelLanguage(model, processedCodeLanguage);
+			const prevLineCount = model.getLineCount();
+			model.setValue(newCode);
+			lastKnownCode = newCode;
+			const newLineCount = model.getLineCount();
+			if (newLineCount !== prevLineCount) maybeScrollToBottom(newLineCount);
+			return;
+		}
+		if (newCode.startsWith(prevCode) && prevCode.length < newCode.length) {
+			const suffix = newCode.slice(prevCode.length);
+			if (suffix) appendCode(suffix, codeLanguage);
+			lastKnownCode = newCode;
+			return;
+		}
+		try {
+			const maxChars = minimalEditMaxCharsLocal;
+			const ratio = minimalEditMaxChangeRatioLocal;
+			const maxLen = Math.max(prevCode.length, newCode.length);
+			const changeRatio = maxLen > 0 ? Math.abs(newCode.length - prevCode.length) / maxLen : 0;
+			if (prevCode.length + newCode.length > maxChars || changeRatio > ratio) {
+				const prevLineCount = model.getLineCount();
+				model.setValue(newCode);
+				lastKnownCode = newCode;
+				const newLineCount = model.getLineCount();
+				if (newLineCount !== prevLineCount) maybeScrollToBottom(newLineCount);
+				return;
+			}
+		} catch {}
+		try {
+			applyMinimalEdit(prevCode, newCode);
+			lastKnownCode = newCode;
+			const newLineCount = model.getLineCount();
+			const prevLineCount = (prevCode ? prevCode.split("\n").length : 0) || model.getLineCount();
+			if (newLineCount !== prevLineCount) maybeScrollToBottom(newLineCount);
+		} catch {
+			try {
+				const prevLineCount = model.getLineCount();
+				model.setValue(newCode);
+				lastKnownCode = newCode;
+				const newLineCount = model.getLineCount();
+				if (newLineCount !== prevLineCount) maybeScrollToBottom(newLineCount);
+			} catch {}
+		}
+	}
+	function flushAppendBuffer() {
+		if (!editorView) return;
+		if (appendBuffer.length === 0) return;
+		appendBufferScheduled = false;
+		const model = editorView.getModel();
+		if (!model) {
+			appendBuffer.length = 0;
+			return;
+		}
+		const text = appendBuffer.join("");
+		appendBuffer.length = 0;
+		try {
+			const lastLine = model.getLineCount();
+			const lastColumn = model.getLineMaxColumn(lastLine);
+			const range = new monaco_shim_exports.Range(lastLine, lastColumn, lastLine, lastColumn);
+			const isReadOnly = editorView.getOption(monaco_shim_exports.editor.EditorOption.readOnly);
+			if (isReadOnly) model.applyEdits([{
+				range,
+				text,
+				forceMoveMarkers: true
+			}]);
+			else editorView.executeEdits("append", [{
+				range,
+				text,
+				forceMoveMarkers: true
+			}]);
+			if (lastKnownCode != null) lastKnownCode = lastKnownCode + text;
+			try {
+				if (lastLine !== model.getLineCount()) maybeScrollToBottom(model.getLineCount());
+			} catch {}
+		} catch {}
+	}
+	function updateCode(newCode, codeLanguage) {
+		if (editorMgr) editorMgr.updateCode(newCode, codeLanguage);
+		else {
+			pendingUpdate = {
+				code: newCode,
+				lang: codeLanguage
+			};
+			rafScheduler.schedule("update", () => {
+				if (!updateThrottleMs) {
+					flushPendingUpdate();
+					return;
+				}
+				const now = Date.now();
+				const since = now - lastFlushTime;
+				if (since >= updateThrottleMs) {
+					flushPendingUpdate();
+					return;
+				}
+				if (updateThrottleTimer != null) return;
+				const wait = updateThrottleMs - since;
+				updateThrottleTimer = setTimeout(() => {
+					updateThrottleTimer = null;
+					rafScheduler.schedule("update", () => flushPendingUpdate());
+				}, wait);
+			});
+		}
+	}
+	function setUpdateThrottleMs(ms) {
+		updateThrottleMs = ms;
+	}
+	function getUpdateThrottleMs() {
+		return updateThrottleMs;
+	}
+	function updateDiff(originalCode, modifiedCode, codeLanguage) {
+		if (diffMgr) diffMgr.updateDiff(originalCode, modifiedCode, codeLanguage);
+	}
+	function updateOriginal(newCode, codeLanguage) {
+		if (diffMgr) diffMgr.updateOriginal(newCode, codeLanguage);
+	}
+	function updateModified(newCode, codeLanguage) {
+		if (diffMgr) diffMgr.updateModified(newCode, codeLanguage);
+	}
+	function appendOriginal(appendText, codeLanguage) {
+		if (diffMgr) diffMgr.appendOriginal(appendText, codeLanguage);
+	}
+	function appendModified(appendText, codeLanguage) {
+		if (diffMgr) diffMgr.appendModified(appendText, codeLanguage);
+	}
+	return {
+		createEditor,
+		createDiffEditor,
+		cleanupEditor,
+		safeClean() {
+			rafScheduler.cancel("update");
+			pendingUpdate = null;
+			if (editorMgr) try {
+				editorMgr.safeClean();
+			} catch {}
+			if (diffMgr) try {
+				diffMgr.safeClean();
+			} catch {}
+			_hasScrollBar = false;
+			shouldAutoScroll = !!autoScrollInitial;
+		},
+		updateCode,
+		appendCode,
+		updateDiff,
+		updateOriginal,
+		updateModified,
+		appendOriginal,
+		appendModified,
+		setTheme: setThemeInternal,
+		setLanguage(language) {
+			if (editorMgr) {
+				editorMgr.setLanguage(language, languages$1);
+				return;
+			}
+			if (diffMgr) {
+				diffMgr.setLanguage(language, languages$1);
+				return;
+			}
+			if (languages$1.includes(language)) {
+				if (editorView) {
+					const model = editorView.getModel();
+					if (model && model.getLanguageId() !== language) monaco_shim_exports.editor.setModelLanguage(model, language);
+				}
+				if (originalModel && originalModel.getLanguageId() !== language) monaco_shim_exports.editor.setModelLanguage(originalModel, language);
+				if (modifiedModel && modifiedModel.getLanguageId() !== language) monaco_shim_exports.editor.setModelLanguage(modifiedModel, language);
+			} else console.warn(`Language "${language}" is not registered. Available languages: ${languages$1.join(", ")}`);
+		},
+		getCurrentTheme() {
+			return globalAppliedThemeName ?? requestedThemeName ?? globalRequestedThemeName ?? currentTheme.value;
+		},
+		getEditor() {
+			return monaco_shim_exports.editor;
+		},
+		getEditorView() {
+			return editorView;
+		},
+		getDiffEditorView() {
+			return diffEditorView;
+		},
+		getDiffModels() {
+			return {
+				original: originalModel,
+				modified: modifiedModel
+			};
+		},
+		getMonacoInstance() {
+			return monaco_shim_exports;
+		},
+		setUpdateThrottleMs,
+		getUpdateThrottleMs,
+		getCode() {
+			if (editorView) try {
+				var _editorView$getModel;
+				return ((_editorView$getModel = editorView.getModel()) === null || _editorView$getModel === void 0 ? void 0 : _editorView$getModel.getValue()) ?? null;
+			} catch {
+				return null;
+			}
+			if (diffEditorView || originalModel && modifiedModel) try {
+				const original = (originalModel === null || originalModel === void 0 ? void 0 : originalModel.getValue()) ?? "";
+				const modified = (modifiedModel === null || modifiedModel === void 0 ? void 0 : modifiedModel.getValue()) ?? "";
+				return {
+					original,
+					modified
+				};
+			} catch {
+				return null;
+			}
+			return null;
+		}
+	};
+}
+
+//#endregion
+exports.RevealStrategy = RevealStrategy;
+exports.clearHighlighterCache = clearHighlighterCache;
+exports.defaultRevealDebounceMs = defaultRevealDebounceMs;
+exports.detectLanguage = detectLanguage;
+exports.getOrCreateHighlighter = getOrCreateHighlighter;
+exports.preloadMonacoWorkers = preloadMonacoWorkers;
+exports.registerMonacoThemes = registerMonacoThemes;
+exports.useMonaco = useMonaco;

@@ -1,0 +1,99 @@
+{
+  "name": "stream-monaco",
+  "type": "module",
+  "version": "0.0.15",
+  "description": "A framework-agnostic library for integrating Monaco Editor with Shiki highlighting, optimized for streaming updates.",
+  "author": "Simon He",
+  "license": "MIT",
+  "funding": "https://github.com/sponsors/Simon-He95",
+  "homepage": "https://github.com/Simon-He95/stream-monaco#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Simon-He95/stream-monaco.git"
+  },
+  "bugs": "https://github.com/Simon-He95/stream-monaco/issues",
+  "keywords": [
+    "monaco-editor",
+    "shiki",
+    "syntax-highlighting",
+    "real-time",
+    "code-editor",
+    "signals",
+    "framework-agnostic",
+    "framework",
+    "streaming",
+    "vue",
+    "react",
+    "svelte",
+    "solid",
+    "preact",
+    "vanilla"
+  ],
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "*": [
+        "./dist/*",
+        "./dist/index.d.ts"
+      ]
+    }
+  },
+  "bin": {
+    "run": "cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "peerDependencies": {
+    "monaco-editor": "^0.52.2"
+  },
+  "dependencies": {
+    "@shikijs/monaco": "^3.19.0",
+    "alien-signals": "^2.0.8",
+    "shiki": "^3.19.0"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^5.4.1",
+    "@types/node": "^18.19.130",
+    "bumpp": "^8.2.1",
+    "eslint": "^9.39.1",
+    "lint-staged": "^13.3.0",
+    "picocolors": "^1.1.1",
+    "playwright": "1.38.0",
+    "prettier": "^2.8.8",
+    "rimraf": "^3.0.2",
+    "tsdown": "^0.12.9",
+    "tsx": "^3.14.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "lint-staged": {
+    "*": [
+      "prettier --write --cache --ignore-unknown"
+    ],
+    "*.{vue,js,ts,jsx,tsx,md,json}": "eslint --fix"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "npm run build -- --watch src",
+    "format": "prettier --write --cache .",
+    "lint": "eslint . --cache",
+    "lint:fix": "pnpm run lint --fix",
+    "release": "bumpp && npm publish",
+    "start": "esno src/index.ts",
+    "bench": "node scripts/stream-benchmark.mjs",
+    "bench:playwright": "node scripts/playwright-bench.mjs",
+    "smoke:diff": "node scripts/playwright-diff-smoke.mjs",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  }
+}

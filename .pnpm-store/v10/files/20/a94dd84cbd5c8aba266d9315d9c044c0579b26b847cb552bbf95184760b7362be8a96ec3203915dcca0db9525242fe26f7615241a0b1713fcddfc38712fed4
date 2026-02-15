@@ -1,0 +1,93 @@
+import { PropType } from '../node_modules/vue-demi/lib/v3/index.mjs';
+declare const _default: import('../node_modules/vue-demi/lib/v3/index.mjs').DefineComponent<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    data: {
+        type: PropType<TMap.visualization.HeatPoint[]>;
+        required: true;
+    };
+    sideLength: {
+        type: NumberConstructor;
+        required: false;
+        default: number;
+    };
+    extrudable: {
+        type: BooleanConstructor;
+        required: false;
+        default: boolean;
+    };
+    colorList: {
+        type: PropType<string[]>;
+        required: false;
+        default: () => string[];
+    };
+    heightRange: {
+        type: PropType<number[]>;
+        required: false;
+        default: () => number[];
+    };
+    showRange: {
+        type: PropType<number[]>;
+        required: false;
+        default: () => never[];
+    };
+    options: {
+        type: PropType<TMap.visualization.GridOptions>;
+        required: false;
+        default: () => {};
+    };
+    selectOptions: {
+        type: PropType<TMap.visualization.VisualSelectOptions>;
+        required: false;
+        default: null;
+    };
+}>, {
+    grid: any;
+} | undefined, {}, {}, {}, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, {}, string, import('../node_modules/vue-demi/lib/v3/index.mjs').PublicProps, Readonly<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    data: {
+        type: PropType<TMap.visualization.HeatPoint[]>;
+        required: true;
+    };
+    sideLength: {
+        type: NumberConstructor;
+        required: false;
+        default: number;
+    };
+    extrudable: {
+        type: BooleanConstructor;
+        required: false;
+        default: boolean;
+    };
+    colorList: {
+        type: PropType<string[]>;
+        required: false;
+        default: () => string[];
+    };
+    heightRange: {
+        type: PropType<number[]>;
+        required: false;
+        default: () => number[];
+    };
+    showRange: {
+        type: PropType<number[]>;
+        required: false;
+        default: () => never[];
+    };
+    options: {
+        type: PropType<TMap.visualization.GridOptions>;
+        required: false;
+        default: () => {};
+    };
+    selectOptions: {
+        type: PropType<TMap.visualization.VisualSelectOptions>;
+        required: false;
+        default: null;
+    };
+}>> & Readonly<{}>, {
+    options: TMap.visualization.GridOptions;
+    selectOptions: TMap.visualization.VisualSelectOptions;
+    sideLength: number;
+    extrudable: boolean;
+    colorList: string[];
+    heightRange: number[];
+    showRange: number[];
+}, {}, {}, {}, string, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentProvideOptions, true, {}, any>;
+export default _default;

@@ -1,0 +1,46 @@
+import { PropType } from '../node_modules/vue-demi/lib/v3/index.mjs';
+declare const _default: import('../node_modules/vue-demi/lib/v3/index.mjs').DefineComponent<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    id: {
+        type: StringConstructor;
+        default: string;
+    };
+    styles: {
+        type: PropType<{
+            [key: string]: TMap.PolylineStyleOptions;
+        }>;
+        required: true;
+    };
+    geometries: {
+        type: PropType<TMap.PolylineGeometry[]>;
+        required: true;
+    };
+    options: {
+        type: PropType<TMap.MultiPolylineOptions>;
+        default: () => {};
+    };
+}>, {
+    polyline: any;
+} | undefined, {}, {}, {}, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, {}, string, import('../node_modules/vue-demi/lib/v3/index.mjs').PublicProps, Readonly<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    id: {
+        type: StringConstructor;
+        default: string;
+    };
+    styles: {
+        type: PropType<{
+            [key: string]: TMap.PolylineStyleOptions;
+        }>;
+        required: true;
+    };
+    geometries: {
+        type: PropType<TMap.PolylineGeometry[]>;
+        required: true;
+    };
+    options: {
+        type: PropType<TMap.MultiPolylineOptions>;
+        default: () => {};
+    };
+}>> & Readonly<{}>, {
+    options: TMap.MultiPolylineOptions;
+    id: string;
+}, {}, {}, {}, string, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentProvideOptions, true, {}, any>;
+export default _default;

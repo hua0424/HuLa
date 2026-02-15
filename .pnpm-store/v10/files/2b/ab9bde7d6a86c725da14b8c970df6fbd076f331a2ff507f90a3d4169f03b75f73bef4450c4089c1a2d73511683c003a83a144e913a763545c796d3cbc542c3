@@ -1,0 +1,64 @@
+import { PropType } from '../node_modules/vue-demi/lib/v2.7/index.mjs';
+declare const _default: import('../node_modules/vue-demi/lib/v2.7/index.mjs').DefineComponent<{
+    data: {
+        type: PropType<TMap.visualization.DotPoint[]>;
+        required: true;
+    };
+    styles: {
+        type: PropType<{
+            [key: string]: any;
+        }>;
+        required: true;
+    };
+    faceTo: {
+        type: PropType<"map" | "screen">;
+        default: string;
+    };
+    selectOptions: {
+        type: PropType<TMap.visualization.VisualSelectOptions>;
+        default: () => {};
+    };
+    enableBloom: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    options: {
+        type: PropType<TMap.visualization.DotOptions>;
+        default: () => {};
+    };
+}, {
+    dot: any;
+} | undefined, {}, {}, {}, import("vue2.7/types/v3-component-options").ComponentOptionsMixin, import("vue2.7/types/v3-component-options").ComponentOptionsMixin, {}, string, Readonly<import('../node_modules/vue-demi/lib/v2.7/index.mjs').ExtractPropTypes<{
+    data: {
+        type: PropType<TMap.visualization.DotPoint[]>;
+        required: true;
+    };
+    styles: {
+        type: PropType<{
+            [key: string]: any;
+        }>;
+        required: true;
+    };
+    faceTo: {
+        type: PropType<"map" | "screen">;
+        default: string;
+    };
+    selectOptions: {
+        type: PropType<TMap.visualization.VisualSelectOptions>;
+        default: () => {};
+    };
+    enableBloom: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    options: {
+        type: PropType<TMap.visualization.DotOptions>;
+        default: () => {};
+    };
+}>>, {
+    options: TMap.visualization.DotOptions;
+    selectOptions: TMap.visualization.VisualSelectOptions;
+    faceTo: "map" | "screen";
+    enableBloom: boolean;
+}>;
+export default _default;

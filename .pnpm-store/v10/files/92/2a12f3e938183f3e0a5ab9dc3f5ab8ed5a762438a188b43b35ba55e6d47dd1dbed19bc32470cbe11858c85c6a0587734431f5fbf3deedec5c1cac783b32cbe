@@ -1,0 +1,68 @@
+{
+  "name": "pinia-shared-state",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "version": "1.0.1",
+  "author": {
+    "name": "Robert Soriano",
+    "email": "sorianorobertc@gmail.com"
+  },
+  "license": "MIT",
+  "funding": "https://github.com/sponsors/wobsoriano",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wobsoriano/pinia-shared-state.git"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": {
+        "import": "./dist/index.d.ts",
+        "require": "./dist/index.d.cts"
+      },
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "unpkg": "dist/index.global.js",
+  "jsdelivr": "dist/index.global.js",
+  "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "*": [
+        "./dist/*",
+        "./*"
+      ]
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "peerDependencies": {
+    "pinia": "^3.0.0"
+  },
+  "dependencies": {
+    "broadcast-channel": "^7.0.0"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^4.2.0",
+    "@changesets/cli": "^2.27.12",
+    "eslint": "^9.20.0",
+    "pinia": "^3.0.1",
+    "tsup": "^8.3.6",
+    "typescript": "^5.3.2",
+    "vue": "^3.5.11"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "pnpm build --watch --onSuccess=\"pnpm --filter vite dev\"",
+    "dev:nuxt": "pnpm build --watch --onSuccess=\"pnpm --filter nuxt3 dev\"",
+    "release": "pnpm build && changeset publish",
+    "lint": "eslint .",
+    "format": "eslint . --fix"
+  }
+}

@@ -1,0 +1,77 @@
+import { PropType } from '../node_modules/vue-demi/lib/v3/index.mjs';
+declare const _default: import('../node_modules/vue-demi/lib/v3/index.mjs').DefineComponent<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    data: {
+        type: PropType<TMap.visualization.HeatPoint[]>;
+        required: true;
+    };
+    radius: {
+        type: NumberConstructor;
+        default: number;
+    };
+    height: {
+        type: NumberConstructor;
+        default: number;
+    };
+    opacity: {
+        type: NumberConstructor;
+        default: number;
+    };
+    min: {
+        type: NumberConstructor;
+        default: number;
+    };
+    max: {
+        type: NumberConstructor;
+        required: false;
+    };
+    gradientColor: {
+        type: PropType<TMap.GradientColorOptions>;
+        required: false;
+    };
+    options: {
+        type: PropType<TMap.visualization.HeatOptions>;
+        default: () => {};
+    };
+}>, {
+    heat: any;
+} | undefined, {}, {}, {}, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, {}, string, import('../node_modules/vue-demi/lib/v3/index.mjs').PublicProps, Readonly<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    data: {
+        type: PropType<TMap.visualization.HeatPoint[]>;
+        required: true;
+    };
+    radius: {
+        type: NumberConstructor;
+        default: number;
+    };
+    height: {
+        type: NumberConstructor;
+        default: number;
+    };
+    opacity: {
+        type: NumberConstructor;
+        default: number;
+    };
+    min: {
+        type: NumberConstructor;
+        default: number;
+    };
+    max: {
+        type: NumberConstructor;
+        required: false;
+    };
+    gradientColor: {
+        type: PropType<TMap.GradientColorOptions>;
+        required: false;
+    };
+    options: {
+        type: PropType<TMap.visualization.HeatOptions>;
+        default: () => {};
+    };
+}>> & Readonly<{}>, {
+    options: TMap.visualization.HeatOptions;
+    height: number;
+    radius: number;
+    opacity: number;
+    min: number;
+}, {}, {}, {}, string, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentProvideOptions, true, {}, any>;
+export default _default;

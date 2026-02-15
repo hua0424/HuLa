@@ -1,0 +1,1093 @@
+import * as vue from 'vue';
+import { Plugin } from 'vue';
+import { BaseNode, ParseOptions, MarkdownIt } from 'stream-markdown-parser';
+export * from 'stream-markdown-parser';
+export { KATEX_COMMANDS, MathOptions, normalizeStandaloneBackslashT, setDefaultMathOptions } from 'stream-markdown-parser';
+
+interface CodeBlockNodeProps {
+    node: {
+        type: 'code_block';
+        language: string;
+        code: string;
+        raw: string;
+        diff?: boolean;
+        originalCode?: string;
+        updatedCode?: string;
+    };
+    isDark?: boolean;
+    loading?: boolean;
+    stream?: boolean;
+    darkTheme?: any;
+    lightTheme?: any;
+    isShowPreview?: boolean;
+    monacoOptions?: {
+        [k: string]: any;
+    };
+    enableFontSizeControl?: boolean;
+    minWidth?: string | number;
+    maxWidth?: string | number;
+    themes?: any[];
+    showHeader?: boolean;
+    showCopyButton?: boolean;
+    showExpandButton?: boolean;
+    showPreviewButton?: boolean;
+    showFontSizeButtons?: boolean;
+    customId?: string;
+}
+interface ImageNodeProps {
+    node: {
+        type: 'image';
+        src: string;
+        alt: string;
+        title: string | null;
+        raw: string;
+        loading?: boolean;
+    };
+    fallbackSrc?: string;
+    showCaption?: boolean;
+    lazy?: boolean;
+    svgMinHeight?: string;
+    usePlaceholder?: boolean;
+}
+interface LinkNodeProps {
+    node: {
+        type: 'link';
+        href: string;
+        title: string | null;
+        text: string;
+        children: {
+            type: string;
+            raw: string;
+        }[];
+        raw: string;
+        loading?: boolean;
+    };
+    indexKey: number | string;
+    customId?: string;
+    showTooltip?: boolean;
+    color?: string;
+    underlineHeight?: number;
+    underlineBottom?: number | string;
+    animationDuration?: number;
+    animationOpacity?: number;
+    animationTiming?: string;
+    animationIteration?: string | number;
+}
+interface PreCodeNodeProps {
+    node: any;
+}
+interface MermaidBlockNodeProps {
+    node: any;
+    maxHeight?: string | null;
+    loading?: boolean;
+    isDark?: boolean;
+    workerTimeoutMs?: number;
+    parseTimeoutMs?: number;
+    renderTimeoutMs?: number;
+    fullRenderTimeoutMs?: number;
+    showHeader?: boolean;
+    showModeToggle?: boolean;
+    showCopyButton?: boolean;
+    showExportButton?: boolean;
+    showFullscreenButton?: boolean;
+    showCollapseButton?: boolean;
+    showZoomControls?: boolean;
+    enableWheelZoom?: boolean;
+    isStrict?: boolean;
+}
+interface MathBlockNodeProps {
+    node: {
+        type: 'math_block';
+        content: string;
+        raw: string;
+        loading?: boolean;
+    };
+}
+interface MathInlineNodeProps {
+    node: {
+        type: 'math_inline';
+        content: string;
+        raw: string;
+        loading?: boolean;
+    };
+}
+
+type AdmonitionKind = 'note' | 'info' | 'tip' | 'warning' | 'danger' | 'caution' | 'error';
+interface AdmonitionNode {
+    type: 'admonition';
+    kind: AdmonitionKind;
+    title?: string;
+    children: {
+        type: string;
+        raw: string;
+    }[];
+    raw: string;
+    collapsible?: boolean;
+    open?: boolean;
+}
+type __VLS_Props$n = {
+    node: AdmonitionNode;
+    indexKey: number | string;
+    isDark?: boolean;
+    typewriter?: boolean;
+    customId?: string;
+};
+declare const _default$t: vue.DefineComponent<__VLS_Props$n, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    copy: (...args: any[]) => void;
+}, string, vue.PublicProps, Readonly<__VLS_Props$n> & Readonly<{
+    onCopy?: (...args: any[]) => any;
+}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLDivElement>;
+
+interface NodeChild$9 {
+    type: string;
+    raw: string;
+    [key: string]: unknown;
+}
+interface BlockquoteNode {
+    type: 'blockquote';
+    children: NodeChild$9[];
+    raw: string;
+    cite?: string;
+}
+type __VLS_Props$m = {
+    node: BlockquoteNode;
+    indexKey: string | number;
+    typewriter?: boolean;
+    customId?: string;
+};
+declare const _default$s: vue.DefineComponent<__VLS_Props$m, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    copy: (text: string) => any;
+}, string, vue.PublicProps, Readonly<__VLS_Props$m> & Readonly<{
+    onCopy?: (text: string) => any;
+}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLQuoteElement>;
+
+type __VLS_Props$l = {
+    node: {
+        type: 'checkbox';
+        checked: boolean;
+        raw: string;
+    };
+};
+declare const _default$r: vue.DefineComponent<__VLS_Props$l, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$l> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLSpanElement>;
+
+interface DefinitionItemNode {
+    type: 'definition_item';
+    term: {
+        type: string;
+        raw: string;
+    }[];
+    definition: {
+        type: string;
+        raw: string;
+    }[];
+    raw: string;
+}
+interface DefinitionListNode {
+    type: 'definition_list';
+    items: DefinitionItemNode[];
+    raw: string;
+}
+type __VLS_Props$k = {
+    node: DefinitionListNode;
+    indexKey: string | number;
+    typewriter?: boolean;
+    customId?: string;
+};
+declare const _default$q: vue.DefineComponent<__VLS_Props$k, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    copy: (...args: any[]) => void;
+}, string, vue.PublicProps, Readonly<__VLS_Props$k> & Readonly<{
+    onCopy?: (...args: any[]) => any;
+}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLDListElement>;
+
+type __VLS_Props$j = {
+    node: {
+        type: 'emoji';
+        name: string;
+        markup: string;
+        raw: string;
+    };
+};
+declare const _default$p: vue.DefineComponent<__VLS_Props$j, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$j> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLSpanElement>;
+
+type __VLS_Props$i = {
+    node: {
+        type: 'footnote_anchor';
+        id: string;
+        raw?: string;
+    };
+};
+declare const _default$o: vue.DefineComponent<__VLS_Props$i, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$i> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLAnchorElement>;
+
+interface FootnoteNode {
+    type: 'footnote';
+    id: string;
+    children: {
+        type: string;
+        raw: string;
+    }[];
+    raw: string;
+}
+type __VLS_Props$h = {
+    node: FootnoteNode;
+    indexKey: string | number;
+    typewriter?: boolean;
+    customId?: string;
+};
+declare const _default$n: vue.DefineComponent<__VLS_Props$h, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    copy: (...args: any[]) => void;
+}, string, vue.PublicProps, Readonly<__VLS_Props$h> & Readonly<{
+    onCopy?: (...args: any[]) => any;
+}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLDivElement>;
+
+interface FootnoteReferenceNode {
+    type: 'footnote_reference';
+    id: string;
+    raw: string;
+}
+type __VLS_Props$g = {
+    node: FootnoteReferenceNode;
+};
+declare const _default$m: vue.DefineComponent<__VLS_Props$g, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$g> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLElement>;
+
+interface HardBreakNode {
+    type: 'hardbreak';
+    raw: string;
+}
+type __VLS_Props$f = {
+    node: HardBreakNode;
+};
+declare const _default$l: vue.DefineComponent<__VLS_Props$f, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$f> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLBRElement>;
+
+declare const _HeadingNode: any;
+
+interface NodeChild$8 {
+    type: string;
+    raw: string;
+    [key: string]: unknown;
+}
+type __VLS_Props$e = {
+    node: {
+        type: 'highlight';
+        children: NodeChild$8[];
+        raw: string;
+    };
+    customId?: string;
+    indexKey?: number | string;
+};
+declare const _default$k: vue.DefineComponent<__VLS_Props$e, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$e> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLElement>;
+
+type __VLS_Props$d = {
+    node: {
+        type: 'html_inline';
+        tag?: string;
+        content: string;
+        loading?: boolean;
+        autoClosed?: boolean;
+    };
+};
+declare const _default$j: vue.DefineComponent<__VLS_Props$d, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$d> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {
+    containerRef: HTMLSpanElement;
+}, HTMLSpanElement>;
+
+declare function __VLS_template$3(): {
+    attrs: Partial<{}>;
+    slots: {
+        placeholder?(_: {
+            node: {
+                type: "image";
+                src: string;
+                alt: string;
+                title: string | null;
+                raw: string;
+                loading?: boolean;
+            };
+            displaySrc: string;
+            imageLoaded: boolean;
+            hasError: boolean;
+            fallbackSrc: string;
+            lazy: boolean;
+            isSvg: boolean;
+        }): any;
+        error?(_: {
+            node: {
+                type: "image";
+                src: string;
+                alt: string;
+                title: string | null;
+                raw: string;
+                loading?: boolean;
+            };
+            displaySrc: string;
+            imageLoaded: boolean;
+            hasError: true;
+            fallbackSrc: string;
+            lazy: boolean;
+            isSvg: boolean;
+        }): any;
+    };
+    refs: {
+        figureRef: HTMLElement;
+    };
+    rootEl: HTMLElement;
+};
+type __VLS_TemplateResult$3 = ReturnType<typeof __VLS_template$3>;
+declare const __VLS_component$3: vue.DefineComponent<ImageNodeProps, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {} & {
+    click: (payload: [Event, string]) => any;
+    error: (src: string) => any;
+    load: (src: string) => any;
+}, string, vue.PublicProps, Readonly<ImageNodeProps> & Readonly<{
+    onClick?: (payload: [Event, string]) => any;
+    onError?: (src: string) => any;
+    onLoad?: (src: string) => any;
+}>, {
+    fallbackSrc: string;
+    showCaption: boolean;
+    lazy: boolean;
+    svgMinHeight: string;
+    usePlaceholder: boolean;
+}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {
+    figureRef: HTMLElement;
+}, HTMLElement>;
+declare const _default$i: __VLS_WithTemplateSlots$3<typeof __VLS_component$3, __VLS_TemplateResult$3["slots"]>;
+
+type __VLS_WithTemplateSlots$3<T, S> = T & {
+    new (): {
+        $slots: S;
+    };
+};
+
+type __VLS_Props$c = {
+    node: {
+        type: 'inline_code';
+        code: string;
+        raw: string;
+    };
+};
+declare const _default$h: vue.DefineComponent<__VLS_Props$c, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$c> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLElement>;
+
+interface NodeChild$7 {
+    type: string;
+    raw: string;
+    [key: string]: unknown;
+}
+type __VLS_Props$b = {
+    node: {
+        type: 'insert';
+        children: NodeChild$7[];
+        raw: string;
+    };
+    customId?: string;
+    indexKey?: number | string;
+};
+declare const _default$g: vue.DefineComponent<__VLS_Props$b, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$b> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLModElement>;
+
+declare const _default$f: vue.DefineComponent<LinkNodeProps, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<LinkNodeProps> & Readonly<{}>, {
+    showTooltip: boolean;
+}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, any>;
+
+interface NodeChild$6 {
+    type: string;
+    raw: string;
+    [key: string]: unknown;
+}
+interface ListItem$1 {
+    type: 'list_item';
+    children: NodeChild$6[];
+    raw: string;
+}
+type __VLS_Props$a = {
+    item: ListItem$1;
+    indexKey?: number | string;
+    value?: number;
+    customId?: string;
+    /** Forwarded flag to enable/disable non-code node enter transition */
+    typewriter?: boolean;
+};
+declare const _default$e: vue.DefineComponent<__VLS_Props$a, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    copy: (text: string) => any;
+}, string, vue.PublicProps, Readonly<__VLS_Props$a> & Readonly<{
+    onCopy?: (text: string) => any;
+}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLLIElement>;
+
+interface NodeChild$5 {
+    type: string;
+    raw: string;
+    [key: string]: unknown;
+}
+interface ListItem {
+    type: 'list_item';
+    children: NodeChild$5[];
+    raw: string;
+}
+type __VLS_Props$9 = {
+    node: {
+        type: 'list';
+        ordered: boolean;
+        start?: number;
+        items: ListItem[];
+        raw: string;
+    };
+    customId?: string;
+    indexKey?: number | string;
+    typewriter?: boolean;
+};
+declare const _default$d: vue.DefineComponent<__VLS_Props$9, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    copy: (...args: any[]) => void;
+}, string, vue.PublicProps, Readonly<__VLS_Props$9> & Readonly<{
+    onCopy?: (...args: any[]) => any;
+}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, any>;
+
+type __VLS_Props$8 = {
+    node: {
+        type: 'code_block';
+        language: string;
+        code: string;
+        raw: string;
+        diff?: boolean;
+        originalCode?: string;
+        updatedCode?: string;
+    };
+    loading?: boolean;
+    /**
+     * If true, update and render code content as it streams in.
+     * If false, keep a lightweight loading state and create the editor only when loading becomes false.
+     */
+    stream?: boolean;
+    darkTheme?: string;
+    lightTheme?: string;
+    isDark?: boolean;
+    isShowPreview?: boolean;
+    enableFontSizeControl?: boolean;
+    /** Minimum width for the code block container (px or CSS unit string) */
+    minWidth?: string | number;
+    /** Maximum width for the code block container (px or CSS unit string) */
+    maxWidth?: string | number;
+    themes?: string[];
+    /** Header visibility and controls */
+    showHeader?: boolean;
+    showCopyButton?: boolean;
+    showExpandButton?: boolean;
+    showPreviewButton?: boolean;
+    showFontSizeButtons?: boolean;
+};
+declare function __VLS_template$2(): {
+    attrs: Partial<{}>;
+    slots: {
+        'header-left'?(_: {}): any;
+        'header-right'?(_: {}): any;
+        loading?(_: {
+            loading: boolean;
+            stream: boolean;
+        }): any;
+    };
+    refs: {
+        codeBlockContent: HTMLDivElement;
+        rendererTarget: HTMLDivElement;
+    };
+    rootEl: any;
+};
+type __VLS_TemplateResult$2 = ReturnType<typeof __VLS_template$2>;
+declare const __VLS_component$2: vue.DefineComponent<__VLS_Props$8, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    copy: (...args: any[]) => void;
+    previewCode: (...args: any[]) => void;
+}, string, vue.PublicProps, Readonly<__VLS_Props$8> & Readonly<{
+    onCopy?: (...args: any[]) => any;
+    onPreviewCode?: (...args: any[]) => any;
+}>, {
+    isDark: boolean;
+    loading: boolean;
+    showHeader: boolean;
+    showCopyButton: boolean;
+    stream: boolean;
+    darkTheme: string;
+    lightTheme: string;
+    isShowPreview: boolean;
+    enableFontSizeControl: boolean;
+    minWidth: string | number;
+    maxWidth: string | number;
+    showExpandButton: boolean;
+    showPreviewButton: boolean;
+    showFontSizeButtons: boolean;
+}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {
+    codeBlockContent: HTMLDivElement;
+    rendererTarget: HTMLDivElement;
+}, any>;
+declare const _default$c: __VLS_WithTemplateSlots$2<typeof __VLS_component$2, __VLS_TemplateResult$2["slots"]>;
+
+type __VLS_WithTemplateSlots$2<T, S> = T & {
+    new (): {
+        $slots: S;
+    };
+};
+
+type KatexLoader = () => Promise<any> | any;
+declare function setKatexLoader(loader: KatexLoader | null): void;
+declare function enableKatex(loader?: KatexLoader): void;
+declare function disableKatex(): void;
+declare function isKatexEnabled(): boolean;
+
+declare function __VLS_template$1(): {
+    attrs: Partial<{}>;
+    slots: {
+        'header-left'?(_: {}): any;
+        'header-center'?(_: {}): any;
+        'header-right'?(_: {}): any;
+    };
+    refs: {
+        modeContainerRef: HTMLDivElement;
+        mermaidContainer: HTMLDivElement;
+        mermaidContent: HTMLDivElement;
+        modalContent: HTMLDivElement;
+    };
+    rootEl: HTMLDivElement;
+};
+type __VLS_TemplateResult$1 = ReturnType<typeof __VLS_template$1>;
+declare const __VLS_component$1: vue.DefineComponent<MermaidBlockNodeProps, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    copy: (...args: any[]) => void;
+    export: (...args: any[]) => void;
+    openModal: (...args: any[]) => void;
+    toggleMode: (...args: any[]) => void;
+}, string, vue.PublicProps, Readonly<MermaidBlockNodeProps> & Readonly<{
+    onCopy?: (...args: any[]) => any;
+    onExport?: (...args: any[]) => any;
+    onOpenModal?: (...args: any[]) => any;
+    onToggleMode?: (...args: any[]) => any;
+}>, {
+    loading: boolean;
+    maxHeight: string | null;
+    workerTimeoutMs: number;
+    parseTimeoutMs: number;
+    renderTimeoutMs: number;
+    fullRenderTimeoutMs: number;
+    showHeader: boolean;
+    showModeToggle: boolean;
+    showCopyButton: boolean;
+    showExportButton: boolean;
+    showFullscreenButton: boolean;
+    showCollapseButton: boolean;
+    showZoomControls: boolean;
+    enableWheelZoom: boolean;
+    isStrict: boolean;
+}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {
+    modeContainerRef: HTMLDivElement;
+    mermaidContainer: HTMLDivElement;
+    mermaidContent: HTMLDivElement;
+    modalContent: HTMLDivElement;
+}, HTMLDivElement>;
+declare const _default$b: __VLS_WithTemplateSlots$1<typeof __VLS_component$1, __VLS_TemplateResult$1["slots"]>;
+
+type __VLS_WithTemplateSlots$1<T, S> = T & {
+    new (): {
+        $slots: S;
+    };
+};
+
+type MermaidLoader = () => Promise<any> | any;
+declare function setMermaidLoader(loader: MermaidLoader | null): void;
+declare function enableMermaid(loader?: MermaidLoader): void;
+declare function disableMermaid(): void;
+declare function isMermaidEnabled(): boolean;
+
+interface NodeRendererProps {
+    content?: string;
+    nodes?: BaseNode[];
+    /** Options forwarded to parseMarkdownToStructure when content is provided */
+    parseOptions?: ParseOptions;
+    customMarkdownIt?: (md: MarkdownIt) => MarkdownIt;
+    /**
+     * Custom HTML-like tags that participate in streaming mid‑state handling
+     * and are emitted as custom nodes (e.g. ['thinking']). Forwarded to `getMarkdown()`.
+     */
+    customHtmlTags?: readonly string[];
+    /** Enable priority rendering for visible viewport area */
+    viewportPriority?: boolean;
+    /**
+     * Whether code_block renders should stream updates.
+     * When false, code blocks stay in a loading state and render once when final content is ready.
+     * Default: true
+     */
+    codeBlockStream?: boolean;
+    codeBlockDarkTheme?: any;
+    codeBlockLightTheme?: any;
+    codeBlockMonacoOptions?: Record<string, any>;
+    /** If true, render all `code_block` nodes as plain <pre><code> blocks instead of the full CodeBlockNode */
+    renderCodeBlocksAsPre?: boolean;
+    /** Minimum width forwarded to CodeBlockNode (px or CSS unit) */
+    codeBlockMinWidth?: string | number;
+    /** Maximum width forwarded to CodeBlockNode (px or CSS unit) */
+    codeBlockMaxWidth?: string | number;
+    /** Arbitrary props to forward to every CodeBlockNode */
+    codeBlockProps?: Record<string, any>;
+    themes?: string[];
+    isDark?: boolean;
+    customId?: string;
+    indexKey?: number | string;
+    /** Enable/disable the non-code-node enter transition (typewriter). Default: true */
+    typewriter?: boolean;
+    /** Enable incremental/batched rendering of nodes to avoid large single flush costs. Default: true */
+    batchRendering?: boolean;
+    /** How many nodes to render immediately before batching kicks in. Default: 40 */
+    initialRenderBatchSize?: number;
+    /** How many additional nodes to render per batch tick. Default: 80 */
+    renderBatchSize?: number;
+    /** Extra delay (ms) before each batch after rAF; helps yield to input. Default: 16 */
+    renderBatchDelay?: number;
+    /** Target budget (ms) for each batch before we shrink subsequent batch sizes. Default: 6 */
+    renderBatchBudgetMs?: number;
+    /** Timeout (ms) for requestIdleCallback slices. Default: 120 */
+    renderBatchIdleTimeoutMs?: number;
+    /** Defer rendering nodes until they are near the viewport */
+    deferNodesUntilVisible?: boolean;
+    /** Maximum number of fully rendered nodes kept in DOM. Default: 320 */
+    maxLiveNodes?: number;
+    /** Number of nodes to keep before/after focus. Default: 60 */
+    liveNodeBuffer?: number;
+}
+declare const _default$a: vue.DefineComponent<NodeRendererProps, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    copy: (...args: any[]) => void;
+    handleArtifactClick: (...args: any[]) => void;
+    click: (...args: any[]) => void;
+    mouseover: (...args: any[]) => void;
+    mouseout: (...args: any[]) => void;
+}, string, vue.PublicProps, Readonly<NodeRendererProps> & Readonly<{
+    onCopy?: (...args: any[]) => any;
+    onHandleArtifactClick?: (...args: any[]) => any;
+    onClick?: (...args: any[]) => any;
+    onMouseover?: (...args: any[]) => any;
+    onMouseout?: (...args: any[]) => any;
+}>, {
+    typewriter: boolean;
+    codeBlockStream: boolean;
+    batchRendering: boolean;
+    initialRenderBatchSize: number;
+    renderBatchSize: number;
+    renderBatchDelay: number;
+    renderBatchBudgetMs: number;
+    renderBatchIdleTimeoutMs: number;
+    deferNodesUntilVisible: boolean;
+    maxLiveNodes: number;
+    liveNodeBuffer: number;
+}, {}, {}, {}, string, vue.ComponentProvideOptions, true, {
+    containerRef: HTMLDivElement;
+}, HTMLDivElement>;
+
+interface NodeChild$4 {
+    type: string;
+    raw: string;
+    [key: string]: unknown;
+}
+type __VLS_Props$7 = {
+    node: {
+        type: 'paragraph';
+        children: NodeChild$4[];
+        raw: string;
+    };
+    customId?: string;
+    indexKey?: number | string;
+};
+declare const _default$9: vue.DefineComponent<__VLS_Props$7, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$7> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLParagraphElement>;
+
+declare const _default$8: vue.DefineComponent<PreCodeNodeProps, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<PreCodeNodeProps> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLPreElement>;
+
+type __VLS_Props$6 = {
+    node: {
+        type: 'reference';
+        id: string;
+        raw: string;
+    };
+    messageId?: string;
+    threadId?: string;
+};
+declare const _default$7: vue.DefineComponent<__VLS_Props$6, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    click: (...args: any[]) => void;
+    mouseEnter: (...args: any[]) => void;
+    mouseLeave: (...args: any[]) => void;
+}, string, vue.PublicProps, Readonly<__VLS_Props$6> & Readonly<{
+    onClick?: (...args: any[]) => any;
+    onMouseEnter?: (...args: any[]) => any;
+    onMouseLeave?: (...args: any[]) => any;
+}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLSpanElement>;
+
+interface NodeChild$3 {
+    type: string;
+    raw: string;
+    [key: string]: unknown;
+}
+type __VLS_Props$5 = {
+    node: {
+        type: 'strikethrough';
+        children: NodeChild$3[];
+        raw: string;
+    };
+    customId?: string;
+    indexKey?: string | number;
+};
+declare const _default$6: vue.DefineComponent<__VLS_Props$5, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$5> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLModElement>;
+
+interface NodeChild$2 {
+    type: string;
+    raw: string;
+    [key: string]: unknown;
+}
+type __VLS_Props$4 = {
+    node: {
+        type: 'strong';
+        children: NodeChild$2[];
+        raw: string;
+    };
+    customId?: string;
+    indexKey?: number | string;
+};
+declare const _default$5: vue.DefineComponent<__VLS_Props$4, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$4> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLElement>;
+
+interface NodeChild$1 {
+    type: string;
+    raw: string;
+    [key: string]: unknown;
+}
+type __VLS_Props$3 = {
+    node: {
+        type: 'subscript';
+        children: NodeChild$1[];
+        raw: string;
+    };
+    customId?: string;
+    indexKey?: number | string;
+};
+declare const _default$4: vue.DefineComponent<__VLS_Props$3, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$3> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLElement>;
+
+interface NodeChild {
+    type: string;
+    raw: string;
+    [key: string]: unknown;
+}
+type __VLS_Props$2 = {
+    node: {
+        type: 'superscript';
+        children: NodeChild[];
+        raw: string;
+    };
+    customId?: string;
+    indexKey?: number | string;
+};
+declare const _default$3: vue.DefineComponent<__VLS_Props$2, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<__VLS_Props$2> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLElement>;
+
+interface TableCellNode {
+    type: 'table_cell';
+    header: boolean;
+    children: {
+        type: string;
+        raw: string;
+    }[];
+    raw: string;
+    align?: 'left' | 'right' | 'center';
+}
+interface TableRowNode {
+    type: 'table_row';
+    cells: TableCellNode[];
+    raw: string;
+}
+interface TableNode {
+    type: 'table';
+    header: TableRowNode;
+    rows: TableRowNode[];
+    raw: string;
+    loading: boolean;
+}
+type __VLS_Props$1 = {
+    node: TableNode;
+    indexKey: string | number;
+    isDark?: boolean;
+    typewriter?: boolean;
+    customId?: string;
+};
+declare function __VLS_template(): {
+    attrs: Partial<{}>;
+    slots: {
+        loading?(_: {
+            isLoading: true;
+        }): any;
+    };
+    refs: {};
+    rootEl: HTMLDivElement;
+};
+type __VLS_TemplateResult = ReturnType<typeof __VLS_template>;
+declare const __VLS_component: vue.DefineComponent<__VLS_Props$1, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    copy: (...args: any[]) => void;
+}, string, vue.PublicProps, Readonly<__VLS_Props$1> & Readonly<{
+    onCopy?: (...args: any[]) => any;
+}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLDivElement>;
+declare const _default$2: __VLS_WithTemplateSlots<typeof __VLS_component, __VLS_TemplateResult["slots"]>;
+
+type __VLS_WithTemplateSlots<T, S> = T & {
+    new (): {
+        $slots: S;
+    };
+};
+
+type __VLS_Props = {
+    node: {
+        type: 'text';
+        content: string;
+        raw: string;
+        center?: boolean;
+    };
+};
+declare const _default$1: vue.DefineComponent<__VLS_Props, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    copy: (...args: any[]) => void;
+}, string, vue.PublicProps, Readonly<__VLS_Props> & Readonly<{
+    onCopy?: (...args: any[]) => any;
+}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {}, HTMLSpanElement>;
+
+declare const _default: vue.DefineComponent<{}, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<{}> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, true, {}, HTMLHRElement>;
+
+declare const defaultMap: Record<string, string>;
+/**
+ * Replace the entire default translation map.
+ * Consumers can call this to provide their own fallback translations (e.g. Chinese).
+ */
+declare function setDefaultI18nMap(map: Record<keyof typeof defaultMap, string>): void;
+
+interface CustomComponents {
+    text: any;
+    paragraph: any;
+    heading: any;
+    code_block: any;
+    list: any;
+    blockquote: any;
+    table: any;
+    definition_list: any;
+    footnote: any;
+    footnote_reference: any;
+    admonition: any;
+    hardbreak: any;
+    link: any;
+    image: any;
+    thematic_break: any;
+    math_inline: any;
+    math_block: any;
+    strong: any;
+    emphasis: any;
+    strikethrough: any;
+    highlight: any;
+    insert: any;
+    subscript: any;
+    superscript: any;
+    emoji: any;
+    checkbox: any;
+    inline_code: any;
+    html_inline: any;
+    reference: any;
+    mermaid: any;
+    [key: string]: any;
+}
+
+declare function setCustomComponents(id: string, mapping: Partial<CustomComponents>): void;
+declare function setCustomComponents(mapping: Partial<CustomComponents>): void;
+/**
+ * Retrieve custom components for a given scope id.
+ * If no id is provided, returns the legacy/global mapping (if any).
+ */
+declare function getCustomNodeComponents(customId?: string): Partial<CustomComponents>;
+/**
+ * Remove a scoped custom components mapping.
+ * Use this to clean up mappings for dynamic or temporary renderers.
+ */
+declare function removeCustomComponents(id: string): void;
+/**
+ * Clear the legacy/global custom components mapping.
+ * Use this when you want to remove the single-argument mapping set by
+ * `setCustomComponents(mapping)`.
+ */
+declare function clearGlobalCustomComponents(): void;
+
+declare function getUseMonaco(): Promise<any>;
+
+type LanguageIconResolver = (lang: string) => string | undefined | null;
+declare function setLanguageIconResolver(resolver?: LanguageIconResolver | null): void;
+declare function normalizeLanguageIdentifier(lang?: string | null): string;
+declare function resolveMonacoLanguageId(lang?: string | null): string;
+declare function getLanguageIcon(lang: string): string;
+declare const languageMap: Record<string, string>;
+
+/**
+ * Allow user to inject a Worker instance, e.g. from Vite ?worker import.
+ */
+declare function setKaTeXWorker(w: Worker): void;
+/**
+ * Remove the current worker instance (for cleanup or SSR).
+ */
+declare function clearKaTeXWorker(): void;
+declare function setKaTeXWorkerDebug(enabled: boolean): void;
+declare function renderKaTeXInWorker(content: string, displayMode?: boolean, timeout?: number, signal?: AbortSignal): Promise<string>;
+declare function setKaTeXCache(content: string, displayMode: boolean, html: string): void;
+/**
+ * Utilities for clients to inspect/adjust worker load behavior
+ */
+declare function getKaTeXWorkerLoad(): {
+    inFlight: number;
+    max: number;
+};
+declare function setKaTeXWorkerMaxConcurrency(n: number): void;
+declare const WORKER_BUSY_CODE = "WORKER_BUSY";
+declare function isKaTeXWorkerBusy(): boolean;
+declare function waitForKaTeXWorkerSlot(timeout?: number, signal?: AbortSignal): Promise<void>;
+interface BackpressureOptions {
+    timeout?: number;
+    waitTimeout?: number;
+    backoffMs?: number;
+    maxRetries?: number;
+    signal?: AbortSignal;
+}
+declare const defaultBackpressure: {
+    timeout: number;
+    waitTimeout: number;
+    backoffMs: number;
+    maxRetries: number;
+};
+declare function setKaTeXBackpressureDefaults(opts: Partial<typeof defaultBackpressure>): void;
+declare function getKaTeXBackpressureDefaults(): {
+    timeout: number;
+    waitTimeout: number;
+    backoffMs: number;
+    maxRetries: number;
+};
+/**
+ * Convenience wrapper: when worker reports busy, wait for a slot and retry.
+ * Does not implement fallback-to-main-thread; leave that to the caller.
+ */
+declare function renderKaTeXWithBackpressure(content: string, displayMode?: boolean, opts?: BackpressureOptions): Promise<string>;
+
+type Theme = 'light' | 'dark';
+declare function setMermaidWorkerClientDebug(enabled: boolean): void;
+declare function setMermaidWorkerMaxConcurrency(n: number): void;
+declare function getMermaidWorkerLoad(): {
+    inFlight: number;
+    max: number;
+};
+declare const MERMAID_WORKER_BUSY_CODE = "WORKER_BUSY";
+declare const MERMAID_DISABLED_CODE = "MERMAID_DISABLED";
+/**
+ * Allow user to inject a Worker instance, e.g. from Vite ?worker import.
+ */
+declare function setMermaidWorker(w: Worker): void;
+/**
+ * Remove the current worker instance (for cleanup or SSR).
+ */
+declare function clearMermaidWorker(): void;
+declare function canParseOffthread(code: string, theme: Theme, timeout?: number): Promise<boolean>;
+declare function findPrefixOffthread(code: string, theme: Theme, timeout?: number): Promise<string>;
+declare function terminateWorker(): void;
+
+declare const CodeBlockNode: {
+    new (...args: any[]): vue.CreateComponentPublicInstanceWithMixins<Readonly<CodeBlockNodeProps> & Readonly<{
+        onCopy?: (...args: any[]) => any;
+        onPreviewCode?: (...args: any[]) => any;
+    }>, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+        copy: (...args: any[]) => void;
+        previewCode: (...args: any[]) => void;
+    }, vue.PublicProps, {
+        loading: boolean;
+        showHeader: boolean;
+        showCopyButton: boolean;
+        stream: boolean;
+        darkTheme: any;
+        lightTheme: any;
+        isShowPreview: boolean;
+        enableFontSizeControl: boolean;
+        minWidth: string | number;
+        maxWidth: string | number;
+        showExpandButton: boolean;
+        showPreviewButton: boolean;
+        showFontSizeButtons: boolean;
+    }, false, {}, {}, vue.GlobalComponents, vue.GlobalDirectives, string, {
+        container: HTMLDivElement;
+        codeEditor: HTMLDivElement;
+    }, any, vue.ComponentProvideOptions, {
+        P: {};
+        B: {};
+        D: {};
+        C: {};
+        M: {};
+        Defaults: {};
+    }, Readonly<CodeBlockNodeProps> & Readonly<{
+        onCopy?: (...args: any[]) => any;
+        onPreviewCode?: (...args: any[]) => any;
+    }>, {}, {}, {}, {}, {
+        loading: boolean;
+        showHeader: boolean;
+        showCopyButton: boolean;
+        stream: boolean;
+        darkTheme: any;
+        lightTheme: any;
+        isShowPreview: boolean;
+        enableFontSizeControl: boolean;
+        minWidth: string | number;
+        maxWidth: string | number;
+        showExpandButton: boolean;
+        showPreviewButton: boolean;
+        showFontSizeButtons: boolean;
+    }>;
+    __isFragment?: never;
+    __isTeleport?: never;
+    __isSuspense?: never;
+} & vue.ComponentOptionsBase<Readonly<CodeBlockNodeProps> & Readonly<{
+    onCopy?: (...args: any[]) => any;
+    onPreviewCode?: (...args: any[]) => any;
+}>, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {
+    copy: (...args: any[]) => void;
+    previewCode: (...args: any[]) => void;
+}, string, {
+    loading: boolean;
+    showHeader: boolean;
+    showCopyButton: boolean;
+    stream: boolean;
+    darkTheme: any;
+    lightTheme: any;
+    isShowPreview: boolean;
+    enableFontSizeControl: boolean;
+    minWidth: string | number;
+    maxWidth: string | number;
+    showExpandButton: boolean;
+    showPreviewButton: boolean;
+    showFontSizeButtons: boolean;
+}, {}, string, {}, vue.GlobalComponents, vue.GlobalDirectives, string, vue.ComponentProvideOptions> & vue.VNodeProps & vue.AllowedComponentProps & vue.ComponentCustomProps & (new () => {
+    $slots: {
+        'header-left'?(_: {}): any;
+        'header-right'?(_: {}): any;
+        loading?(_: {
+            loading: boolean;
+            stream: boolean;
+        }): any;
+    };
+});
+declare const MathBlockNode: vue.DefineComponent<MathBlockNodeProps, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, vue.PublicProps, Readonly<MathBlockNodeProps> & Readonly<{}>, {}, {}, {}, {}, string, vue.ComponentProvideOptions, false, {
+    containerEl: HTMLDivElement;
+    mathBlockElement: HTMLDivElement;
+}, HTMLDivElement>;
+declare const MathInlineNode: {
+    new (...args: any[]): vue.CreateComponentPublicInstanceWithMixins<Readonly<MathInlineNodeProps> & Readonly<{}>, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, vue.PublicProps, {}, false, {}, {}, vue.GlobalComponents, vue.GlobalDirectives, string, {
+        containerEl: HTMLSpanElement;
+        mathElement: HTMLSpanElement;
+    }, HTMLSpanElement, vue.ComponentProvideOptions, {
+        P: {};
+        B: {};
+        D: {};
+        C: {};
+        M: {};
+        Defaults: {};
+    }, Readonly<MathInlineNodeProps> & Readonly<{}>, {}, {}, {}, {}, {}>;
+    __isFragment?: never;
+    __isTeleport?: never;
+    __isSuspense?: never;
+} & vue.ComponentOptionsBase<Readonly<MathInlineNodeProps> & Readonly<{}>, {}, {}, {}, {}, vue.ComponentOptionsMixin, vue.ComponentOptionsMixin, {}, string, {}, {}, string, {}, vue.GlobalComponents, vue.GlobalDirectives, string, vue.ComponentProvideOptions> & vue.VNodeProps & vue.AllowedComponentProps & vue.ComponentCustomProps & (new () => {
+    $slots: {
+        loading?(_: {
+            isLoading: true;
+        }): any;
+    };
+});
+
+declare const VueRendererMarkdown: Plugin;
+
+export { _default$t as AdmonitionNode, BackpressureOptions, _default$s as BlockquoteNode, _default$r as CheckboxNode, CodeBlockNode, _default$q as DefinitionListNode, _default$p as EmojiNode, _default$o as FootnoteAnchorNode, _default$n as FootnoteNode, _default$m as FootnoteReferenceNode, _default$l as HardBreakNode, _HeadingNode as HeadingNode, _default$k as HighlightNode, _default$j as HtmlInlineNode, _default$i as ImageNode, _default$h as InlineCodeNode, _default$g as InsertNode, KatexLoader, LanguageIconResolver, _default$f as LinkNode, _default$e as ListItemNode, _default$d as ListNode, MERMAID_DISABLED_CODE, MERMAID_WORKER_BUSY_CODE, _default$c as MarkdownCodeBlockNode, _default$a as MarkdownRender, MathBlockNode, MathInlineNode, _default$b as MermaidBlockNode, MermaidLoader, _default$9 as ParagraphNode, _default$8 as PreCodeNode, _default$7 as ReferenceNode, _default$6 as StrikethroughNode, _default$5 as StrongNode, _default$4 as SubscriptNode, _default$3 as SuperscriptNode, _default$2 as TableNode, _default$1 as TextNode, _default as ThematicBreakNode, VueRendererMarkdown, WORKER_BUSY_CODE, canParseOffthread, clearGlobalCustomComponents, clearKaTeXWorker, clearMermaidWorker, _default$a as default, disableKatex, disableMermaid, enableKatex, enableMermaid, findPrefixOffthread, getCustomNodeComponents, getKaTeXBackpressureDefaults, getKaTeXWorkerLoad, getLanguageIcon, getMermaidWorkerLoad, getUseMonaco, isKaTeXWorkerBusy, isKatexEnabled, isMermaidEnabled, languageMap, normalizeLanguageIdentifier, removeCustomComponents, renderKaTeXInWorker, renderKaTeXWithBackpressure, resolveMonacoLanguageId, setCustomComponents, setDefaultI18nMap, setKaTeXBackpressureDefaults, setKaTeXCache, setKaTeXWorker, setKaTeXWorkerDebug, setKaTeXWorkerMaxConcurrency, setKatexLoader, setLanguageIconResolver, setMermaidLoader, setMermaidWorker, setMermaidWorkerClientDebug, setMermaidWorkerMaxConcurrency, terminateWorker, waitForKaTeXWorkerSlot };

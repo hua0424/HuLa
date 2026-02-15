@@ -1,0 +1,117 @@
+import { Highlighter, SpecialTheme, ThemeInput } from "shiki";
+
+//#region src/utils/highlight.d.ts
+declare const defaultLanguages: string[];
+declare const defaultThemes: string[];
+declare function registerHighlight(options?: {
+  themes?: ThemeInput[] | SpecialTheme[];
+  langs?: string[];
+}): Promise<Highlighter>;
+declare function disposeHighlighter(): void;
+//#endregion
+//#region src/utils/shiki-render.d.ts
+interface RenderOptions {
+  lang: string;
+  theme: string;
+  preClass?: string;
+  codeClass?: string;
+  lineClass?: string;
+  showLineNumbers?: boolean;
+  startingLineNumber?: number;
+}
+interface ThemedToken {
+  content: string;
+  color?: string;
+  fontStyle?: number;
+}
+declare function renderCodeWithTokens(highlighter: Highlighter, code: string, opts: RenderOptions): string;
+//#endregion
+//#region src/utils/incremental-tokens.d.ts
+type UpdateResult = 'incremental' | 'full' | 'noop';
+interface TokenIncrementalOptions extends Omit<RenderOptions, 'preClass' | 'codeClass' | 'lineClass'> {
+  preClass?: string;
+  codeClass?: string;
+  lineClass?: string;
+  onResult?: (result: UpdateResult) => void;
+}
+declare function updateCodeTokensIncremental(container: HTMLElement | null | undefined, highlighter: Highlighter, code: string, opts: TokenIncrementalOptions): UpdateResult;
+interface TokenIncrementalUpdater {
+  update: (code: string) => UpdateResult;
+  reset: () => void;
+  dispose: () => void;
+}
+declare function createTokenIncrementalUpdater(container: HTMLElement | null | undefined, highlighter: Highlighter, opts: TokenIncrementalOptions): TokenIncrementalUpdater;
+declare function createScheduledTokenIncrementalUpdater(container: HTMLElement | null | undefined, highlighter: Highlighter, opts: TokenIncrementalOptions): TokenIncrementalUpdater;
+//#endregion
+//#region src/utils/render-scheduler.d.ts
+declare function setTimeBudget(ms: number): void;
+declare function getTimeBudget(): number;
+declare function isPaused(): boolean;
+declare function getQueueLength(): number;
+declare function pause(): void;
+declare function resume(): void;
+/**
+ * Schedule a render job to be executed within the time-budgeted rAF loop.
+ * Returns a function to cancel the scheduled job if it hasn't run yet.
+ */
+declare function scheduleRenderJob(job: () => void, options?: {
+  priority?: 'high' | 'normal';
+}): () => void;
+/**
+ * Run a job immediately, bypassing the scheduler. Use sparingly for very high
+ * priority operations.
+ */
+declare function runImmediate(job: () => void): void;
+/**
+ * Drain the queue by running all pending jobs immediately, bypassing the
+ * per-frame time budget. Use with caution — this can block the main thread.
+ */
+declare function drain(): void;
+/**
+ * Clear all pending jobs and cancel the next frame. Used for cleanup.
+ */
+declare function clearAll(): void;
+//#endregion
+//#region src/utils/restore-priority.d.ts
+interface RestoreItem {
+  el: Element;
+  render: () => void;
+}
+interface RestoreOptions {
+  batchSize?: number;
+  staggerMs?: number;
+  drainVisible?: boolean;
+}
+/**
+ * Restore a set of render items prioritizing visible elements.
+ *
+ * Behavior:
+ * - immediately schedules visible items with high priority
+ * - staggers non-visible items in batches to avoid flooding the scheduler
+ *
+ * Returns a cancel function to abort scheduling of remaining background jobs.
+ */
+declare function restoreWithVisibilityPriority(items: RestoreItem[], opts?: RestoreOptions): () => void;
+//#endregion
+//#region src/utils/shiki-stream-renderer.d.ts
+interface ShikiStreamRendererOptions {
+  lang?: string;
+  langs?: string[];
+  theme?: string;
+  themes?: any[];
+  scheduleInRaf?: boolean;
+  timeBudget?: number;
+}
+declare function createShikiStreamRenderer(container: HTMLElement, options: ShikiStreamRendererOptions): {
+  updateCode: (code: string, lang?: string) => Promise<void>;
+  setTheme: (theme: string) => Promise<void>;
+  dispose: () => void;
+  getState: () => {
+    code: string;
+    lang: string | undefined;
+    theme: string;
+  };
+};
+//#endregion
+export { RenderOptions, RestoreItem, RestoreOptions, ShikiStreamRendererOptions, ThemedToken, TokenIncrementalOptions, TokenIncrementalUpdater, UpdateResult, clearAll, createScheduledTokenIncrementalUpdater, createShikiStreamRenderer, createTokenIncrementalUpdater, defaultLanguages, defaultThemes, disposeHighlighter, drain, getQueueLength, getTimeBudget, isPaused, pause, registerHighlight, renderCodeWithTokens, restoreWithVisibilityPriority, resume, runImmediate, scheduleRenderJob, setTimeBudget, updateCodeTokensIncremental };
+//# sourceMappingURL=index.d.ts.map

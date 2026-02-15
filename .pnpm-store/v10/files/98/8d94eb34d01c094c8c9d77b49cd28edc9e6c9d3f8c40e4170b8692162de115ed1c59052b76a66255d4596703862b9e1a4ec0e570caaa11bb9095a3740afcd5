@@ -1,0 +1,77 @@
+import { PropType } from '../node_modules/vue-demi/lib/v2.7/index.mjs';
+declare const _default: import('../node_modules/vue-demi/lib/v2.7/index.mjs').DefineComponent<{
+    data: {
+        type: PropType<TMap.visualization.HeatPoint[]>;
+        required: true;
+    };
+    radius: {
+        type: NumberConstructor;
+        default: number;
+    };
+    height: {
+        type: NumberConstructor;
+        default: number;
+    };
+    opacity: {
+        type: NumberConstructor;
+        default: number;
+    };
+    min: {
+        type: NumberConstructor;
+        default: number;
+    };
+    max: {
+        type: NumberConstructor;
+        required: false;
+    };
+    gradientColor: {
+        type: PropType<TMap.GradientColorOptions>;
+        required: false;
+    };
+    options: {
+        type: PropType<TMap.visualization.HeatOptions>;
+        default: () => {};
+    };
+}, {
+    heat: any;
+} | undefined, {}, {}, {}, import("vue2.7/types/v3-component-options").ComponentOptionsMixin, import("vue2.7/types/v3-component-options").ComponentOptionsMixin, {}, string, Readonly<import('../node_modules/vue-demi/lib/v2.7/index.mjs').ExtractPropTypes<{
+    data: {
+        type: PropType<TMap.visualization.HeatPoint[]>;
+        required: true;
+    };
+    radius: {
+        type: NumberConstructor;
+        default: number;
+    };
+    height: {
+        type: NumberConstructor;
+        default: number;
+    };
+    opacity: {
+        type: NumberConstructor;
+        default: number;
+    };
+    min: {
+        type: NumberConstructor;
+        default: number;
+    };
+    max: {
+        type: NumberConstructor;
+        required: false;
+    };
+    gradientColor: {
+        type: PropType<TMap.GradientColorOptions>;
+        required: false;
+    };
+    options: {
+        type: PropType<TMap.visualization.HeatOptions>;
+        default: () => {};
+    };
+}>>, {
+    options: TMap.visualization.HeatOptions;
+    height: number;
+    radius: number;
+    opacity: number;
+    min: number;
+}>;
+export default _default;

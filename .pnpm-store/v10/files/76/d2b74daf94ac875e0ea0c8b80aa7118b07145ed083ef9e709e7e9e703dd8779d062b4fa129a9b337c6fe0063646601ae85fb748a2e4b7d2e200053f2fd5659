@@ -1,0 +1,46 @@
+import { PropType } from '../node_modules/vue-demi/lib/v2.7/index.mjs';
+declare const _default: import('../node_modules/vue-demi/lib/v2.7/index.mjs').DefineComponent<{
+    id: {
+        type: StringConstructor;
+        default: string;
+    };
+    styles: {
+        type: PropType<{
+            [key: string]: TMap.MarkerStyleOptions;
+        }>;
+        required: true;
+    };
+    geometries: {
+        type: PropType<TMap.PointGeometry[]>;
+        required: true;
+    };
+    options: {
+        type: PropType<TMap.MultiMarkerOptions>;
+        default: () => {};
+    };
+}, {
+    marker: any;
+} | undefined, {}, {}, {}, import("vue2.7/types/v3-component-options").ComponentOptionsMixin, import("vue2.7/types/v3-component-options").ComponentOptionsMixin, {}, string, Readonly<import('../node_modules/vue-demi/lib/v2.7/index.mjs').ExtractPropTypes<{
+    id: {
+        type: StringConstructor;
+        default: string;
+    };
+    styles: {
+        type: PropType<{
+            [key: string]: TMap.MarkerStyleOptions;
+        }>;
+        required: true;
+    };
+    geometries: {
+        type: PropType<TMap.PointGeometry[]>;
+        required: true;
+    };
+    options: {
+        type: PropType<TMap.MultiMarkerOptions>;
+        default: () => {};
+    };
+}>>, {
+    options: TMap.MultiMarkerOptions;
+    id: string;
+}>;
+export default _default;

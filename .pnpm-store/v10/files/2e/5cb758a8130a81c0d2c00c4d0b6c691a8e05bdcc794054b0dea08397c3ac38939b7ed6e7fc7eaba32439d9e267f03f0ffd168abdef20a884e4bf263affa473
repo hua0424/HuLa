@@ -1,0 +1,45 @@
+import h from "katex";
+import "katex/contrib/mhchem";
+let n = !1;
+globalThis.addEventListener("message", (t) => {
+  var i, l, g, u;
+  const e = t.data || {};
+  if (e.type === "init") {
+    n = !!e.debug;
+    try {
+      n && console.debug("[katexRenderer.worker] debug enabled");
+    } catch (r) {
+    }
+    return;
+  }
+  const o = (i = e.id) != null ? i : "", s = (l = e.content) != null ? l : "", a = (g = e.displayMode) != null ? g : !0;
+  try {
+    n && console.debug("[katexRenderer.worker] render start", { id: o, displayMode: a, content: s });
+    const r = h.renderToString(s, {
+      throwOnError: !0,
+      displayMode: a,
+      output: "html",
+      strict: "ignore"
+    }), d = { id: o, html: r, content: s, displayMode: a };
+    try {
+      globalThis.postMessage(d), n && console.debug("[katexRenderer.worker] render success", { id: o });
+    } catch (c) {
+      console.error("[katexRenderer.worker] failed to postMessage result", c);
+    }
+  } catch (r) {
+    const d = { id: o, error: String((u = r == null ? void 0 : r.message) != null ? u : r), content: s, displayMode: a };
+    try {
+      globalThis.postMessage(d);
+    } catch (c) {
+      console.error("[katexRenderer.worker] failed to postMessage error", c);
+    }
+  }
+});
+globalThis.addEventListener("error", (t) => {
+  var e;
+  console.error("[katexRenderer.worker] uncaught error", t.message, t.error);
+  try {
+    globalThis.postMessage({ id: "__worker_uncaught__", error: String((e = t.message) != null ? e : t.error), content: "", displayMode: !0 });
+  } catch (o) {
+  }
+});

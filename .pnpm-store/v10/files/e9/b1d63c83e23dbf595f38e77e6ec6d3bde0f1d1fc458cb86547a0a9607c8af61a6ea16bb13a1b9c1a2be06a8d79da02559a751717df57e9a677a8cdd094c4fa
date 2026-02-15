@@ -1,0 +1,115 @@
+import { PropType } from '../node_modules/vue-demi/lib/v3/index.mjs';
+type ControlConfig = {
+    position: string;
+    className: string;
+    numVisible?: boolean;
+};
+declare const _default: import('../node_modules/vue-demi/lib/v3/index.mjs').DefineComponent<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    apiKey: {
+        type: StringConstructor;
+        default: string;
+    };
+    libraries: {
+        type: StringConstructor;
+        default: string;
+    };
+    center: {
+        type: PropType<TMap.LatLng>;
+        default: () => {
+            lat: number;
+            lng: number;
+        };
+    };
+    zoom: {
+        type: NumberConstructor;
+        default: number;
+    };
+    minZoom: {
+        type: NumberConstructor;
+        default: number;
+    };
+    maxZoom: {
+        type: NumberConstructor;
+        default: number;
+    };
+    control: {
+        type: PropType<{
+            zoom: boolean | ControlConfig;
+            scale: boolean | ControlConfig;
+            rotation: boolean | ControlConfig;
+        }>;
+        default: () => {
+            zoom: boolean;
+            scale: boolean;
+            rotation: boolean;
+        };
+    };
+    options: {
+        type: PropType<TMap.MapOptions>;
+        default: () => {};
+    };
+}>, {
+    ele: import('../node_modules/vue-demi/lib/v3/index.mjs').Ref<HTMLDivElement | null, HTMLDivElement | null>;
+    readonly map: any;
+    mapRef: import('../node_modules/vue-demi/lib/v3/index.mjs').Ref<any, any>;
+}, {}, {}, {}, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, "map_inited"[], "map_inited", import('../node_modules/vue-demi/lib/v3/index.mjs').PublicProps, Readonly<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    apiKey: {
+        type: StringConstructor;
+        default: string;
+    };
+    libraries: {
+        type: StringConstructor;
+        default: string;
+    };
+    center: {
+        type: PropType<TMap.LatLng>;
+        default: () => {
+            lat: number;
+            lng: number;
+        };
+    };
+    zoom: {
+        type: NumberConstructor;
+        default: number;
+    };
+    minZoom: {
+        type: NumberConstructor;
+        default: number;
+    };
+    maxZoom: {
+        type: NumberConstructor;
+        default: number;
+    };
+    control: {
+        type: PropType<{
+            zoom: boolean | ControlConfig;
+            scale: boolean | ControlConfig;
+            rotation: boolean | ControlConfig;
+        }>;
+        default: () => {
+            zoom: boolean;
+            scale: boolean;
+            rotation: boolean;
+        };
+    };
+    options: {
+        type: PropType<TMap.MapOptions>;
+        default: () => {};
+    };
+}>> & Readonly<{
+    onMap_inited?: ((...args: any[]) => any) | undefined;
+}>, {
+    options: TMap.MapOptions;
+    apiKey: string;
+    libraries: string;
+    center: TMap.LatLng;
+    zoom: number;
+    minZoom: number;
+    maxZoom: number;
+    control: {
+        zoom: boolean | ControlConfig;
+        scale: boolean | ControlConfig;
+        rotation: boolean | ControlConfig;
+    };
+}, {}, {}, {}, string, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentProvideOptions, true, {}, any>;
+export default _default;

@@ -1,0 +1,42 @@
+import { PropType } from '../node_modules/vue-demi/lib/v3/index.mjs';
+declare const _default: import('../node_modules/vue-demi/lib/v3/index.mjs').DefineComponent<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    data: {
+        type: PropType<TMap.visualization.ArcLine[]>;
+        required: true;
+    };
+    pickStyle: {
+        type: FunctionConstructor;
+        require: boolean;
+    };
+    mode: {
+        type: PropType<"horizontal" | "vertical">;
+        default: string;
+    };
+    options: {
+        type: PropType<TMap.visualization.ArcOptions>;
+        default: () => {};
+    };
+}>, {
+    arc: any;
+} | undefined, {}, {}, {}, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, {}, string, import('../node_modules/vue-demi/lib/v3/index.mjs').PublicProps, Readonly<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    data: {
+        type: PropType<TMap.visualization.ArcLine[]>;
+        required: true;
+    };
+    pickStyle: {
+        type: FunctionConstructor;
+        require: boolean;
+    };
+    mode: {
+        type: PropType<"horizontal" | "vertical">;
+        default: string;
+    };
+    options: {
+        type: PropType<TMap.visualization.ArcOptions>;
+        default: () => {};
+    };
+}>> & Readonly<{}>, {
+    mode: "horizontal" | "vertical";
+    options: TMap.visualization.ArcOptions;
+}, {}, {}, {}, string, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentProvideOptions, true, {}, any>;
+export default _default;

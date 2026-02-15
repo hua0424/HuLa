@@ -1,0 +1,133 @@
+import { PropType } from '../node_modules/vue-demi/lib/v2.7/index.mjs';
+declare const _default: import('../node_modules/vue-demi/lib/v2.7/index.mjs').DefineComponent<{
+    circleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    defaultCircleGeometries: {
+        type: PropType<TMap.CircleGeometry[]>;
+    };
+    circleStyles: {
+        type: PropType<TMap.MultiCircleStyleHash>;
+    };
+    circleDrawingStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    circleSelectedStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    polygonId: {
+        type: StringConstructor;
+        default: string;
+    };
+    defaultPolygonGeometries: {
+        type: PropType<TMap.PolygonGeometry[]>;
+    };
+    polygonStyles: {
+        type: PropType<TMap.MultiPolygonStyleHash>;
+    };
+    polygonDrawingStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    polygonSelectedStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    activeOverlayId: {
+        type: StringConstructor;
+        default: string;
+    };
+    actionMode: {
+        type: StringConstructor;
+        default: string;
+    };
+    snappable: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    selectable: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    options: {
+        type: PropType<TMap.tools.GeometryEditorOptions>;
+        default: () => {};
+    };
+}, {
+    circle: any;
+    polygon: any;
+    editor: any;
+} | undefined, {}, {}, {}, import("vue2.7/types/v3-component-options").ComponentOptionsMixin, import("vue2.7/types/v3-component-options").ComponentOptionsMixin, ("select" | "update:activeOverlayId")[], string, Readonly<import('../node_modules/vue-demi/lib/v2.7/index.mjs').ExtractPropTypes<{
+    circleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    defaultCircleGeometries: {
+        type: PropType<TMap.CircleGeometry[]>;
+    };
+    circleStyles: {
+        type: PropType<TMap.MultiCircleStyleHash>;
+    };
+    circleDrawingStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    circleSelectedStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    polygonId: {
+        type: StringConstructor;
+        default: string;
+    };
+    defaultPolygonGeometries: {
+        type: PropType<TMap.PolygonGeometry[]>;
+    };
+    polygonStyles: {
+        type: PropType<TMap.MultiPolygonStyleHash>;
+    };
+    polygonDrawingStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    polygonSelectedStyleId: {
+        type: StringConstructor;
+        default: string;
+    };
+    activeOverlayId: {
+        type: StringConstructor;
+        default: string;
+    };
+    actionMode: {
+        type: StringConstructor;
+        default: string;
+    };
+    snappable: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    selectable: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    options: {
+        type: PropType<TMap.tools.GeometryEditorOptions>;
+        default: () => {};
+    };
+}>>, {
+    options: TMap.tools.GeometryEditorOptions;
+    circleId: string;
+    circleDrawingStyleId: string;
+    circleSelectedStyleId: string;
+    polygonId: string;
+    polygonDrawingStyleId: string;
+    polygonSelectedStyleId: string;
+    activeOverlayId: string;
+    actionMode: string;
+    snappable: boolean;
+    selectable: boolean;
+}>;
+export default _default;

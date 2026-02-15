@@ -1,0 +1,42 @@
+import { PropType } from '../node_modules/vue-demi/lib/v2.7/index.mjs';
+declare const _default: import('../node_modules/vue-demi/lib/v2.7/index.mjs').DefineComponent<{
+    visible: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    position: {
+        type: PropType<TMap.LatLngData>;
+        required: true;
+    };
+    content: {
+        type: StringConstructor;
+        required: true;
+    };
+    options: {
+        type: PropType<TMap.InfoWindowOptions>;
+        default: () => {};
+    };
+}, {
+    infoWindow: any;
+} | undefined, {}, {}, {}, import("vue2.7/types/v3-component-options").ComponentOptionsMixin, import("vue2.7/types/v3-component-options").ComponentOptionsMixin, {}, string, Readonly<import('../node_modules/vue-demi/lib/v2.7/index.mjs').ExtractPropTypes<{
+    visible: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    position: {
+        type: PropType<TMap.LatLngData>;
+        required: true;
+    };
+    content: {
+        type: StringConstructor;
+        required: true;
+    };
+    options: {
+        type: PropType<TMap.InfoWindowOptions>;
+        default: () => {};
+    };
+}>>, {
+    options: TMap.InfoWindowOptions;
+    visible: boolean;
+}>;
+export default _default;

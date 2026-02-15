@@ -1,0 +1,64 @@
+import { PropType } from '../node_modules/vue-demi/lib/v3/index.mjs';
+declare const _default: import('../node_modules/vue-demi/lib/v3/index.mjs').DefineComponent<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    data: {
+        type: PropType<TMap.visualization.DotPoint[]>;
+        required: true;
+    };
+    styles: {
+        type: PropType<{
+            [key: string]: any;
+        }>;
+        required: true;
+    };
+    faceTo: {
+        type: PropType<"map" | "screen">;
+        default: string;
+    };
+    selectOptions: {
+        type: PropType<TMap.visualization.VisualSelectOptions>;
+        default: () => {};
+    };
+    enableBloom: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    options: {
+        type: PropType<TMap.visualization.DotOptions>;
+        default: () => {};
+    };
+}>, {
+    dot: any;
+} | undefined, {}, {}, {}, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentOptionsMixin, {}, string, import('../node_modules/vue-demi/lib/v3/index.mjs').PublicProps, Readonly<import('../node_modules/vue-demi/lib/v3/index.mjs').ExtractPropTypes<{
+    data: {
+        type: PropType<TMap.visualization.DotPoint[]>;
+        required: true;
+    };
+    styles: {
+        type: PropType<{
+            [key: string]: any;
+        }>;
+        required: true;
+    };
+    faceTo: {
+        type: PropType<"map" | "screen">;
+        default: string;
+    };
+    selectOptions: {
+        type: PropType<TMap.visualization.VisualSelectOptions>;
+        default: () => {};
+    };
+    enableBloom: {
+        type: BooleanConstructor;
+        default: boolean;
+    };
+    options: {
+        type: PropType<TMap.visualization.DotOptions>;
+        default: () => {};
+    };
+}>> & Readonly<{}>, {
+    options: TMap.visualization.DotOptions;
+    selectOptions: TMap.visualization.VisualSelectOptions;
+    faceTo: "map" | "screen";
+    enableBloom: boolean;
+}, {}, {}, {}, string, import('../node_modules/vue-demi/lib/v3/index.mjs').ComponentProvideOptions, true, {}, any>;
+export default _default;
