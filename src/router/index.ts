@@ -1,27 +1,19 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router"
 
-// 极简路由配置
 const routes: Array<RouteRecordRaw> = [
   {
-    path: '/',
-    redirect: '/home'
+    path: "/",
+    redirect: "/chat"
   },
   {
-    path: '/home',
-    name: 'home',
-    component: () => import('@/layout/index.vue'),
-    children: [
-      {
-        path: '/message',
-        name: 'message',
-        component: () => import('@/components/rightBox/chatBox/index.vue') // 暂时用 chatBox index
-      }
-    ]
+    path: "/chat",
+    name: "chat",
+    component: () => import("@/views/chat/index.vue")
   },
   {
-    path: '/login',
-    name: 'login',
-    component: () => import('@/views/loginWindow/Login.vue')
+    path: "/login",
+    name: "login",
+    component: () => import("@/views/loginWindow/Login.vue")
   }
 ]
 

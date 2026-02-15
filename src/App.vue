@@ -1,16 +1,30 @@
 <template>
   <div class="h-100vh w-100vw">
-    <NaiveProvider :message-max="3" :notific-max="3" class="h-full">
-      <div class="h-full">
-        <router-view />
-      </div>
-    </NaiveProvider>
+    <div class="h-full">
+      <router-view />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { loadLanguage } from '@/services/i18n'
-import { isMobile } from '@/utils/PlatformConstants'
+import { onMounted } from "vue"
+import { useConnectionStore } from "@/stores/connection"
 
-const isMobileFlag = isMobile()
+const connectionStore = useConnectionStore()
+
+onMounted(async () => {
+  // 自动连接（本地开发用 localhost:18789）
+  // 生产环境可以改成实际的 Gateway 地址
+  const gatewayUrl = import.meta.env.VITE_GATEWAY_URL || "ws://localhost:18789"
+  
+  try {
+    await connectionStore.connect({
+      gatewayUrl,
+      gatewayToken: ""
+    })
+    console.log("[OpenClaw] Connected to Gateway")
+  } catch (e) {
+    console.error("[OpenClaw] Connection failed:", e)
+  }
+})
 </script>
