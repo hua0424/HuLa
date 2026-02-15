@@ -52,3 +52,6 @@ export const messageSendStream = async (): Promise<unknown> => undefined
 export const messageSaveGeneratedContent = async (): Promise<unknown> => undefined
 export const messageCancelStream = async (): Promise<unknown> => undefined
 export const conversationGetMy = async (): Promise<unknown> => undefined
+export const getEmoji = async (): Promise<unknown> => undefined
+export const addEmoji = async (): Promise<unknown> => undefined
+export const deleteEmoji = async (): Promise<unknown> => undefined
