@@ -1,13 +1,14 @@
-/**
- * HuLa WebSocket 类型定义
- * @deprecated 已被 OpenClaw 协议层替代
- */
-
 export enum WsResponseMessageType {
   LOGIN_SUCCESS = 'loginSuccess',
   RECEIVE_MESSAGE = 'receiveMessage',
   ONLINE = 'online',
-  TOKEN_EXPIRED = 'tokenExpired'
+  OFFLINE = 'offline',
+  TOKEN_EXPIRED = 'tokenExpired',
+  USER_STATE_CHANGE = 'userStateChange',
+  FEED_SEND_MSG = 'feedSendMsg',
+  FEED_NOTIFY = 'feedNotify',
+  MSG_RECALL = 'msgRecall',
+  REQUEST_NEW_FRIEND = 'requestNewFriend'
 }
 
 export type LoginSuccessResType = {
