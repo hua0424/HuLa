@@ -47,7 +47,7 @@
       </div>
       
       <div v-for="msg in messages" :key="msg.id" class="mb-4">
-        <div v-if="msg.role === "user"" class="flex justify-end">
+        <div v-if="msg.role === 'user'" class="flex justify-end">
           <div class="bg-blue-500 text-white rounded-lg px-4 py-2 max-w-md shadow">
             {{ msg.content }}
           </div>
@@ -193,7 +193,7 @@ async function reconnect() {
 function handleAgentEvent(event: any) {
   const runId = event.runId
   currentRunId.value = runId
-  let msg = messages.value.find(m => m.id === runId && m.role === "assistant")
+  let msg = messages.value.find(m => m.id === runId && m.role === 'assistant')
   
   if (event.stream === "text_delta") {
     if (!msg) {
