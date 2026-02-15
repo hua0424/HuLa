@@ -1,6 +1,9 @@
 name: Build Android APK
 
 on:
+  push:
+    branches:
+      - client_direct_release
   workflow_dispatch:
 
 jobs:
