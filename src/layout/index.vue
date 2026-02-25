@@ -52,6 +52,7 @@ import { UserAttentionType } from '@tauri-apps/api/window'
 import type { MessageType } from '@/services/types.ts'
 import { WsResponseMessageType } from '@/services/wsType.ts'
 import { useChatStore } from '@/stores/chat'
+import { useAiChatStore } from '@/stores/aiChat'
 import { useFileStore } from '@/stores/file'
 import { useUserStore } from '@/stores/user'
 import { useSettingStore } from '@/stores/setting.ts'
@@ -213,6 +214,7 @@ const AsyncRight = defineAsyncComponent({
   }
 })
 
+const aiChatStore = useAiChatStore()
 const globalStore = useGlobalStore()
 const contactStore = useContactStore()
 const { checkUpdate, CHECK_UPDATE_TIME } = useCheckUpdate()
@@ -413,6 +415,36 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
   }
 
   globalStore.updateGlobalUnreadCount()
+})
+
+// AI streaming reply chunks
+useMitt.on(WsResponseMessageType.AI_REPLY_CHUNK, (data: any) => {
+  aiChatStore.handleAiReplyChunk(data)
+})
+
+// AI approval requests (for the owner)
+useMitt.on(WsResponseMessageType.AI_APPROVAL_REQUEST, (data: any) => {
+  aiChatStore.addApprovalRequest(data)
+})
+
+// AI approval results (for the requester)
+useMitt.on(WsResponseMessageType.AI_APPROVAL_RESULT, (data: any) => {
+  if (data.decision === 'reject' || data.decision === 'timeout') {
+    window.$message?.warning?.(data.message || 'AI request was not approved')
+  }
+})
+
+// AI errors
+useMitt.on(WsResponseMessageType.AI_ERROR, (data: any) => {
+  aiChatStore.setError(data)
+  const msg = data.message || 'AI service error'
+  window.$message?.error?.(msg)
+  if (data.requestId) {
+    const roomId = globalStore.currentSessionRoomId
+    if (roomId) {
+      aiChatStore.setRoomLoading(roomId, false)
+    }
+  }
 })
 
 const cleanupNativeFileDropListeners = () => {

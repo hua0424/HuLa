@@ -321,6 +321,7 @@ import AudioCall from './AudioCall.vue'
 import Emoji from './Emoji.vue'
 import File from './File.vue'
 import Image from './Image.vue'
+import AiMessage from './AiMessage.vue'
 import Location from './Location.vue'
 import MergeMessage from './MergeMessage.vue'
 import BotMessage from './special/BotMessage.vue'
@@ -472,7 +473,8 @@ const componentMap: Partial<Record<MsgEnum, Component>> = {
   [MsgEnum.RECALL]: RecallMessage,
   [MsgEnum.BOT]: BotMessage,
   [MsgEnum.MERGE]: MergeMessage,
-  [MsgEnum.LOCATION]: Location
+  [MsgEnum.LOCATION]: Location,
+  [MsgEnum.AI]: AiMessage
 }
 
 const isSpecialMsgType = (type: number): boolean => {

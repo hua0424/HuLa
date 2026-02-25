@@ -26,6 +26,7 @@ import { useMitt } from '@/hooks/useMitt'
 import type { MessageType } from '@/services/types'
 import { WsResponseMessageType } from '@/services/wsType'
 import { useChatStore } from '@/stores/chat'
+import { useAiChatStore } from '@/stores/aiChat'
 import { useFileStore } from '@/stores/file'
 import { useGlobalStore } from '@/stores/global'
 import { useSettingStore } from '@/stores/setting'
@@ -49,6 +50,7 @@ interface MobileLayoutProps {
 
 const route = useRoute()
 const chatStore = useChatStore()
+const aiChatStore = useAiChatStore()
 const fileStore = useFileStore()
 const userStore = useUserStore()
 const globalStore = useGlobalStore()
@@ -228,6 +230,21 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
   }
 
   await globalStore.updateGlobalUnreadCount()
+})
+
+// AI streaming reply chunks
+useMitt.on(WsResponseMessageType.AI_REPLY_CHUNK, (data: any) => {
+  aiChatStore.handleAiReplyChunk(data)
+})
+
+// AI approval requests (for the owner)
+useMitt.on(WsResponseMessageType.AI_APPROVAL_REQUEST, (data: any) => {
+  aiChatStore.addApprovalRequest(data)
+})
+
+// AI errors
+useMitt.on(WsResponseMessageType.AI_ERROR, (data: any) => {
+  aiChatStore.setError(data)
 })
 </script>
 

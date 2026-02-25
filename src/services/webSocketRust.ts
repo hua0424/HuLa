@@ -475,6 +475,34 @@ class RustWebSocketClient {
         useMitt.emit(WsResponseMessageType.FEED_NOTIFY, event.payload)
       })
     )
+
+    // AI 相关事件
+    this.listenerController.add(
+      await listen('ws-ai-reply-chunk', (event: any) => {
+        useMitt.emit(WsResponseMessageType.AI_REPLY_CHUNK, event.payload)
+      })
+    )
+
+    this.listenerController.add(
+      await listen('ws-ai-approval-request', (event: any) => {
+        info(`收到 AI 审批请求: ${JSON.stringify(event.payload)}`)
+        useMitt.emit(WsResponseMessageType.AI_APPROVAL_REQUEST, event.payload)
+      })
+    )
+
+    this.listenerController.add(
+      await listen('ws-ai-approval-result', (event: any) => {
+        info(`收到 AI 审批结果: ${JSON.stringify(event.payload)}`)
+        useMitt.emit(WsResponseMessageType.AI_APPROVAL_RESULT, event.payload)
+      })
+    )
+
+    this.listenerController.add(
+      await listen('ws-ai-error', (event: any) => {
+        info(`收到 AI 错误: ${JSON.stringify(event.payload)}`)
+        useMitt.emit(WsResponseMessageType.AI_ERROR, event.payload)
+      })
+    )
   }
 }
 info('创建RustWebSocketClient')

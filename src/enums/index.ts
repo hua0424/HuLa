@@ -199,7 +199,9 @@ export enum StoresEnum {
   /** 缩略图缓存 */
   THUMBNAIL_CACHE = 'thumbnailCache',
   /** 初始化同步状态 */
-  INITIAL_SYNC = 'initialSync'
+  INITIAL_SYNC = 'initialSync',
+  /** AI 聊天 */
+  AI_CHAT = 'aiChat'
 }
 
 /**

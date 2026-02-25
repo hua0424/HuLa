@@ -78,7 +78,15 @@ export enum WsResponseMessageType {
   /** 朋友圈消息推送 */
   FEED_SEND_MSG = 'feedSendMsg',
   /** 朋友圈通知（点赞/评论，通过 comment 字段判断） */
-  FEED_NOTIFY = 'feedNotify'
+  FEED_NOTIFY = 'feedNotify',
+  /** AI 流式回复 chunk */
+  AI_REPLY_CHUNK = 'aiReplyChunk',
+  /** AI 审批请求（Owner 收到） */
+  AI_APPROVAL_REQUEST = 'aiApprovalRequest',
+  /** AI 审批结果（Requester 收到） */
+  AI_APPROVAL_RESULT = 'aiApprovalResult',
+  /** AI 错误 */
+  AI_ERROR = 'aiError'
 }
 
 export enum NoticeTypeEnum {
