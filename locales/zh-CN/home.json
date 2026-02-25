@@ -481,5 +481,11 @@
   "file_drop": {
     "title": "松开鼠标即可发送文件",
     "desc": "支持拖拽多张图片或文件，当前会话将收到这些文件"
+  },
+  "ai_approval": {
+    "title": "审批请求",
+    "approve": "同意",
+    "reject": "拒绝",
+    "modify": "修改后同意"
   }
 }

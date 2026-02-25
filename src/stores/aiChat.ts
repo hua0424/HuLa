@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { info } from '@tauri-apps/plugin-log'
-import { StoresEnum, MsgEnum, MessageStatusEnum } from '@/enums'
+import { MsgEnum, MessageStatusEnum } from '@/enums'
 import type { AiReplyChunk, AiStreamingMessage, AiApprovalRequest, AiErrorResponse } from '@/services/aiTypes'
 import type { MessageType } from '@/services/types'
 import { useChatStore } from '@/stores/chat'
@@ -142,7 +142,7 @@ export const useAiChatStore = defineStore('aiChat', () => {
    * Initiate a request context before receiving stream chunks.
    * This pre-registers the stream so we can route chunks to the correct room.
    */
-  const registerPendingRequest = (requestId: string, roomId: string, targetUserId: string) => {
+  const registerPendingRequest = (requestId: string, roomId: string) => {
     setRoomLoading(roomId, true)
     info(`[AI] Registered pending request ${requestId} for room ${roomId}`)
   }

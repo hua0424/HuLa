@@ -3,10 +3,13 @@
     <!-- 头部 -->
     <ChatHeader />
 
+    <!-- AI 审批面板 (仅 owner 可见) -->
+    <AiApprovalPanel />
+
     <div class="flex-1 flex min-h-0">
       <div class="flex-1 min-h-0">
-        <!-- bot用户时显示Bot组件 -->
-        <template v-if="isBotUser">
+        <!-- bot用户时显示Bot组件（非AI助手的bot） -->
+        <template v-if="isBotUser && !isAiAssistant">
           <Bot />
         </template>
         <n-split
@@ -35,12 +38,21 @@
 import { useGlobalStore } from '@/stores/global'
 import { storeToRefs } from 'pinia'
 import { UserType } from '@/enums'
+import AiApprovalPanel from '@/components/rightBox/AiApprovalPanel.vue'
 
 const globalStore = useGlobalStore()
 const { currentSession } = storeToRefs(globalStore)
 
 // 是否为bot用户
 const isBotUser = computed(() => currentSession.value?.account === UserType.BOT)
+
+// AI 助手类型的 BOT 用户 - 使用常规聊天界面而非 Bot 组件
+// 当会话的 detailId 对应的用户是 AI 节点时为 true
+// TODO: 后续可通过服务端返回的 userType 或 AI 节点注册表精确判断
+const isAiAssistant = computed(() => {
+  if (!currentSession.value) return false
+  return isBotUser.value
+})
 </script>
 <style scoped lang="scss">
 :deep(.n-split .n-split__resize-trigger) {
