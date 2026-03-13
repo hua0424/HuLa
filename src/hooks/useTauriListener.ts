@@ -1,7 +1,11 @@
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
-import { error, info } from '@tauri-apps/plugin-log'
+import { error as tauriError, info as tauriInfo } from '@tauri-apps/plugin-log'
 import { getCurrentInstance, onUnmounted } from 'vue'
+
+const isInTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+const info = isInTauri ? tauriInfo : (..._args: any[]) => Promise.resolve()
+const error = isInTauri ? tauriError : (..._args: any[]) => Promise.resolve()
 
 // 全局监听器管理
 const globalListeners = new Map<string, Promise<UnlistenFn>[]>()
@@ -25,7 +29,14 @@ export const useTauriListener = () => {
   const listeners: Promise<UnlistenFn>[] = []
   const listenerIds: string[] = []
   const instance = getCurrentInstance()
-  const windowLabel = WebviewWindow.getCurrent().label
+  let windowLabel = 'web'
+  if (isInTauri) {
+    try {
+      windowLabel = WebviewWindow.getCurrent().label
+    } catch {
+      windowLabel = 'unknown'
+    }
+  }
   let isComponentMounted = true
 
   /**
@@ -167,8 +178,10 @@ export const useTauriListener = () => {
     }
   }
 
-  // 设置窗口关闭监听器
-  setupWindowCloseListener()
+  // 仅在 Tauri 环境中设置窗口关闭监听器
+  if (isInTauri) {
+    setupWindowCloseListener()
+  }
 
   // 只在组件实例存在时才注册 onUnmounted 钩子
   if (instance) {

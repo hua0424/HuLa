@@ -7,7 +7,7 @@ import vResize from '@/directives/v-resize'
 import vSlide from '@/directives/v-slide.ts'
 import router from '@/router'
 import { pinia } from '@/stores'
-import { initializePlatform, isIOS, isMobile } from '@/utils/PlatformConstants'
+import { initializePlatform, isIOS, isMobile, isWeb } from '@/utils/PlatformConstants'
 import { startWebVitalObserver } from '@/utils/WebVitalsObserver'
 import { invoke } from '@tauri-apps/api/core'
 import App from '@/App.vue'
@@ -15,7 +15,7 @@ import App from '@/App.vue'
 initializePlatform()
 startWebVitalObserver()
 
-if (isIOS()) {
+if (isIOS() && !isWeb()) {
   invoke('request_ios_badge_authorization').catch((error) => {
     console.warn('[HuLaBadge] 请求 iOS 角标权限失败', error)
   })
@@ -47,7 +47,7 @@ export const forceUpdateMessageTop = (topValue: number) => {
   })
 }
 
-if (isMobile()) {
+if (isMobile() && !isWeb()) {
   if (document.readyState === 'loading') {
     window.addEventListener('DOMContentLoaded', setup)
   } else {
@@ -56,7 +56,9 @@ if (isMobile()) {
 }
 
 async function setup() {
-  await invoke('set_complete', { task: 'frontend' })
+  if (!isWeb()) {
+    await invoke('set_complete', { task: 'frontend' })
+  }
 }
 
 const app = createApp(App)

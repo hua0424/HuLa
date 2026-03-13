@@ -6,7 +6,7 @@ import { useWindow } from '@/hooks/useWindow.ts'
 import { useChatStore } from '@/stores/chat'
 import { useGlobalStore } from '@/stores/global.ts'
 import { LoginStatus, useWsLoginStore } from '@/stores/ws'
-import { isDesktop, isMac, isMobile } from '@/utils/PlatformConstants'
+import { isDesktop, isMac, isMobile, isWeb } from '@/utils/PlatformConstants'
 import { clearListener } from '@/utils/ReadCountQueue'
 import { ErrorType, invokeSilently, invokeWithErrorHandler } from '@/utils/TauriInvokeHandler.ts'
 import { useSettingStore } from '../stores/setting'
@@ -24,7 +24,14 @@ import { UserInfoType } from '../services/types'
 import { getEnhancedFingerprint } from '../services/fingerprint'
 import { invoke } from '@tauri-apps/api/core'
 import { useMitt } from './useMitt'
-import { info as logInfo } from '@tauri-apps/plugin-log'
+// 安全日志：Tauri 环境用 plugin-log，浏览器 Web 环境降级到 console.log
+const logInfo = (msg: string): void => {
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    import('@tauri-apps/plugin-log').then(({ info }) => void info(msg)).catch(() => {})
+  } else {
+    console.log('[useLogin]', msg)
+  }
+}
 import { ensureAppStateReady } from '@/utils/AppStateReady'
 import { useI18nGlobal } from '../services/i18n'
 import { useInitialSyncStore } from '@/stores/initialSync'
@@ -390,6 +397,42 @@ export const useLogin = () => {
     localStorage.setItem('clientId', clientId)
 
     await ensureAppStateReady()
+
+    // Web 模式：调用 webLoginCommand 替代 Tauri login_command
+    if (isWeb()) {
+      try {
+        const { webLoginCommand } = await import('@/services/webLoginCommand')
+        await webLoginCommand(
+          { account, password, uid: auto ? userStore.userInfo?.uid : undefined },
+          auto
+        )
+        loginDisabled.value = true
+        loading.value = false
+        loginText.value = t('login.status.success_redirect')
+        if (!auto && isMobile()) {
+          settingStore.setAutoLogin(true)
+        }
+        useMitt.emit(MittEnum.MSG_INIT)
+      } catch (e: any) {
+        window.$message.error(e?.message ?? String(e))
+        loading.value = false
+        loginDisabled.value = false
+        loginText.value = t('login.button.login.default')
+        if (auto) {
+          uiState.value = 'manual'
+          loginDisabled.value = false
+          loginText.value = t('login.button.login.default')
+          settingStore.setAutoLogin(false)
+          if (userStore.userInfo) {
+            info.value.account = userStore.userInfo.account || userStore.userInfo.email || ''
+            info.value.avatar = userStore.userInfo.avatar
+            info.value.name = userStore.userInfo.name
+            info.value.uid = userStore.userInfo.uid
+          }
+        }
+      }
+      return
+    }
 
     invoke('login_command', {
       data: {

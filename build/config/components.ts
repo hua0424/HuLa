@@ -1,4 +1,4 @@
-const MOBILE_PLATFORMS = new Set(['android', 'ios'])
+const MOBILE_PLATFORMS = new Set(['android', 'ios', 'web'])
 
 /** 标准化平台标识，确保比较逻辑一致 */
 const normalizePlatform = (platform?: string) => {

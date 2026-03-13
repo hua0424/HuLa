@@ -13,8 +13,7 @@
   <component :is="mobileRtcCallFloatCell" v-if="mobileRtcCallFloatCell" />
 </template>
 <script setup lang="ts">
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
-import { info } from '@tauri-apps/plugin-log'
+import { info as tauriInfo } from '@tauri-apps/plugin-log'
 import { exit } from '@tauri-apps/plugin-process'
 import { loadLanguage } from '@/services/i18n'
 import { CallTypeEnum, EventEnum, ThemeEnum, ChangeTypeEnum, MittEnum, OnlineEnum, RoomTypeEnum } from '@/enums'
@@ -24,7 +23,9 @@ import { useWindow } from '@/hooks/useWindow.ts'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { useGlobalStore } from '@/stores/global'
 import { useSettingStore } from '@/stores/setting.ts'
-import { isDesktop, isIOS, isMobile, isWindows10 } from '@/utils/PlatformConstants'
+import { isDesktop, isIOS, isMobile, isWeb, isWindows10 } from '@/utils/PlatformConstants'
+// Web 模式下 @tauri-apps/plugin-log 不可用，使用 console 替代
+const info = isWeb() ? (..._args: any[]) => Promise.resolve() : tauriInfo
 import LockScreen from '@/views/LockScreen.vue'
 import MemoryMonitor from '@/components/common/MemoryMonitor.vue'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
@@ -53,7 +54,17 @@ const mobileRtcCallFloatCell = isMobile()
 
 const isDev = import.meta.env.DEV
 const showMemoryMonitor = ref(true)
-const isHomeDesktopWindow = computed(() => isDesktop() && appWindow.label === 'home')
+
+// Web 模式不使用 WebviewWindow
+// 注意：不能使用顶层 await（会使组件变成 async component，无 Suspense 则渲染空白）
+const appWindow = ref<any>(null)
+if (!isWeb()) {
+  import('@tauri-apps/api/webviewWindow').then(({ WebviewWindow }) => {
+    appWindow.value = WebviewWindow.getCurrent()
+  })
+}
+
+const isHomeDesktopWindow = computed(() => isDesktop() && !isWeb() && appWindow.value?.label === 'home')
 
 const userStore = useUserStore()
 const contactStore = useContactStore()
@@ -63,19 +74,18 @@ const feedNotificationStore = useFeedNotificationStore()
 const userUid = computed(() => userStore.userInfo!.uid)
 const groupStore = useGroupStore()
 const chatStore = useChatStore()
-const appWindow = WebviewWindow.getCurrent()
 const { createRtcCallWindow, sendWindowPayload } = useWindow()
 const globalStore = useGlobalStore()
 const router = useRouter()
 const { addListener } = useTauriListener()
 // 只在桌面端初始化窗口管理功能
-const { createWebviewWindow } = isDesktop() ? useWindow() : { createWebviewWindow: () => {} }
+const { createWebviewWindow } = isDesktop() && !isWeb() ? useWindow() : { createWebviewWindow: () => {} }
 const settingStore = useSettingStore()
 const { themes, lockScreen, page, login } = storeToRefs(settingStore)
 // 全局快捷键管理
 const { initializeGlobalShortcut, cleanupGlobalShortcut } = useGlobalShortcut()
 // 提前初始化网络状态监听，确保不错过 WebSocket 状态变化事件
-if (isDesktop()) {
+if (isDesktop() && !isWeb()) {
   useNetworkStatus()
 }
 
@@ -280,7 +290,7 @@ useMitt.on(WsResponseMessageType.TOKEN_EXPIRED, async (wsTokenExpire: WsTokenExp
   if (Number(userUid.value) === Number(wsTokenExpire.uid) && userStore.userInfo!.client === wsTokenExpire.client) {
     const { useLogin } = await import('@/hooks/useLogin')
     const { resetLoginState, logout } = useLogin()
-    if (isMobile()) {
+    if (isMobile() || isWeb()) {
       try {
         // 1. 先重置登录状态（不请求接口，只清理本地）
         await resetLoginState()
@@ -288,30 +298,32 @@ useMitt.on(WsResponseMessageType.TOKEN_EXPIRED, async (wsTokenExpire: WsTokenExp
         await logout()
 
         settingStore.toggleLogin(false, false)
-        info('账号在其他设备登录')
 
         // 3. 立即跳转到登录页，使用 replace 替换当前路由
         const router = await import('@/router')
         await router.default.replace('/mobile/login')
 
-        // 4. 跳转后再显示弹窗提示
-        const { showDialog } = await import('vant')
-        await import('vant/es/dialog/style')
+        // 4. 跳转后再显示弹窗提示（仅在移动原生端，web 端跳转即可）
+        if (isMobile()) {
+          const { showDialog } = await import('vant')
+          await import('vant/es/dialog/style')
 
-        showDialog({
-          title: '登录失效',
-          message: '您的账号已在其他设备登录，请重新登录',
-          confirmButtonText: '我知道了',
-          showCancelButton: false,
-          closeOnClickOverlay: false,
-          closeOnPopstate: false,
-          allowHtml: false
-        })
+          showDialog({
+            title: '登录失效',
+            message: '您的账号已在其他设备登录，请重新登录',
+            confirmButtonText: '我知道了',
+            showCancelButton: false,
+            closeOnClickOverlay: false,
+            closeOnPopstate: false,
+            allowHtml: false
+          })
+        }
       } catch (error) {
         console.error('处理token过期失败：', error)
       }
-    } else {
+    } else if (!isWeb()) {
       // 桌面端处理：聚焦主窗口并显示远程登录弹窗
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
       const home = await WebviewWindow.getByLabel('home')
       await home?.setFocus()
       const remoteIp = wsTokenExpire.ip || '未知IP'
@@ -619,9 +631,9 @@ onMounted(() => {
     requestNetworkPermissionForIOS()
   }
 
-  if (isWindows10()) {
-    void appWindow.setShadow(false).catch((error) => {
-      console.warn('禁用窗口阴影失败:', error)
+  if (isWindows10() && appWindow.value) {
+    void appWindow.value.setShadow(false).catch((err: unknown) => {
+      console.warn('禁用窗口阴影失败:', err)
     })
   }
   // 判断是否是桌面端，桌面端需要调整样式
@@ -640,10 +652,12 @@ onMounted(() => {
   document.documentElement.dataset.theme = settingStore.themes.content
   window.addEventListener('dragstart', preventDrag)
 
-  addListener(listen('websocket-event', handleWebsocketEvent), 'websocket-event')
+  if (!isWeb()) {
+    addListener(listen('websocket-event', handleWebsocketEvent), 'websocket-event')
+  }
 
   // 只在桌面端的主窗口中初始化全局快捷键
-  if (isDesktop() && appWindow.label === 'home') {
+  if (isDesktop() && !isWeb() && appWindow.value?.label === 'home') {
     initializeGlobalShortcut()
   }
   /** 开发环境不禁止 */
@@ -658,18 +672,20 @@ onMounted(() => {
     window.addEventListener('contextmenu', preventGlobalContextMenu, false)
   }
   // 只在桌面端处理窗口相关事件
-  if (isDesktop()) {
+  if (isDesktop() && !isWeb()) {
     useMitt.on(MittEnum.CHECK_UPDATE, async () => {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
       const checkUpdateWindow = await WebviewWindow.getByLabel('checkupdate')
       await checkUpdateWindow?.show()
     })
     useMitt.on(MittEnum.DO_UPDATE, async (event) => {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
       await createWebviewWindow('更新', 'update', 490, 335, '', false, 490, 335, false, true)
       const closeWindow = await WebviewWindow.getByLabel(event.close)
       closeWindow?.close()
     })
     addListener(
-      appWindow.listen(EventEnum.EXIT, async () => {
+      appWindow.value.listen(EventEnum.EXIT, async () => {
         await exit(0)
       }),
       'app-exit'
@@ -683,7 +699,7 @@ onUnmounted(async () => {
   window.removeEventListener('dragstart', preventDrag)
 
   // 只在桌面端的主窗口中清理全局快捷键
-  if (isDesktop() && appWindow.label === 'home') {
+  if (isDesktop() && !isWeb() && appWindow.value?.label === 'home') {
     await cleanupGlobalShortcut()
   }
 })
@@ -788,8 +804,10 @@ const setConfigProxy = async () => {
     window.$message.error(t('login.network.messages.save_failed', { error: err }))
   })
 }
-// 在整个应用挂载前，运行一次这段代码
-onBeforeMount(setConfigProxy)
+// 在整个应用挂载前，运行一次这段代码（Web 模式跳过代理设置）
+if (!isWeb()) {
+  onBeforeMount(setConfigProxy)
+}
 </script>
 <style lang="scss">
 /* 修改naive-ui select 组件的样式 */

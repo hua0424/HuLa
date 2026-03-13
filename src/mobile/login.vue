@@ -290,7 +290,7 @@ import { useLoginHistoriesStore } from '@/stores/loginHistory.ts'
 import { useMobileStore } from '@/stores/mobile'
 import { AvatarUtils } from '@/utils/AvatarUtils'
 import { register, sendCaptcha } from '@/utils/ImRequestUtils'
-import { isAndroid, isIOS } from '@/utils/PlatformConstants'
+import { isAndroid, isIOS, isWeb } from '@/utils/PlatformConstants'
 import { validateAlphaNumeric, validateSpecialChar } from '@/utils/Validate'
 import { useMitt } from '../hooks/useMitt'
 import { WsResponseMessageType } from '../services/wsType'
@@ -712,7 +712,9 @@ onMounted(async () => {
   }
 
   // 进入登录页面时立即隐藏首屏，确保无论登录成功或失败都能看到登录界面
-  await invoke('hide_splash_screen')
+  if (!isWeb()) {
+    await invoke('hide_splash_screen')
+  }
 
   useMitt.on(WsResponseMessageType.NO_INTERNET, () => {
     loginDisabled.value = true

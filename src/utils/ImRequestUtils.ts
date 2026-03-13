@@ -1,8 +1,17 @@
 import { ImUrlEnum, TauriCommand, type NotificationTypeEnum } from '@/enums'
 import type { CacheBadgeReq, LoginUserReq, ModifyUserInfoType, RegisterUserReq, UserItem } from '@/services/types'
 import { ErrorType, invokeSilently, invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
+import { isWeb } from '@/utils/PlatformConstants'
 import { useChatStore } from '../stores/chat'
 import { useGroupStore } from '../stores/group'
+
+let _webImRequest: (<T = any>(url: ImUrlEnum, body?: any, params?: any) => Promise<T>) | null = null
+const getWebImRequest = async () => {
+  if (!_webImRequest) {
+    _webImRequest = (await import('@/utils/webImRequest')).webImRequest
+  }
+  return _webImRequest
+}
 
 /**
  * IM 请求参数接口
@@ -44,6 +53,11 @@ export async function imRequest<T = any>(
   requestParams: ImRequestParams,
   options?: Omit<ImRequestOptions, 'silent'>
 ): Promise<T> {
+  if (isWeb()) {
+    const webReq = await getWebImRequest()
+    return await webReq<T>(requestParams.url, requestParams.body, requestParams.params)
+  }
+
   const { retry, ...invokeOptions } = options || {}
 
   // 构建调用参数
@@ -81,6 +95,14 @@ export async function imRequest<T = any>(
  * ```
  */
 export async function imRequestSilent<T = any>(requestParams: ImRequestParams): Promise<T | null> {
+  if (isWeb()) {
+    try {
+      const webReq = await getWebImRequest()
+      return await webReq<T>(requestParams.url, requestParams.body, requestParams.params)
+    } catch {
+      return null
+    }
+  }
   const args = {
     url: requestParams.url,
     body: requestParams.body || null,

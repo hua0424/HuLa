@@ -31,7 +31,7 @@ import { useGlobalStore } from '@/stores/global'
 import { useSettingStore } from '@/stores/setting'
 import { useUserStore } from '@/stores/user'
 import { audioManager } from '@/utils/AudioManager'
-import { isMobile, isWindows } from '@/utils/PlatformConstants'
+import { isMobile, isWeb, isWindows } from '@/utils/PlatformConstants'
 import { invokeSilently } from '@/utils/TauriInvokeHandler'
 import { useRoute } from 'vue-router'
 interface MobileLayoutProps {
@@ -182,7 +182,7 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
     if (session && session.muteNotification !== NotificationTypeEnum.NOT_DISTURB) {
       let shouldPlaySound = isMobile()
 
-      if (!isMobile()) {
+      if (!isMobile() && !isWeb()) {
         try {
           const home = await WebviewWindow.getByLabel('mobile-home')
 
@@ -213,11 +213,11 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
       // useMitt.emit(MittEnum.MESSAGE_ANIMATION, data)
       // session.unreadCount++
       // 在windows系统下才发送通知
-      if (!isMobile() && isWindows()) {
+      if (!isMobile() && !isWeb() && isWindows()) {
         globalStore.setTipVisible(true)
       }
 
-      if (!isMobile()) {
+      if (!isMobile() && !isWeb()) {
         const currentWindow = WebviewWindow.getCurrent()
 
         if (currentWindow.label === 'mobile-home') {
