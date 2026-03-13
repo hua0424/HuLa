@@ -638,8 +638,8 @@ onMounted(() => {
   }
   // 判断是否是桌面端，桌面端需要调整样式
   isDesktop() && import('@/styles/scss/global/desktop.scss')
-  // 判断是否是移动端，移动端需要加载安全区域适配样式
-  isMobile() && import('@/styles/scss/global/mobile.scss')
+  // 判断是否是移动端或 Web 端，需要加载安全区域适配样式
+  ;(isMobile() || isWeb()) && import('@/styles/scss/global/mobile.scss')
 
   import(`@/styles/scss/theme/${themes.value.versatile}.scss`)
   if (!settingStore.themes.content) {

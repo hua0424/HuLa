@@ -110,13 +110,30 @@
           :disabled="loginDisabled"
           tertiary
           style="color: #fff"
-          class="w-full mt-8px mb-50px gradient-button"
-          @click="normalLogin('MOBILE', true, false)">
+          :class="['w-full mt-8px gradient-button', isWeb() ? '' : 'mb-50px']"
+          @click="handleLoginClick">
           <span>{{ loginText }}</span>
         </n-button>
 
-        <!-- 协议 -->
-        <n-flex align="center" justify="center" :style="agreementStyle" :size="6" class="absolute bottom-0 w-[80%]">
+        <!-- Web 端：记住密码 / 自动登录 -->
+        <n-flex v-if="isWeb()" justify="space-between" align="center" class="mt-16px w-full px-4px">
+          <n-flex align="center" :size="6">
+            <n-checkbox v-model:checked="webRememberPassword" @update:checked="onRememberChange" />
+            <span class="text-13px color-#606060 cursor-default">记住密码</span>
+          </n-flex>
+          <n-flex align="center" :size="6">
+            <n-checkbox v-model:checked="webAutoLogin" @update:checked="onAutoLoginChange" />
+            <span class="text-13px color-#606060 cursor-default">自动登录</span>
+          </n-flex>
+        </n-flex>
+
+        <!-- 协议：原生端绝对定位在底部，Web 端正常流布局 -->
+        <n-flex
+          align="center"
+          justify="center"
+          :style="isWeb() ? {} : agreementStyle"
+          :size="6"
+          :class="isWeb() ? 'mt-16px w-full' : 'absolute bottom-0 w-[80%]'">
           <n-checkbox v-model:checked="protocol" />
           <div class="text-12px color-#909090 cursor-default lh-14px">
             <span>{{ t('login.term.checkout.text1') }}</span>
@@ -336,6 +353,34 @@ const accountPH = ref(t('login.mobile.input.account_placeholder'))
 const passwordPH = ref(t('login.mobile.input.code_placeholder'))
 const protocol = ref(true)
 const arrowStatus = ref(false)
+
+// Web 端：记住密码 / 自动登录
+const WEB_CREDS_KEY = 'webSavedCredentials'
+const webRememberPassword = ref(false)
+const webAutoLogin = ref(false)
+
+const onRememberChange = (val: boolean) => {
+  if (!val) {
+    localStorage.removeItem(WEB_CREDS_KEY)
+    webAutoLogin.value = false
+    settingStore.setAutoLogin(false)
+  }
+}
+
+const onAutoLoginChange = (val: boolean) => {
+  if (val) webRememberPassword.value = true
+  settingStore.setAutoLogin(val)
+}
+
+const handleLoginClick = () => {
+  if (isWeb() && webRememberPassword.value) {
+    localStorage.setItem(
+      WEB_CREDS_KEY,
+      JSON.stringify({ account: userInfo.value.account, password: userInfo.value.password })
+    )
+  }
+  normalLogin('MOBILE', true, false)
+}
 
 // 注册相关的占位符和状态
 const registerNamePH = ref(t('login.mobile.register.input.nickname'))
@@ -720,6 +765,20 @@ onMounted(async () => {
     loginDisabled.value = true
     loginText.value = t('login.status.service_disconnected')
   })
+
+  // Web 端：加载保存的凭证，必须在 autoLogin 判断之前
+  if (isWeb()) {
+    const saved = localStorage.getItem(WEB_CREDS_KEY)
+    if (saved) {
+      try {
+        const { account, password } = JSON.parse(saved)
+        userInfo.value.account = account || ''
+        userInfo.value.password = password || ''
+        webRememberPassword.value = true
+      } catch {}
+    }
+    webAutoLogin.value = login.value.autoLogin
+  }
 
   if (login.value.autoLogin) {
     normalLogin('MOBILE', true, true)
