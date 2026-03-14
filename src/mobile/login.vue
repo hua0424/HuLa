@@ -315,6 +315,7 @@ import { useSettingStore } from '../stores/setting'
 import { clearListener } from '../utils/ReadCountQueue'
 import { useLogin } from '../hooks/useLogin'
 import { useI18n } from 'vue-i18n'
+import { useI18nGlobal } from '@/services/i18n'
 
 // 本地注册信息类型，扩展API类型以包含确认密码
 interface LocalRegisterInfo extends RegisterUserReq {}
@@ -354,6 +355,26 @@ const passwordPH = ref(t('login.mobile.input.code_placeholder'))
 const protocol = ref(true)
 const arrowStatus = ref(false)
 
+// 注册相关的占位符和状态（声明提前，供 locale watcher 引用）
+const registerNamePH = ref(t('login.mobile.register.input.nickname'))
+const registerEmailPH = ref(t('login.mobile.register.input.email'))
+const registerPasswordPH = ref(t('login.mobile.register.input.password'))
+const confirmPasswordPH = ref(t('login.mobile.register.input.confirm_password'))
+const registerCodePH = ref(t('login.mobile.register.input.email_verification_code'))
+
+// 当语言包异步加载完成后，同步更新所有用 ref(t(...)) 初始化的占位符
+// 必须监听 i18n.global.locale（实际写入源），而非 useI18n() 的组件 locale
+const { locale: globalLocale } = useI18nGlobal()
+watch(globalLocale, () => {
+  accountPH.value = t('login.mobile.input.account_placeholder')
+  passwordPH.value = t('login.mobile.input.code_placeholder')
+  registerNamePH.value = t('login.mobile.register.input.nickname')
+  registerEmailPH.value = t('login.mobile.register.input.email')
+  registerPasswordPH.value = t('login.mobile.register.input.password')
+  confirmPasswordPH.value = t('login.mobile.register.input.confirm_password')
+  registerCodePH.value = t('login.mobile.register.input.email_verification_code')
+})
+
 // Web 端：记住密码 / 自动登录
 const WEB_CREDS_KEY = 'webSavedCredentials'
 const webRememberPassword = ref(false)
@@ -382,12 +403,6 @@ const handleLoginClick = () => {
   normalLogin('MOBILE', true, false)
 }
 
-// 注册相关的占位符和状态
-const registerNamePH = ref(t('login.mobile.register.input.nickname'))
-const registerEmailPH = ref(t('login.mobile.register.input.email'))
-const registerPasswordPH = ref(t('login.mobile.register.input.password'))
-const confirmPasswordPH = ref(t('login.mobile.register.input.confirm_password'))
-const registerCodePH = ref(t('login.mobile.register.input.email_verification_code'))
 const registerProtocol = ref(true)
 const registerLoading = ref(false)
 const sendCodeLoading = ref(false)
