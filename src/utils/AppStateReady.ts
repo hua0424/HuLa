@@ -1,5 +1,6 @@
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import { isWeb } from '@/utils/PlatformConstants'
 
 /**
  * 统一管理 后端状态是否可用 的判定，避免在AppData尚未注入时调用 tauri command。
@@ -38,6 +39,9 @@ const waitForReadyEvent = () =>
  * 如果前端在等待期间被多次调用，会复用同一个 Promise，避免重复监听。
  */
 export const ensureAppStateReady = async () => {
+  // Web 模式下没有 Tauri 进程，直接跳过
+  if (isWeb()) return
+
   if (isReady) {
     return
   }

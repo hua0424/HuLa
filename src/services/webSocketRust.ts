@@ -477,9 +477,27 @@ class RustWebSocketClient {
     )
   }
 }
-info('创建RustWebSocketClient')
-// 创建全局实例
-const rustWebSocketClient = new RustWebSocketClient()
+const isInTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+
+let rustWebSocketClient: any
+
+if (!isInTauri) {
+  // Web 模式：返回代理，运行时委托给已注册的 webSocketWebClient
+  const getWebClient = () => (globalThis as any).__webSocketWebClient
+  rustWebSocketClient = {
+    initConnect: () => getWebClient()?.initConnect() ?? Promise.resolve(),
+    disconnect: () => getWebClient()?.disconnect(),
+    sendMessage: (data: any) => getWebClient()?.sendMessage(data) ?? Promise.resolve(),
+    getState: () => getWebClient()?.getState() ?? Promise.resolve('DISCONNECTED'),
+    isConnected: () => getWebClient()?.isConnected() ?? Promise.resolve(false),
+    forceReconnect: () => getWebClient()?.forceReconnect() ?? Promise.resolve(),
+    setupBusinessMessageListeners: () => getWebClient()?.setupBusinessMessageListeners() ?? Promise.resolve()
+  }
+} else {
+  info('创建RustWebSocketClient')
+  // 创建全局实例
+  rustWebSocketClient = new RustWebSocketClient()
+}
 
 // 使用 Tauri 原生事件监听窗口焦点变化（跨平台兼容）
 // 防止重复设置窗口焦点监听器

@@ -41,14 +41,15 @@ export default defineConfig(({ mode }: ConfigEnv) => {
   const config = loadEnv(mode, process.cwd(), '')
   const currentPlatform = config.TAURI_ENV_PLATFORM
   const isPC = currentPlatform === 'windows' || currentPlatform === 'darwin' || currentPlatform === 'linux'
+  const isWebPlatform = currentPlatform === 'web'
 
-  const serverPort = isPC ? 6130 : 5210
+  const serverPort = isPC ? 6130 : isWebPlatform ? 5310 : 5210
   const componentsDirs = getComponentsDirs(currentPlatform)
   const componentsDtsPath = getComponentsDtsPath(currentPlatform)
 
   // 根据平台决定host地址
   const host = (() => {
-    if (isPC) {
+    if (isPC || isWebPlatform) {
       return '127.0.0.1'
     }
 

@@ -109,8 +109,8 @@ const globalStore = useGlobalStore()
 
 /** 获取用户状态 */
 const getUserState = (uid: string) => {
-  const userInfo = groupStore.getUserInfo(uid)!
-  const userStateId = userInfo.userStateId
+  const userInfo = groupStore.getUserInfo(uid)
+  const userStateId = userInfo?.userStateId
 
   if (userStateId && userStateId !== '1') {
     return stateList.value.find((state: { id: string }) => state.id === userStateId)

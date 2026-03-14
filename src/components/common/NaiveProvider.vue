@@ -35,6 +35,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import { ThemeEnum } from '@/enums'
 import { useSettingStore } from '@/stores/setting.ts'
+import { isWeb } from '@/utils/PlatformConstants'
 
 const { notificMax, messageMax } = defineProps<{
   notificMax?: number
@@ -261,6 +262,7 @@ const registerNaiveTools = () => {
 
   // 检查当前路由是否需要禁用消息
   const shouldDisableMessage = () => {
+    if (isWeb()) return false
     return noMessageWindows.includes(getCurrentWebviewWindow().label)
   }
 

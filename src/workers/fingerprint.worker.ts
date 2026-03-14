@@ -48,6 +48,16 @@ const detectBrowserFeatures = async (): Promise<Record<string, boolean>> => {
   return features
 }
 
+// 非安全上下文（HTTP）时 crypto.subtle 不可用，使用 djb2 哈希作为降级方案
+const djb2Hash = (str: string): string => {
+  let hash = 5381
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) ^ str.charCodeAt(i)
+    hash = hash & hash
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
 // 生成设备指纹
 const generateFingerprint = async (data: { deviceInfo: any; browserFingerprint: string }): Promise<string> => {
   try {
@@ -68,14 +78,18 @@ const generateFingerprint = async (data: { deviceInfo: any; browserFingerprint: 
       timestamp: Date.now()
     })
 
-    // 4. 使用 SHA-256 生成最终指纹
-    const fingerprintBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(combinedFingerprint))
-
-    const fingerprint = Array.from(new Uint8Array(fingerprintBuffer))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')
+    // 4. 生成最终指纹（HTTPS 用 SHA-256，HTTP 非安全上下文降级到 djb2）
+    let fingerprint: string
+    if (typeof crypto !== 'undefined' && crypto.subtle) {
+      const fingerprintBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(combinedFingerprint))
+      fingerprint = Array.from(new Uint8Array(fingerprintBuffer))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')
+    } else {
+      fingerprint = djb2Hash(combinedFingerprint)
+    }
     const hashTime = performance.now() - hashStart
-    console.log(`Worker: SHA-256计算耗时: ${hashTime.toFixed(2)}ms`)
+    console.log(`Worker: 哈希计算耗时: ${hashTime.toFixed(2)}ms`)
 
     const totalTime = performance.now() - totalStart
     console.log(`Worker: 指纹生成总耗时: ${totalTime.toFixed(2)}ms`)

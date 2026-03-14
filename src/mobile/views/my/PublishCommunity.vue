@@ -50,12 +50,7 @@
             :title="t('mobile_post.visibility.label')">
             <n-radio-group
               :value="permission"
-              @update:value="
-                (e) => {
-                  permission = e
-                  handlePermissionChange(e)
-                }
-              ">
+              @update:value="handlePermissionUpdate">
               <n-radio class="w-full" value="open">{{ t('mobile_post.visibility.public') }}</n-radio>
               <n-radio class="w-full" value="partVisible">{{ t('mobile_post.visibility.selected') }}</n-radio>
               <n-radio class="w-full" value="notAnyone">{{ t('mobile_post.visibility.exclude') }}</n-radio>
@@ -257,6 +252,11 @@ const isPublishValid = computed(() => {
 })
 
 // 处理权限变化
+const handlePermissionUpdate = (value: 'open' | 'partVisible' | 'notAnyone') => {
+  permission.value = value
+  handlePermissionChange(value)
+}
+
 const handlePermissionChange = (value: string) => {
   // 如果切换到公开，清空已选用户
   if (value === 'open') {

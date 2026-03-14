@@ -3,12 +3,14 @@ import { type, version } from '@tauri-apps/plugin-os'
 /**
  * 平台类型枚举
  */
-export type PlatformType = 'desktop' | 'mobile'
+export type PlatformType = 'desktop' | 'mobile' | 'web'
 
 /**
  * 操作系统类型
  */
 export type OSType = 'windows' | 'macos' | 'linux' | 'android' | 'ios'
+
+const isInTauriEnv = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
 /**
  * 平台检测结果 - 应用启动时执行一次，全局共享
@@ -25,6 +27,12 @@ class PlatformDetector {
    */
   static initialize(): void {
     if (PlatformDetector._initialized) return
+
+    if (!isInTauriEnv()) {
+      PlatformDetector._platformType = 'web'
+      PlatformDetector._initialized = true
+      return
+    }
 
     try {
       const detectedType = type()
@@ -103,6 +111,9 @@ class PlatformDetector {
   }
 }
 
+// Auto-initialize at module load time so router and other early-loading modules can use platform checks
+PlatformDetector.initialize()
+
 export const initializePlatform = () => PlatformDetector.initialize()
 
 /**
@@ -131,6 +142,11 @@ export const isDesktop = (): boolean => PlatformDetector.platformType === 'deskt
  * 是否为移动端
  */
 export const isMobile = (): boolean => PlatformDetector.platformType === 'mobile'
+
+/**
+ * 是否为 Web 浏览器端
+ */
+export const isWeb = (): boolean => PlatformDetector.platformType === 'web'
 
 /**
  * 是否为 Windows 系统
@@ -192,6 +208,7 @@ export const Platform = {
   // 平台判断
   isDesktop,
   isMobile,
+  isWeb,
 
   // 系统判断
   isWindows,

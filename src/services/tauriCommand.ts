@@ -12,6 +12,7 @@ import { getAllUserState, getUserDetail } from '../utils/ImRequestUtils'
 import { ErrorType, invokeWithErrorHandler } from '../utils/TauriInvokeHandler'
 import { getEnhancedFingerprint } from './fingerprint'
 import { ensureAppStateReady } from '@/utils/AppStateReady'
+import { isWeb } from '@/utils/PlatformConstants'
 import type { UserInfoType } from './types'
 
 export type Settings = {
@@ -79,6 +80,10 @@ export const loginCommand = async (
   }>,
   auto: boolean = false
 ) => {
+  if (isWeb()) {
+    const { webLoginCommand } = await import('@/services/webLoginCommand')
+    return await webLoginCommand(info, auto)
+  }
   const userStore = useUserStore()
   const settingStore = useSettingStore()
 

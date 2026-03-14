@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import { type } from '@tauri-apps/plugin-os'
+import { isMobile as checkMobile, isWeb } from '@/utils/PlatformConstants'
 import {
   createRouter,
   createWebHistory,
@@ -60,7 +60,7 @@ import SyncData from '#/views/SyncData.vue'
 /**! 创建窗口后再跳转页面就会导致样式没有生效所以不能使用懒加载路由的方式，有些页面需要快速响应的就不需要懒加载 */
 const { BASE_URL } = import.meta.env
 
-const isMobile = type() === 'ios' || type() === 'android'
+const isMobileOrWeb = checkMobile() || isWeb()
 
 // 移动端路由配置 - 使用直接导入避免懒加载问题
 const getMobileRoutes = (): Array<RouteRecordRaw> => [
@@ -616,7 +616,7 @@ const getCommonRoutes = (): Array<RouteRecordRaw> => [
 // 创建所有路由（通用路由 + 平台特定路由）
 const getAllRoutes = (): Array<RouteRecordRaw> => {
   const commonRoutes = getCommonRoutes()
-  if (isMobile) {
+  if (isMobileOrWeb) {
     return [...commonRoutes, ...getMobileRoutes()]
   } else {
     return [...commonRoutes, ...getDesktopRoutes()]
@@ -633,7 +633,7 @@ const router: any = createRouter({
 // 为解决 “已声明‘to’，但从未读取其值” 的问题，将 to 参数改为下划线开头表示该参数不会被使用
 router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormalized, next: NavigationGuardNext) => {
   // 桌面端直接放行
-  if (!isMobile) {
+  if (!isMobileOrWeb) {
     console.log('[守卫] 非移动端，直接放行')
     return next()
   }
@@ -650,8 +650,16 @@ router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormal
       return next()
     }
 
-    const tokens = await invoke<{ token: string | null; refreshToken: string | null }>(TauriCommand.GET_USER_TOKENS)
-    const isLoggedIn = !!(tokens.token && tokens.refreshToken)
+    let isLoggedIn: boolean
+    if (isWeb()) {
+      // Web 模式：从 Pinia 持久化存储读取 token
+      const { useUserStore } = await import('@/stores/user')
+      const userStore = useUserStore()
+      isLoggedIn = !!((userStore.userInfo as any)?.token && (userStore.userInfo as any)?.refreshToken)
+    } else {
+      const tokens = await invoke<{ token: string | null; refreshToken: string | null }>(TauriCommand.GET_USER_TOKENS)
+      isLoggedIn = !!(tokens.token && tokens.refreshToken)
+    }
 
     // 未登录且不是登录页 → 跳转登录
     if (!isLoggedIn && !isLoginPage) {
@@ -667,7 +675,6 @@ router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormal
       console.warn('[守卫] 出错，强制跳转到 /mobile/login')
       return next('/mobile/login')
     }
-    // console.log('[守卫] 出错但目标是登录页，直接放行')
     return next()
   }
 })
