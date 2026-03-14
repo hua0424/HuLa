@@ -2,7 +2,6 @@ import { ImUrlEnum } from '@/enums'
 import { webImRequest } from '@/utils/webImRequest'
 import { useLogin } from '@/hooks/useLogin'
 import { useLoginHistoriesStore } from '@/stores/loginHistory'
-import { useSettingStore } from '@/stores/setting'
 import { useUserStore } from '@/stores/user'
 import { useUserStatusStore } from '@/stores/userStatus'
 import { getAllUserState, getUserDetail } from '@/utils/ImRequestUtils'
@@ -29,9 +28,8 @@ export const webLoginCommand = async (
   auto: boolean = false
 ) => {
   const userStore = useUserStore()
-  const settingStore = useSettingStore()
 
-  const loginInfo = settingStore.login.autoLogin ? (userStore.userInfo as UserInfoType) : info
+  const loginInfo = auto ? (userStore.userInfo as UserInfoType) : info
   const clientId = await getEnhancedFingerprint()
 
   const res = await webImRequest<LoginResponse>(ImUrlEnum.LOGIN, {
