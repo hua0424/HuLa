@@ -4,9 +4,11 @@
       message.message.id,
       message.message.status,
       message.message.body?.translatedText?.text || '',
+      message.message.body?.content || '',
       uploadProgress,
       searchKeyword,
-      historyMode
+      historyMode,
+      chatStore.isMessageStreaming(message.message.id)
     ]"
     v-if="historyMode || !hasBubble(message.message.type)"
     :is="componentMap[message.message.type]"
@@ -20,7 +22,8 @@
     :on-image-click="onImageClick"
     :onVideoClick="onVideoClick"
     :search-keyword="searchKeyword"
-    :history-mode="historyMode" />
+    :history-mode="historyMode"
+    :is-streaming="chatStore.isMessageStreaming(message.message.id)" />
 
   <!-- 好友或者群聊的信息 -->
   <div v-else class="flex flex-col w-full" :class="{ 'justify-end': isMe }">
@@ -170,9 +173,11 @@
                 message.message.id,
                 message.message.status,
                 message.message.body?.translatedText?.text || '',
+                message.message.body?.content || '',
                 uploadProgress,
                 searchKeyword,
-                historyMode
+                historyMode,
+                chatStore.isMessageStreaming(message.message.id)
               ]"
               :class="[
                 message.message.type === MsgEnum.VOICE ? 'select-none cursor-pointer' : 'select-text cursor-text',
@@ -196,7 +201,8 @@
               :on-image-click="onImageClick"
               :onVideoClick="onVideoClick"
               :search-keyword="searchKeyword"
-              :history-mode="historyMode" />
+              :history-mode="historyMode"
+              :is-streaming="chatStore.isMessageStreaming(message.message.id)" />
 
             <!-- 显示翻译文本 -->
             <Transition name="fade-translate" appear mode="out-in">
@@ -439,9 +445,8 @@ const ensureSenderInfo = async (uid: string) => {
     }
   } catch (error) {
     console.error('[Message] 拉取缺失用户信息失败:', error)
-  } finally {
-    resolvingUserSet.delete(uid)
   }
+  // 不从 resolvingUserSet 中删除，避免 watchEffect 循环请求
 }
 
 watchEffect(() => {

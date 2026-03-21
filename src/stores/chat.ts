@@ -17,6 +17,7 @@ import { renderReplyContent } from '@/utils/RenderReplyContent.ts'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useSessionUnreadStore } from '@/stores/sessionUnread'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
+import { isWeb } from '@/utils/PlatformConstants'
 import { useMitt } from '@/hooks/useMitt'
 
 type RecalledMessage = {
@@ -350,7 +351,7 @@ export const useChatStore = defineStore(
      * 该方法会清空旧房间的消息数据，重新加载新房间的消息，并处理相关的状态重置。
      */
     const changeRoom = async () => {
-      const currentWindowLabel = WebviewWindow.getCurrent()
+      const currentWindowLabel = isWeb() ? { label: 'home' } : WebviewWindow.getCurrent()
       if (currentWindowLabel.label !== 'home' && currentWindowLabel.label !== 'mobile-home') {
         return
       }
@@ -443,7 +444,7 @@ export const useChatStore = defineStore(
      * - 使用 Promise.allSettled 确保部分失败不影响其他会话
      */
     const setAllSessionMsgList = async (size = pageSize) => {
-      await info('初始设置所有会话消息列表')
+      !isWeb() && await info('初始设置所有会话消息列表')
 
       if (sessionList.value.length === 0) return
 
@@ -463,7 +464,7 @@ export const useChatStore = defineStore(
       const successCount = results.filter((r) => r.status === 'fulfilled').length
       const failCount = results.filter((r) => r.status === 'rejected').length
 
-      await info(`会话消息加载完成: 成功 ${successCount}/${sortedSessions.length}, 失败 ${failCount}`)
+      !isWeb() && await info(`会话消息加载完成: 成功 ${successCount}/${sortedSessions.length}, 失败 ${failCount}`)
 
       // 记录失败的会话（可选）
       if (failCount > 0) {
@@ -477,7 +478,7 @@ export const useChatStore = defineStore(
 
     // 获取消息列表
     const getMsgList = async (size = pageSize, async?: boolean) => {
-      await info('获取消息列表')
+      !isWeb() && await info('获取消息列表')
       // 获取当前房间ID，用于后续比较
       const requestRoomId = globalStore.currentSessionRoomId
 
@@ -485,22 +486,43 @@ export const useChatStore = defineStore(
     }
 
     const getPageMsg = async (pageSize: number, roomId: string, cursor: string = '', async?: boolean) => {
-      // 查询本地存储，获取消息数据
-      const data: any = await invokeWithErrorHandler(
-        TauriCommand.PAGE_MSG,
-        {
-          param: {
-            pageSize: pageSize,
-            cursor: cursor,
-            roomId: roomId,
-            async: !!async
+      let data: any
+      if (isWeb()) {
+        const { imRequest } = await import('@/utils/ImRequestUtils')
+        const { ImUrlEnum } = await import('@/enums')
+        try {
+          const raw = await imRequest({
+            url: ImUrlEnum.GET_MSG_LIST,
+            body: { pageSize, cursor: cursor || null, roomId }
+          })
+          // 适配后端返回格式（可能是 { list, cursor, isLast } 或 { records, ... }）
+          data = {
+            list: raw?.list || raw?.records || raw || [],
+            cursor: raw?.cursor ?? '',
+            isLast: raw?.isLast ?? true
           }
-        },
-        {
-          customErrorMessage: '获取消息列表失败',
-          errorType: ErrorType.Network
+        } catch (error) {
+          console.error('[chat] Web getPageMsg 失败:', error)
+          data = { isLast: true, cursor: '', list: [] }
         }
-      )
+      } else {
+        // 查询本地存储，获取消息数据
+        data = await invokeWithErrorHandler(
+          TauriCommand.PAGE_MSG,
+          {
+            param: {
+              pageSize: pageSize,
+              cursor: cursor,
+              roomId: roomId,
+              async: !!async
+            }
+          },
+          {
+            customErrorMessage: '获取消息列表失败',
+            errorType: ErrorType.Network
+          }
+        )
+      }
 
       // 更新 messageOptions
       messageOptions[roomId] = {
@@ -514,7 +536,8 @@ export const useChatStore = defineStore(
         messageMap[roomId] = {}
       }
 
-      for (const msg of data.list) {
+      const list = Array.isArray(data.list) ? data.list : []
+      for (const msg of list) {
         messageMap[roomId][msg.message.id] = msg
       }
     }
@@ -541,6 +564,25 @@ export const useChatStore = defineStore(
         if (sessionOptions.isLoading) return
         sessionOptions.isLoading = true
         globalStore.unreadReady = false
+
+        // Web 模式下使用 HTTP API 替代 Tauri invoke
+        if (isWeb()) {
+          const { imRequest } = await import('@/utils/ImRequestUtils')
+          const { ImUrlEnum } = await import('@/enums')
+          const data: any = await imRequest({ url: ImUrlEnum.GET_CONTACT_LIST, params: { pageSize: 100 } }).catch(() => {
+            sessionOptions.isLoading = false
+            return null
+          })
+          if (!data) {
+            globalStore.unreadReady = true
+            unreadCountManager.refreshBadge(globalStore.unReadMark, feedStore.unreadCount)
+            return
+          }
+          sessionOptions.isLoading = false
+          globalStore.unreadReady = true
+          return
+        }
+
         const prevSessions =
           sessionList.value.length > 0
             ? sessionList.value.reduce(
@@ -1396,6 +1438,104 @@ export const useChatStore = defineStore(
       })
     }
 
+    // ==================== AIclaw 流式消息 ====================
+
+    /** 正在流式中的消息 ID 集合 */
+    const streamingMessages = reactive(new Set<string>())
+    /**
+     * 已完成流式的占位消息映射：streamMsgId → roomId
+     * 用于在 receiveMessage 到达时，用真实消息替换流式占位消息
+     * （后端流式 msgId 和持久化消息 ID 不同）
+     */
+    const pendingStreamReplace = new Map<string, string>()
+
+    /** 创建流式消息占位（stream_start 时调用） */
+    const startStream = (payload: { msgId: string; fromUid: number; toUid: number; roomId: number }) => {
+      const groupStore = useGroupStore()
+      const userInfo = groupStore.getUserInfo(String(payload.fromUid))
+      const roomId = String(payload.roomId)
+      const msgId = String(payload.msgId)
+
+      const placeholderMsg: MessageType = {
+        fromUser: {
+          uid: String(payload.fromUid),
+          username: userInfo?.name || 'AI',
+          avatar: userInfo?.avatar || '',
+          locPlace: userInfo?.locPlace || '',
+          userType: userInfo?.userType
+        },
+        message: {
+          id: msgId,
+          roomId,
+          type: MsgEnum.TEXT,
+          body: { content: '', reply: { id: '', uid: '', username: '', type: 0, body: null }, urlContentMap: {} },
+          sendTime: Date.now(),
+          messageMarks: {},
+          status: MessageStatusEnum.SUCCESS
+        },
+        sendTime: Date.now()
+      }
+
+      streamingMessages.add(msgId)
+      pushMsg(placeholderMsg, {
+        isActiveChatView: globalStore.currentSessionRoomId === roomId,
+        activeRoomId: globalStore.currentSessionRoomId || ''
+      })
+    }
+
+    /** 追加流式内容（stream_delta 时调用，已由 rAF 节流后的批量数据） */
+    const appendStreamContent = (roomId: string, msgId: string, delta: string) => {
+      const msg = messageMap[roomId]?.[msgId]
+      if (msg) {
+        msg.message.body.content += delta
+      }
+    }
+
+    /** 结束流式消息（stream_end 时调用） */
+    const finalizeStream = (payload: { msgId: string; fullContent: string; status: 'complete' | 'error' }) => {
+      const msgId = String(payload.msgId)
+      streamingMessages.delete(msgId)
+
+      // 在所有 room 中找到这条占位消息，更新内容并记录待替换
+      for (const roomId of Object.keys(messageMap)) {
+        const msg = messageMap[roomId]?.[msgId]
+        if (msg) {
+          msg.message.body.content = payload.fullContent
+          // 记录：当同 room 的 receiveMessage 到达时，用真实消息替换此占位
+          pendingStreamReplace.set(roomId, msgId)
+          break
+        }
+      }
+    }
+
+    /**
+     * 尝试用真实消息替换流式占位消息
+     * 返回 true 表示已替换（调用方不需要再 pushMsg），false 表示无需替换
+     */
+    const tryReplaceStreamPlaceholder = (realMsg: MessageType): boolean => {
+      const roomId = String(realMsg.message.roomId)
+      const streamMsgId = pendingStreamReplace.get(roomId)
+      if (!streamMsgId) return false
+
+      // 从 messageMap 中删除流式占位消息，插入真实消息
+      if (messageMap[roomId]?.[streamMsgId]) {
+        delete messageMap[roomId][streamMsgId]
+      }
+      pendingStreamReplace.delete(roomId)
+
+      // 插入真实消息
+      if (!messageMap[roomId]) {
+        messageMap[roomId] = {}
+      }
+      messageMap[roomId][String(realMsg.message.id)] = realMsg
+      return true
+    }
+
+    /** 判断消息是否正在流式中（用于 UI 渲染） */
+    const isMessageStreaming = (msgId: string): boolean => {
+      return streamingMessages.has(String(msgId))
+    }
+
     return {
       getMsgIndex,
       chatMessageList,
@@ -1450,7 +1590,13 @@ export const useChatStore = defineStore(
       setCustomForwardTask,
       resetSessionSelection,
       checkMsgExist,
-      clearRedundantMessages
+      clearRedundantMessages,
+      streamingMessages,
+      startStream,
+      appendStreamContent,
+      finalizeStream,
+      isMessageStreaming,
+      tryReplaceStreamPlaceholder
     }
   },
   {

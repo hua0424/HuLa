@@ -94,7 +94,10 @@
                           style="border: 1px solid var(--avatar-border-color)"
                           :size="44"
                           class="grayscale"
-                          :class="{ 'grayscale-0': item.activeStatus === OnlineEnum.ONLINE }"
+                          :class="{
+                            'grayscale-0':
+                              item.activeStatus === OnlineEnum.ONLINE || isAiclawByUserType(item.userType)
+                          }"
                           :src="AvatarUtils.getAvatarUrl(groupStore.getUserInfo(item.uid)?.avatar!)"
                           fallback-src="/logo.png" />
 
@@ -106,6 +109,13 @@
                           <div class="text leading-tight text-12px flex-y-center gap-4px flex-1 truncate">
                             [
                             <template v-if="isBotUser(item.uid)">助手</template>
+                            <template v-else-if="isAiclawByUserType(item.userType)">
+                              <n-badge
+                                :color="getAiclawStatus(item.activeStatus) === 'online' ? '#1ab292' : '#909090'"
+                                dot />
+                              <span class="text-#7c5cfc font-500">{{ t('aiclaw.badge') }}</span>
+                              {{ t(`aiclaw.status.${getAiclawStatus(item.activeStatus)}`) }}
+                            </template>
                             <template v-else-if="getUserState(item.uid)">
                               <img class="size-12px rounded-50%" :src="getUserState(item.uid)?.url" alt="" />
                               {{ getUserState(item.uid)?.title }}
@@ -179,6 +189,9 @@ import { useGlobalStore } from '@/stores/global'
 import { useGroupStore } from '@/stores/group'
 import { useUserStatusStore } from '@/stores/userStatus'
 import { AvatarUtils } from '@/utils/AvatarUtils'
+import { isAiclawByUserType, getAiclawStatus } from '@/utils/AiclawUtils'
+import { getUserByIds } from '@/utils/ImRequestUtils'
+import { isWeb } from '@/utils/PlatformConstants'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -259,10 +272,17 @@ const groupChatList = computed(() => {
 const onlineCount = computed(() => {
   return contactStore.contactsList.filter((item) => item.activeStatus === OnlineEnum.ONLINE).length
 })
-/** 排序好友列表 */
+/** 排序好友列表：Bot > AI助理 > 在线 > 离线 */
 const sortedContacts = computed(() => {
   return [...contactStore.contactsList].sort((a, b) => {
-    // 在线用户排在前面
+    const aIsBot = isBotUser(a.uid)
+    const bIsBot = isBotUser(b.uid)
+    if (aIsBot && !bIsBot) return -1
+    if (!aIsBot && bIsBot) return 1
+    const aIsAiclaw = isAiclawByUserType(a.userType)
+    const bIsAiclaw = isAiclawByUserType(b.userType)
+    if (aIsAiclaw && !bIsAiclaw) return -1
+    if (!aIsAiclaw && bIsAiclaw) return 1
     if (a.activeStatus === OnlineEnum.ONLINE && b.activeStatus !== OnlineEnum.ONLINE) return -1
     if (a.activeStatus !== OnlineEnum.ONLINE && b.activeStatus === OnlineEnum.ONLINE) return 1
     return 0
@@ -329,6 +349,29 @@ onMounted(async () => {
   try {
     await contactStore.getContactList(true)
     await contactStore.getApplyPage('friend', false)
+
+    // Web 端没有本地 SQLite 缓存，需要主动拉取好友的用户详情
+    if (isWeb() && contactStore.contactsList.length > 0) {
+      const uids = contactStore.contactsList.map((c) => c.uid)
+      const users = await getUserByIds(uids)
+      if (Array.isArray(users)) {
+        // 写入 userListMap 的 __contacts__ 虚拟 room，使 allUserMap / getUserInfo 可访问
+        const contactsRoomKey = '__contacts__'
+        if (!groupStore.userListMap[contactsRoomKey]) {
+          groupStore.userListMap[contactsRoomKey] = []
+        }
+        users.forEach((u: any) => {
+          if (u?.uid) {
+            const existing = groupStore.userListMap[contactsRoomKey].find((item: any) => item.uid === u.uid)
+            if (existing) {
+              Object.assign(existing, u)
+            } else {
+              groupStore.userListMap[contactsRoomKey].push(u)
+            }
+          }
+        })
+      }
+    }
   } catch (error) {
     console.log('请求好友申请列表失败')
   }

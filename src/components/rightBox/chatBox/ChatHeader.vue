@@ -63,7 +63,7 @@
     </n-flex>
     <!-- 顶部右边选项栏 -->
     <nav v-if="shouldShowDeleteFriend || chatStore.isGroup" class="options flex-y-center gap-20px color-[--icon-color]">
-      <div v-if="!isChannel && !isBotUser" class="options-box">
+      <div v-if="!isChannel && !isBotUser && !isAiclawSession" class="options-box">
         <n-popover trigger="hover" :show-arrow="false" placement="bottom">
           <template #trigger>
             <svg @click="startRtcCall(CallTypeEnum.AUDIO)">
@@ -74,7 +74,7 @@
         </n-popover>
       </div>
 
-      <div v-if="!isChannel && !isBotUser" class="options-box">
+      <div v-if="!isChannel && !isBotUser && !isAiclawSession" class="options-box">
         <n-popover trigger="hover" :show-arrow="false" placement="bottom">
           <template #trigger>
             <svg @click="startRtcCall(CallTypeEnum.VIDEO)">
@@ -85,7 +85,7 @@
         </n-popover>
       </div>
 
-      <div v-if="!isChannel && !isBotUser" class="options-box">
+      <div v-if="!isChannel && !isBotUser && !isAiclawSession" class="options-box">
         <n-popover trigger="hover" :show-arrow="false" placement="bottom">
           <template #trigger>
             <svg @click="handleMedia">
@@ -96,7 +96,7 @@
         </n-popover>
       </div>
 
-      <div v-if="!isChannel && !isBotUser" class="options-box">
+      <div v-if="!isChannel && !isBotUser && !isAiclawSession" class="options-box">
         <n-popover trigger="hover" :show-arrow="false" placement="bottom">
           <template #trigger>
             <svg @click="handleAssist">
@@ -163,10 +163,18 @@
               <p>{{ t('home.chat_header.sidebar.single.delete_history') }}</p>
             </div>
 
+            <!-- AI 助理 Token 重置 -->
+            <div
+              v-if="isAiclawSession"
+              class="box-item cursor-pointer"
+              @click="handleAiclawRefreshActivation">
+              <p class="color-#7c5cfc">{{ t('aiclaw.token.refresh') }}</p>
+            </div>
+
             <div
               v-if="!isBotUser"
               class="box-item flex-x-center cursor-pointer"
-              @click="handleDelete(RoomActEnum.DELETE_FRIEND)">
+              @click="isAiclawSession ? (showAiclawDeleteDialog = true) : handleDelete(RoomActEnum.DELETE_FRIEND)">
               <p class="color-#d03553">{{ t('home.chat_header.sidebar.single.delete_friend') }}</p>
             </div>
 
@@ -572,6 +580,16 @@
     class="hidden"
     @change="handleFileChange" />
   <AvatarCropper ref="cropperRef" v-model:show="showCropper" :image-url="localImageUrl" @crop="handleCrop" />
+
+  <!-- AI 助理删除强确认 -->
+  <AiclawDeleteConfirmDialog
+    v-model:visible="showAiclawDeleteDialog"
+    @confirm="handleAiclawDeleteConfirm" />
+
+  <!-- AI 助理激活码展示 -->
+  <AiclawTokenDialog
+    v-model:visible="showAiclawTokenDialog"
+    :uid="activeItem?.detailId" />
 </template>
 
 <script setup lang="ts">
@@ -598,6 +616,9 @@ import {
   UserType,
   MsgEnum
 } from '@/enums'
+import { isAiclawUser as isAiclawCheck } from '@/utils/AiclawUtils'
+import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
+import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
 import { useAvatarUpload } from '@/hooks/useAvatarUpload'
 import { useMyRoomInfoUpdater } from '@/hooks/useMyRoomInfoUpdater'
 import { useMitt } from '@/hooks/useMitt.ts'
@@ -760,6 +781,34 @@ const resolveQrExportIcon = async () => {
 const isChannel = computed(() => activeItem.value?.hotFlag === IsAllUserEnum.Yes || currentSessionRoomId.value === '1')
 // 是否为bot用户
 const isBotUser = computed(() => activeItem.value?.account === UserType.BOT)
+// 是否为 AI 助理会话
+const isAiclawSession = computed(() => {
+  if (!activeItem.value?.detailId || chatStore.isGroup) return false
+  return isAiclawCheck(activeItem.value.detailId)
+})
+
+// AI 助理删除确认
+const showAiclawDeleteDialog = ref(false)
+const handleAiclawDeleteConfirm = async (_password: string) => {
+  const detailId = activeItem.value?.detailId
+  if (!detailId) return
+  try {
+    await contactStore.onDeleteFriend(detailId)
+    useMitt.emit(MittEnum.DELETE_SESSION, currentSessionRoomId.value)
+    window.$message.success(t('home.chat_header.toast.delete_friend_success'))
+    showAiclawDeleteDialog.value = false
+    sidebarShow.value = false
+  } catch (error) {
+    console.error('删除 AI 助理失败:', error)
+    showAiclawDeleteDialog.value = false
+  }
+}
+
+// AI 助理激活码管理
+const showAiclawTokenDialog = ref(false)
+const handleAiclawRefreshActivation = () => {
+  showAiclawTokenDialog.value = true
+}
 // 是否为群主
 const isGroupOwner = computed(() => {
   const session = activeItem.value

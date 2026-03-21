@@ -1,0 +1,52 @@
+{
+  "title": "AI 助理",
+  "empty": "暂无 AI 助理，点击下方按钮创建",
+  "create": {
+    "title": "创建 AI 助理",
+    "name": "名称",
+    "name_placeholder": "请输入 AI 助理名称",
+    "avatar": "头像",
+    "avatar_tip": "可选，留空使用默认头像",
+    "description": "简介",
+    "description_placeholder": "请输入简介（可选）",
+    "submit": "创建",
+    "success": "创建成功",
+    "failed": "创建失败"
+  },
+  "token": {
+    "dialog_title": "激活码",
+    "warning": "请复制激活码并在 AI 助理机器上执行激活命令。未激活前可反复查看。",
+    "copy": "复制激活码",
+    "copied": "已复制",
+    "copy_failed": "复制失败",
+    "view": "查看激活码",
+    "refresh": "重新生成激活码",
+    "refresh_confirm": "重新生成后旧连接 Token 立即失效，AI 助理将断开连接并需要重新激活，确定吗？",
+    "refresh_success": "激活码已重新生成",
+    "activated": "已激活",
+    "deactivated": "已停用"
+  },
+  "badge": "AI",
+  "status": {
+    "inactive": "未激活",
+    "online": "在线",
+    "offline": "离线"
+  },
+  "chat": {
+    "notice": "AI 助理对话 · 回复由 AI 生成",
+    "streaming": "正在回复..."
+  },
+  "delete": {
+    "title": "删除 AI 助理",
+    "warning": "删除后 Token 失效，AI 助理将断开连接。数据保留 24 小时可恢复。",
+    "password": "请输入密码确认",
+    "password_placeholder": "输入登录密码",
+    "confirm": "确认删除",
+    "cancel": "取消"
+  },
+  "auth": {
+    "request": "你的 AI 助理 {name} 尝试从新设备登录，是否授权？",
+    "approve": "授权",
+    "reject": "拒绝"
+  }
+}

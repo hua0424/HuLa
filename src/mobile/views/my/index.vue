@@ -6,7 +6,7 @@
     <PersonalInfo :is-show="isShow"></PersonalInfo>
 
     <div class="relative top-0 flex-1 flex">
-      <div ref="measureRef" class="h-full w-full absolute top-0 z-0"></div>
+      <div ref="measureRef" class="h-full w-full absolute top-0 z-0 pointer-events-none"></div>
       <!-- 动态内容 -->
       <div
         ref="scrollContainer"

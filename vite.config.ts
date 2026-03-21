@@ -172,7 +172,19 @@ export default defineConfig(({ mode }: ConfigEnv) => {
       watch: {
         // 3. tell vite to ignore watching `src-tauri`
         ignored: ['**/src-tauri/**']
-      }
+      },
+      // Web 模式下代理 /api 到后端，配合 .env 中 VITE_WEB_API_URL=/api 使用
+      ...(isWebPlatform
+        ? {
+            proxy: {
+              '/api': {
+                target: 'http://localhost:18080',
+                changeOrigin: true,
+                ws: true
+              }
+            }
+          }
+        : {})
     }
   }
 })

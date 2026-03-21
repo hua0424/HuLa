@@ -13,8 +13,19 @@
       <div class="flex flex-col overflow-auto h-full">
         <PersonalInfo :is-my-page="isMyPage" :is-show="isShow"></PersonalInfo>
 
+        <!-- AI 助理激活码管理 -->
+        <div v-if="isAiclawFriend" class="px-20px py-12px">
+          <n-button
+            block
+            secondary
+            :disabled="aiclawDeactivated"
+            @click="handleRefreshActivation">
+            {{ t('aiclaw.token.refresh') }}
+          </n-button>
+        </div>
+
         <div class="top-0 flex-1 flex w-full border-#13987F border-1">
-          <div ref="measureRef" class="h-full w-full absolute top-0 z-0"></div>
+          <div ref="measureRef" class="h-full w-full absolute top-0 z-0 pointer-events-none"></div>
 
           <div
             ref="scrollContainer"
@@ -88,14 +99,21 @@
       </div>
     </template>
   </AutoFixHeightPage>
+
+  <!-- 激活码展示弹窗 -->
+  <AiclawTokenDialog v-model:visible="showTokenDialog" :token="refreshedToken" :uid="uid" @refreshed="onTokenRefreshed" />
 </template>
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import { useI18n } from 'vue-i18n'
 import CommunityContent from '#/components/community/CommunityContent.vue'
 import CommunityTab from '#/components/community/CommunityTab.vue'
 import PersonalInfo from '#/components/my/PersonalInfo.vue'
+import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
+import { useContactStore } from '@/stores/contacts'
 import { useUserStore } from '@/stores/user'
 import { useFeedStore } from '@/stores/feed'
+import { isAiclawUser } from '@/utils/AiclawUtils'
 
 const feedStore = useFeedStore()
 const { feedList, feedOptions } = storeToRefs(feedStore)
@@ -115,9 +133,30 @@ const userStore = useUserStore()
 
 const route = useRoute()
 
+const { t } = useI18n()
+const contactStore = useContactStore()
 const uid = route.params.uid as string
 
 const isMyPage = ref(false)
+
+// AI 助理激活码管理
+const isAiclawFriend = computed(() => isAiclawUser(uid))
+const aiclawDeactivated = computed(() => {
+  const contact = contactStore.contactsList.find((c) => c.uid === uid)
+  // authStatus === 2 为停用状态，按钮 disable
+  return (contact as any)?.authStatus === 2
+})
+const showTokenDialog = ref(false)
+const refreshedToken = ref('')
+
+const handleRefreshActivation = () => {
+  refreshedToken.value = ''
+  showTokenDialog.value = true
+}
+
+const onTokenRefreshed = () => {
+  // 刷新后列表状态可能变化（回到未激活）
+}
 
 const onUpdate = (newTab: string) => {
   console.log('已更新：', newTab)

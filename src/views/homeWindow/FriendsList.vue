@@ -48,7 +48,7 @@
                       style="border: 1px solid var(--avatar-border-color)"
                       :size="44"
                       class="grayscale"
-                      :class="{ 'grayscale-0': item.activeStatus === OnlineEnum.ONLINE || isBotUser(item.uid) }"
+                      :class="{ 'grayscale-0': item.activeStatus === OnlineEnum.ONLINE || isBotUser(item.uid) || isAiclawByUserType(item.userType) }"
                       :src="AvatarUtils.getAvatarUrl(groupStore.getUserInfo(item.uid)!.avatar!)"
                       :color="themes.content === ThemeEnum.DARK ? '' : '#fff'"
                       :fallback-src="themes.content === ThemeEnum.DARK ? '/logoL.png' : '/logoD.png'" />
@@ -61,6 +61,13 @@
                       <div class="text leading-tight text-12px flex-y-center gap-4px flex-1 truncate">
                         [
                         <template v-if="isBotUser(item.uid)">{{ t('home.friends_list.bot_tag') }}</template>
+                        <template v-else-if="isAiclawByUserType(item.userType)">
+                          <n-badge
+                            :color="getAiclawStatus(item.activeStatus) === 'online' ? '#1ab292' : '#909090'"
+                            dot />
+                          <span class="text-#7c5cfc font-500">{{ t('aiclaw.badge') }}</span>
+                          {{ t(`aiclaw.status.${getAiclawStatus(item.activeStatus)}`) }}
+                        </template>
                         <template v-else-if="getUserState(item.uid)">
                           <img class="size-12px rounded-50%" :src="getUserState(item.uid)?.url" alt="" />
                           {{ translateStateTitle(getUserState(item.uid)?.title) }}
@@ -130,6 +137,7 @@ import { useGroupStore } from '@/stores/group'
 import { useSettingStore } from '@/stores/setting'
 import { useUserStatusStore } from '@/stores/userStatus'
 import { AvatarUtils } from '@/utils/AvatarUtils'
+import { isAiclawByUserType, getAiclawStatus } from '@/utils/AiclawUtils'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 
 const route = useRoute()
@@ -172,6 +180,10 @@ const sortedContacts = computed(() => {
     const bIsBot = isBotUser(b.uid)
     if (aIsBot && !bIsBot) return -1
     if (!aIsBot && bIsBot) return 1
+    const aIsAiclaw = isAiclawByUserType(a.userType)
+    const bIsAiclaw = isAiclawByUserType(b.userType)
+    if (aIsAiclaw && !bIsAiclaw) return -1
+    if (!aIsAiclaw && bIsAiclaw) return 1
     if (a.activeStatus === OnlineEnum.ONLINE && b.activeStatus !== OnlineEnum.ONLINE) return -1
     if (a.activeStatus !== OnlineEnum.ONLINE && b.activeStatus === OnlineEnum.ONLINE) return 1
     return 0

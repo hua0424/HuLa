@@ -192,6 +192,19 @@ class WebSocketWebClient {
       case 'feedNotify':
         mitt.emit(WsResponseMessageType.FEED_NOTIFY, data)
         break
+      // AIclaw 流式消息
+      case 'streamStart':
+        mitt.emit(WsResponseMessageType.STREAM_START, data)
+        break
+      case 'streamDelta':
+        mitt.emit(WsResponseMessageType.STREAM_DELTA, data)
+        break
+      case 'streamEnd':
+        mitt.emit(WsResponseMessageType.STREAM_END, data)
+        break
+      case 'aiclawAuthRequest':
+        mitt.emit(WsResponseMessageType.AICLAW_AUTH_REQUEST, data)
+        break
       default:
         console.debug('[WebWS] 未处理的消息类型:', type)
     }

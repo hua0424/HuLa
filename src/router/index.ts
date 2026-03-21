@@ -395,6 +395,11 @@ const getDesktopRoutes = (): Array<RouteRecordRaw> => [
     ]
   },
   {
+    path: '/aiAssistant',
+    name: 'aiAssistant',
+    component: () => import('@/views/aiAssistantWindow/index.vue')
+  },
+  {
     path: '/mail',
     name: 'mail',
     component: () => import('@/views/mailWindow/index.vue')

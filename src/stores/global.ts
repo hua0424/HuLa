@@ -2,6 +2,7 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { info } from '@tauri-apps/plugin-log'
 import { defineStore } from 'pinia'
 import { MittEnum, StoresEnum } from '@/enums'
+import { isWeb } from '@/utils/PlatformConstants'
 import type { FriendItem, RequestFriendItem, SessionItem } from '@/services/types'
 import { useChatStore } from '@/stores/chat'
 import { useFeedStore } from '@/stores/feed'
@@ -103,7 +104,7 @@ export const useGlobalStore = defineStore(
 
     // 更新全局未读消息计数
     const updateGlobalUnreadCount = () => {
-      info('[global]更新全局未读消息计数')
+      if (!isWeb()) info('[global]更新全局未读消息计数')
       // 使用统一的计数管理器，避免重复逻辑（包含朋友圈未读数）
       unreadCountManager.calculateTotal(chatStore.sessionList, unReadMark, feedStore.unreadCount)
     }
@@ -135,7 +136,7 @@ export const useGlobalStore = defineStore(
         return
       }
 
-      const webviewWindowLabel = WebviewWindow.getCurrent()
+      const webviewWindowLabel = isWeb() ? { label: 'home' } : WebviewWindow.getCurrent()
       if (webviewWindowLabel.label !== 'home' && webviewWindowLabel.label !== '/mobile/message') {
         useMitt.emit(MittEnum.SESSION_CHANGED, {
           roomId: val,

@@ -915,7 +915,25 @@ export enum ImUrlEnum {
   /** 更新聊天角色 */
   CHAT_ROLE_UPDATE = 'chatRoleUpdate',
   /** 删除聊天角色 */
-  CHAT_ROLE_DELETE = 'chatRoleDelete'
+  CHAT_ROLE_DELETE = 'chatRoleDelete',
+
+  // ==================== AIclaw AI助理 ====================
+  /** 创建 AI 助理 */
+  AICLAW_CREATE = 'aiclawCreate',
+  /** 获取 AI 助理列表 */
+  AICLAW_LIST = 'aiclawList',
+  /** 修改 AI 助理资料 */
+  AICLAW_PROFILE = 'aiclawProfile',
+  /** 查看激活 token（未激活时） */
+  AICLAW_ACTIVATION_TOKEN = 'aiclawActivationToken',
+  /** 重新生成激活码（含重置 token 功能） */
+  AICLAW_REFRESH_ACTIVATION = 'aiclawRefreshActivation',
+  /** 停用 AI 助理 */
+  AICLAW_DEACTIVATE = 'aiclawDeactivate',
+  /** 恢复 AI 助理 */
+  AICLAW_RESTORE = 'aiclawRestore',
+  /** 机器码变更授权确认 */
+  AICLAW_AUTH_CONFIRM = 'aiclawAuthConfirm'
 }
 
 // 滚动意图管理枚举
@@ -933,5 +951,7 @@ export enum MergeMessageType {
 
 // 用户类型
 export enum UserType {
-  BOT = 'bot'
+  BOT = 'bot',
+  /** AI 助理，对应后端 user_type=4 */
+  AICLAW = 4
 }

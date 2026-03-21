@@ -22,7 +22,7 @@
       v-show="shrinkStatus"
       :shrink-status="!shrinkStatus"
       :max-w="false"
-      :current-label="appWindow.label" />
+      :current-label="appWindow?.label ?? ''" />
 
     <!-- 顶部搜索栏 -->
     <header class="mt-30px pb-10px flex-1 flex-col-x-center border-b-(1px solid [--right-chat-footer-line-color])">
@@ -149,7 +149,7 @@ import { useGlobalStore } from '@/stores/global.ts'
 import { useGroupStore } from '@/stores/group'
 import { useSettingStore } from '@/stores/setting.ts'
 import * as ImRequestUtils from '@/utils/ImRequestUtils'
-import { isMac, isWindows } from '@/utils/PlatformConstants'
+import { isMac, isWeb, isWindows } from '@/utils/PlatformConstants'
 import { options, renderLabel, renderSourceList, renderTargetList } from './model.tsx'
 import { useI18n } from 'vue-i18n'
 
@@ -161,7 +161,7 @@ const settingStore = useSettingStore()
 const globalStore = useGlobalStore()
 const groupStore = useGroupStore()
 const { page } = storeToRefs(settingStore)
-const appWindow = WebviewWindow.getCurrent()
+const appWindow = isWeb() ? null : WebviewWindow.getCurrent()
 const selectedValue = ref<string[]>([])
 const createGroupModal = ref(false)
 const preSelectedFriendId = ref('')

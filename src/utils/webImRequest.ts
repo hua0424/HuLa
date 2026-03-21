@@ -192,7 +192,18 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   audioMyListByIds: { method: 'GET', path: 'ai/audio/my-list-by-ids' },
   audioGenerate: { method: 'POST', path: 'ai/audio/generate' },
   audioDeleteMy: { method: 'DELETE', path: 'ai/audio/delete-my' },
-  audioVoices: { method: 'GET', path: 'ai/audio/voices' }
+  audioVoices: { method: 'GET', path: 'ai/audio/voices' },
+
+  // AIclaw AI 助理（固定路径）
+  aiclawCreate: { method: 'POST', path: 'im/aiclaw/create' },
+  aiclawList: { method: 'GET', path: 'im/aiclaw/list' },
+  // 以下接口为动态路径，需要调用方通过 params._pathUid 传入 uid 替换 {uid}
+  aiclawProfile: { method: 'PUT', path: 'im/aiclaw/{uid}/profile' },
+  aiclawActivationToken: { method: 'GET', path: 'im/aiclaw/{uid}/activation-token' },
+  aiclawRefreshActivation: { method: 'POST', path: 'im/aiclaw/{uid}/refresh-activation' },
+  aiclawDeactivate: { method: 'POST', path: 'im/aiclaw/{uid}/deactivate' },
+  aiclawRestore: { method: 'POST', path: 'im/aiclaw/{uid}/restore' },
+  aiclawAuthConfirm: { method: 'POST', path: 'im/aiclaw/{uid}/auth-confirm' }
 }
 
 // 与联调契约一致：Authorization 头直接使用 base64 值（无 "Basic " 前缀）
@@ -217,10 +228,21 @@ export async function webImRequest<T = any>(
     throw new Error(`[webImRequest] 未找到 URL 映射: ${url}`)
   }
 
-  const { method, path } = mapping
+  const { method } = mapping
+  // 支持路径变量替换（如 {uid}）
+  let resolvedPath = mapping.path
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      const placeholder = `{${k}}`
+      if (resolvedPath.includes(placeholder)) {
+        resolvedPath = resolvedPath.replace(placeholder, String(v))
+        delete params[k]
+      }
+    }
+  }
 
   // 构建完整 URL，附加查询参数
-  let fullUrl = `${baseUrl}/${path}`
+  let fullUrl = `${baseUrl}/${resolvedPath}`
   if (params && Object.keys(params).length > 0) {
     const searchParams = new URLSearchParams()
     for (const [k, v] of Object.entries(params)) {
@@ -254,9 +276,9 @@ export async function webImRequest<T = any>(
     headers
   }
 
-  // GET/DELETE 不带 body，其他带 body
-  if (method !== 'GET' && method !== 'DELETE') {
-    fetchOptions.body = JSON.stringify(body ?? {})
+  // GET 不带 body，其他方法（含 DELETE）有 body 时携带
+  if (method !== 'GET' && body !== undefined && body !== null) {
+    fetchOptions.body = JSON.stringify(body)
   }
 
   const response = await fetch(fullUrl, fetchOptions)

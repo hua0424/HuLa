@@ -6,7 +6,9 @@
       <!-- 头像 -->
       <div
         class="self-center h-auto transition-transform duration-300 ease-in-out origin-top"
-        :style="{ transform: props.isShow ? 'scale(1) translateY(0)' : 'scale(0.62) translateY(0px)' }">
+        :class="{ 'cursor-pointer': props.isMyPage }"
+        :style="{ transform: props.isShow ? 'scale(1) translateY(0)' : 'scale(0.62) translateY(0px)' }"
+        @click="props.isMyPage && router.push('/mobile/mobileMy/simpleBio')">
         <n-avatar :size="86" :src="AvatarUtils.getAvatarUrl(userDetailInfo!.avatar)" fallback-src="/logo.png" round />
       </div>
 
