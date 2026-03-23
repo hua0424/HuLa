@@ -101,7 +101,7 @@
   </AutoFixHeightPage>
 
   <!-- 激活码展示弹窗 -->
-  <AiclawTokenDialog v-model:visible="showTokenDialog" :token="refreshedToken" :uid="uid" @refreshed="onTokenRefreshed" />
+  <AiclawTokenDialog v-model:visible="showTokenDialog" :token="refreshedToken" />
 </template>
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
@@ -110,10 +110,12 @@ import CommunityContent from '#/components/community/CommunityContent.vue'
 import CommunityTab from '#/components/community/CommunityTab.vue'
 import PersonalInfo from '#/components/my/PersonalInfo.vue'
 import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
+import { ImUrlEnum } from '@/enums'
 import { useContactStore } from '@/stores/contacts'
 import { useUserStore } from '@/stores/user'
 import { useFeedStore } from '@/stores/feed'
 import { isAiclawUser } from '@/utils/AiclawUtils'
+import { imRequest } from '@/utils/ImRequestUtils'
 
 const feedStore = useFeedStore()
 const { feedList, feedOptions } = storeToRefs(feedStore)
@@ -148,14 +150,31 @@ const aiclawDeactivated = computed(() => {
 })
 const showTokenDialog = ref(false)
 const refreshedToken = ref('')
+const refreshLoading = ref(false)
 
 const handleRefreshActivation = () => {
-  refreshedToken.value = ''
-  showTokenDialog.value = true
-}
-
-const onTokenRefreshed = () => {
-  // 刷新后列表状态可能变化（回到未激活）
+  window.$dialog?.warning({
+    title: t('aiclaw.token.refresh'),
+    content: t('aiclaw.token.refresh_confirm'),
+    positiveText: t('aiclaw.delete.confirm'),
+    negativeText: t('aiclaw.delete.cancel'),
+    onPositiveClick: async () => {
+      refreshLoading.value = true
+      try {
+        const result = await imRequest<{ activationToken: string }>({
+          url: ImUrlEnum.AICLAW_REFRESH_ACTIVATION,
+          params: { uid }
+        })
+        refreshedToken.value = result.activationToken
+        showTokenDialog.value = true
+        window.$message?.success?.(t('aiclaw.token.refresh_success'))
+      } catch (error) {
+        console.error('[FriendInfo] 重新生成激活码失败:', error)
+      } finally {
+        refreshLoading.value = false
+      }
+    }
+  })
 }
 
 const onUpdate = (newTab: string) => {
