@@ -289,20 +289,25 @@ const allUserMap = computed(() => {
   return map
 })
 
-/** 解析后端返回的 session.text（可能是 JSON 字符串），提取纯文本第一行 */
-const parseSessionText = (text?: string) => {
+/** 解析后端返回的 session.text（可能是 JSON 字符串或对象），提取纯文本第一行 */
+const parseSessionText = (text?: unknown) => {
   if (!text) return ''
-  // 尝试解析 JSON（后端可能返回 {"content":"xxx"} 格式）
-  if (text.startsWith('{')) {
+  // 如果是对象（后端直接返回了 body 对象），提取 content
+  if (typeof text === 'object') {
+    const obj = text as Record<string, any>
+    return String(obj.content || '').split('\n')[0].trim()
+  }
+  let str = String(text)
+  // 尝试解析 JSON 字符串
+  if (str.startsWith('{')) {
     try {
-      const parsed = JSON.parse(text)
-      text = parsed.content || parsed.text || text
+      const parsed = JSON.parse(str)
+      str = parsed.content || parsed.text || str
     } catch {
       // 非 JSON，保持原值
     }
   }
-  // 只取第一行，去掉换行
-  return (text || '').split('\n')[0].trim()
+  return str.split('\n')[0].trim()
 }
 
 // 会话列表
