@@ -779,7 +779,7 @@ export const useChatStore = defineStore(
             : renderReplyContent(
                 lastMsgUserName,
                 msg.message.type,
-                msg.message.body?.content || msg.message.body,
+                typeof msg.message.body?.content === 'string' ? msg.message.body.content : '',
                 session.type
               )
 

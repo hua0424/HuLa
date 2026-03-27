@@ -1,12 +1,19 @@
 import { MSG_REPLY_TEXT_MAP } from '@/common/message'
 import { MsgEnum, RoomTypeEnum } from '@/enums'
 
+// 提取消息内容的第一行用于预览（会话列表展示）
+const firstLine = (text?: string) => {
+  if (!text) return ''
+  return text.split('\n')[0].trim()
+}
+
 // 计算展示的回复消息的内容
 export const renderReplyContent = (name?: string, type?: MsgEnum, content?: string, roomType?: RoomTypeEnum) => {
   switch (type) {
     case MsgEnum.SYSTEM:
     case MsgEnum.TEXT: {
-      return roomType === RoomTypeEnum.GROUP ? `${name}:${content}` : content
+      const preview = firstLine(content)
+      return roomType === RoomTypeEnum.GROUP ? `${name}:${preview}` : preview
     }
     case MsgEnum.IMAGE: {
       return roomType === RoomTypeEnum.GROUP
