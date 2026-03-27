@@ -13,8 +13,8 @@
       <div class="flex flex-col overflow-auto h-full">
         <PersonalInfo :is-my-page="isMyPage" :is-show="isShow"></PersonalInfo>
 
-        <!-- AI 助理激活码管理 -->
-        <div v-if="isAiclawFriend" class="px-20px py-12px">
+        <!-- AI 助理激活码管理（仅 owner 可见） -->
+        <div v-if="isAiclawOwner" class="px-20px py-12px">
           <n-button
             block
             secondary
@@ -141,11 +141,11 @@ const uid = route.params.uid as string
 
 const isMyPage = ref(false)
 
-// AI 助理激活码管理
+// AI 助理激活码管理（仅 owner 可见）
 const isAiclawFriend = computed(() => isAiclawUser(uid))
+const isAiclawOwner = ref(false)
 const aiclawDeactivated = computed(() => {
   const contact = contactStore.contactsList.find((c) => c.uid === uid)
-  // authStatus === 2 为停用状态，按钮 disable
   return (contact as any)?.authStatus === 2
 })
 const showTokenDialog = ref(false)
@@ -251,6 +251,16 @@ onMounted(async () => {
     isMyPage.value = true
   } else {
     isMyPage.value = false
+  }
+
+  // 检查当前用户是否为该 aiclaw 的 owner
+  if (isAiclawFriend.value) {
+    try {
+      const list = await imRequest<Array<{ uid: string }>>({ url: ImUrlEnum.AICLAW_LIST })
+      isAiclawOwner.value = (list || []).some((a) => String(a.uid) === String(uid))
+    } catch {
+      isAiclawOwner.value = false
+    }
   }
 
   // 初始加载动态列表
