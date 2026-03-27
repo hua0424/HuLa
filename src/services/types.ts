@@ -182,6 +182,8 @@ export type CacheUserItem = {
   account: string
   /** 用户类型（0=普通用户, 4=AI助理） */
   userType?: number
+  /** AI助理的主人信息 */
+  ownerInfo?: { uid: string; name: string; avatar: string }
 }
 
 export type UserItem = {
@@ -203,6 +205,8 @@ export type UserItem = {
   account: string
   /** 用户类型（0=普通用户, 4=AI助理） */
   userType?: number
+  /** AI助理的主人信息 */
+  ownerInfo?: { uid: string; name: string; avatar: string }
   /** 我的群昵称 */
   myName?: string
   /** 当前佩戴的徽章 */
@@ -291,6 +295,10 @@ export type UserInfoType = {
   linkedGitcode?: boolean
   /** 已绑定的 OAuth 提供商 */
   oauthProviders?: ('gitee' | 'github' | 'gitcode')[]
+  /** 用户类型（0=普通用户, 4=AI助理） */
+  userType?: number
+  /** AI助理的主人信息 */
+  ownerInfo?: { uid: string; name: string; avatar: string }
 }
 
 export type BadgeType = {
@@ -603,6 +611,12 @@ export interface NoticeItem {
   senderId: string
   /** 接收人UID */
   receiverId: string
+  /** 接收人用户类型（0=普通用户, 4=AI助理） */
+  receiverUserType?: number
+  /** 接收人名称 */
+  receiverName?: string
+  /** 接收人头像 */
+  receiverAvatar?: string
   /** 申请ID */
   applyId: string
   /** 房间ID */

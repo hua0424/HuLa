@@ -39,6 +39,19 @@
             <img class="w-14px h-14px dark:invert" src="@/assets/mobile/my/qr-code.webp" alt="" />
           </span>
         </div>
+        <!-- AI助理主人信息 -->
+        <div
+          v-if="
+            userDetailInfo?.userType === UserType.AICLAW &&
+            userDetailInfo?.ownerInfo &&
+            userDetailInfo?.ownerInfo?.uid !== userStore.userInfo?.uid
+          "
+          class="flex items-center gap-4px">
+          <span class="text-bold-style">{{ t('aiclaw.owner.label') }}:</span>
+          <n-avatar :size="16" :src="AvatarUtils.getAvatarUrl(userDetailInfo.ownerInfo.avatar)" round />
+          <span class="text-bold-style">{{ userDetailInfo.ownerInfo.name }}</span>
+        </div>
+
         <Transition name="medal-fade">
           <div
             v-if="props.isShow"

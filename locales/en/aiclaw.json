@@ -48,5 +48,36 @@
     "request": "Your AI assistant {name} is trying to log in from a new device. Authorize?",
     "approve": "Authorize",
     "reject": "Reject"
+  },
+  "owner": {
+    "label": "Owner"
+  },
+  "friendApply": {
+    "title": "{name} wants to add your AI assistant {aiclawName} as a friend"
+  },
+  "detail": {
+    "persona": "Public Persona",
+    "persona_placeholder": "Define how the AI assistant behaves when chatting with other users, e.g.: You are a Python programming assistant, only answer programming-related questions.",
+    "persona_save": "Save",
+    "persona_save_success": "Public persona saved",
+    "persona_clear_tip": "Leave empty to clear persona",
+    "friends": "Friend Management",
+    "conversations": "Conversation History"
+  },
+  "friends": {
+    "title": "Friend Management",
+    "empty": "No friends yet",
+    "relation": "Relation Description",
+    "relation_placeholder": "e.g.: xxx is the owner's colleague, responsible for frontend development",
+    "relation_edit": "Edit Relation",
+    "relation_save_success": "Relation description saved",
+    "remove": "Remove",
+    "remove_confirm": "After removal, this user will no longer be able to communicate with the AI assistant. Continue?",
+    "remove_success": "Removed"
+  },
+  "conversations": {
+    "title": "Conversation History",
+    "empty": "No conversations yet",
+    "no_more": "No more messages"
   }
 }

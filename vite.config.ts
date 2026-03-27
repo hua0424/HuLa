@@ -47,10 +47,13 @@ export default defineConfig(({ mode }: ConfigEnv) => {
   const componentsDirs = getComponentsDirs(currentPlatform)
   const componentsDtsPath = getComponentsDtsPath(currentPlatform)
 
-  // 根据平台决定host地址
+  // 根据平台决定host地址（Web 平台不写死，支持局域网访问）
   const host = (() => {
-    if (isPC || isWebPlatform) {
+    if (isPC) {
       return '127.0.0.1'
+    }
+    if (isWebPlatform) {
+      return '0.0.0.0'
     }
 
     // 移动端逻辑：检查是否为有效的内网IP地址
@@ -160,11 +163,9 @@ export default defineConfig(({ mode }: ConfigEnv) => {
     clearScreen: false,
     // 2. tauri expects a fixed port, fail if that port is not available
     server: {
-      hmr: {
-        protocol: 'ws',
-        host: host,
-        port: serverPort
-      },
+      hmr: isWebPlatform
+        ? { protocol: 'ws', port: serverPort }
+        : { protocol: 'ws', host: host, port: serverPort },
       cors: true, // 配置 CORS
       host: '0.0.0.0',
       port: serverPort,
@@ -180,7 +181,10 @@ export default defineConfig(({ mode }: ConfigEnv) => {
               '/api': {
                 target: 'http://localhost:18080',
                 changeOrigin: true,
-                ws: true
+                ws: true,
+                headers: {
+                  Origin: 'http://localhost:18080'
+                }
               }
             }
           }

@@ -48,5 +48,36 @@
     "request": "你的 AI 助理 {name} 尝试从新设备登录，是否授权？",
     "approve": "授权",
     "reject": "拒绝"
+  },
+  "owner": {
+    "label": "主人"
+  },
+  "friendApply": {
+    "title": "{name} 想添加你的 AI 助理 {aiclawName} 为好友"
+  },
+  "detail": {
+    "persona": "对外人设",
+    "persona_placeholder": "定义 AI 助理与其他用户聊天时的行为，例如：你是一个 Python 编程助手，只回答编程相关问题。",
+    "persona_save": "保存",
+    "persona_save_success": "对外人设已保存",
+    "persona_clear_tip": "留空表示不设置人设",
+    "friends": "好友管理",
+    "conversations": "对话记录"
+  },
+  "friends": {
+    "title": "好友管理",
+    "empty": "暂无好友",
+    "relation": "关系说明",
+    "relation_placeholder": "例如：xxx 是主人的同事，负责前端开发",
+    "relation_edit": "编辑关系",
+    "relation_save_success": "关系说明已保存",
+    "remove": "移除",
+    "remove_confirm": "移除后该用户将无法再与 AI 助理通讯，确定吗？",
+    "remove_success": "已移除"
+  },
+  "conversations": {
+    "title": "对话记录",
+    "empty": "暂无对话记录",
+    "no_more": "没有更多了"
   }
 }

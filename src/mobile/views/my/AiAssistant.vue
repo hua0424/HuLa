@@ -18,8 +18,13 @@
               v-for="item in aiclawList"
               :key="item.uid"
               class="flex items-center gap-12px p-12px rounded-12px bg-white dark:bg-#1a1a1a shadow-sm">
-              <n-avatar round :size="44" :src="item.avatar || '/logo.png'" fallback-src="/logo.png" />
-              <div class="flex flex-col flex-1 min-w-0">
+              <n-avatar
+                round :size="44" :src="item.avatar || '/logo.png'" fallback-src="/logo.png"
+                class="cursor-pointer flex-shrink-0"
+                @click="router.push(`/mobile/mobileMy/aiAssistant/${item.uid}`)" />
+              <div
+                class="flex flex-col flex-1 min-w-0 cursor-pointer"
+                @click="router.push(`/mobile/mobileMy/aiAssistant/${item.uid}`)">
                 <span class="text-15px font-500 truncate">{{ item.name }}</span>
                 <span class="text-12px text-#999 mt-2px">
                   {{ t(`aiclaw.status.${authStatusMap[item.authStatus] || 'inactive'}`) }}
@@ -90,11 +95,14 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import AiclawCreateForm from '@/components/aiclaw/AiclawCreateForm.vue'
 import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
 import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
 import { ImUrlEnum } from '@/enums'
 import { imRequest } from '@/utils/ImRequestUtils'
+
+const router = useRouter()
 
 const { t } = useI18n()
 
@@ -105,6 +113,7 @@ type AiclawListItem = {
   description: string
   authStatus: number
   adapterType: string
+  publicPersona: string | null
   createTime: number
 }
 

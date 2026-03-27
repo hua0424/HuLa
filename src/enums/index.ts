@@ -717,8 +717,10 @@ export enum ImUrlEnum {
   REQUEST_NOTICE_READ = 'RequestNoticeRead',
   /** 获取联系人列表 */
   GET_CONTACT_LIST = 'getContactList',
-  /** 搜索好友 */
+  /** 搜索好友（好友范围内） */
   SEARCH_FRIEND = 'searchFriend',
+  /** 全局用户搜索（含非好友、aiclaw） */
+  SEARCH_USER = 'searchUser',
 
   // 用户状态相关
   /** 改变用户状态 */
@@ -933,7 +935,19 @@ export enum ImUrlEnum {
   /** 恢复 AI 助理 */
   AICLAW_RESTORE = 'aiclawRestore',
   /** 机器码变更授权确认 */
-  AICLAW_AUTH_CONFIRM = 'aiclawAuthConfirm'
+  AICLAW_AUTH_CONFIRM = 'aiclawAuthConfirm',
+  /** 设置 aiclaw 对外人设 */
+  AICLAW_SET_PERSONA = 'aiclawSetPersona',
+  /** 获取 aiclaw 对话列表 */
+  AICLAW_CONVERSATIONS = 'aiclawConversations',
+  /** 获取 aiclaw 与某用户的聊天记录 */
+  AICLAW_CONVERSATION_MESSAGES = 'aiclawConversationMessages',
+  /** 获取 aiclaw 好友列表 */
+  AICLAW_FRIENDS = 'aiclawFriends',
+  /** 移除 aiclaw 好友 */
+  AICLAW_REMOVE_FRIEND = 'aiclawRemoveFriend',
+  /** 设置 aiclaw 好友关系说明 */
+  AICLAW_SET_RELATION = 'aiclawSetRelation'
 }
 
 // 滚动意图管理枚举

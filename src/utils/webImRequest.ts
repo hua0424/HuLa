@@ -83,6 +83,7 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   getFriendPage: { method: 'GET', path: 'im/user/friend/page' },
   getContactList: { method: 'GET', path: 'im/chat/contact/list' },
   searchFriend: { method: 'GET', path: 'im/user/friend/search' },
+  searchUser: { method: 'GET', path: 'im/user/search' },
 
   // 用户状态相关
   changeUserState: { method: 'POST', path: 'im/user/state/changeState' },
@@ -203,7 +204,13 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   aiclawRefreshActivation: { method: 'POST', path: 'im/aiclaw/{uid}/refresh-activation' },
   aiclawDeactivate: { method: 'POST', path: 'im/aiclaw/{uid}/deactivate' },
   aiclawRestore: { method: 'POST', path: 'im/aiclaw/{uid}/restore' },
-  aiclawAuthConfirm: { method: 'POST', path: 'im/aiclaw/{uid}/auth-confirm' }
+  aiclawAuthConfirm: { method: 'POST', path: 'im/aiclaw/{uid}/auth-confirm' },
+  aiclawSetPersona: { method: 'PUT', path: 'im/aiclaw/{uid}/persona' },
+  aiclawConversations: { method: 'GET', path: 'im/aiclaw/{uid}/conversations' },
+  aiclawConversationMessages: { method: 'GET', path: 'im/aiclaw/{uid}/conversations/{friendUid}/messages' },
+  aiclawFriends: { method: 'GET', path: 'im/aiclaw/{uid}/friends' },
+  aiclawRemoveFriend: { method: 'DELETE', path: 'im/aiclaw/{uid}/friends/{friendUid}' },
+  aiclawSetRelation: { method: 'PUT', path: 'im/aiclaw/{uid}/friends/{friendUid}/relation' }
 }
 
 // 与联调契约一致：Authorization 头直接使用 base64 值（无 "Basic " 前缀）
