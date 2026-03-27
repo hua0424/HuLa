@@ -578,8 +578,16 @@ export const useChatStore = defineStore(
             unreadCountManager.refreshBadge(globalStore.unReadMark, feedStore.unreadCount)
             return
           }
+          // 将会话数据写入 sessionList 并更新 sessionMap
+          const list = Array.isArray(data) ? data : (data.list || [])
+          sessionList.value = [...list]
+          for (const session of sessionList.value) {
+            sessionMap.value[session.roomId] = session
+          }
+          sortAndUniqueSessionList()
           sessionOptions.isLoading = false
           globalStore.unreadReady = true
+          unreadCountManager.refreshBadge(globalStore.unReadMark, feedStore.unreadCount)
           return
         }
 

@@ -126,7 +126,7 @@
               <div class="truncate pl-7 flex pt-5px gap-10px leading-tight flex-col">
                 <n-text class="text-16px font-bold flex-1 truncate">{{ item.name }}</n-text>
                 <div class="text-13px text-gray-600 dark:text-gray-400 truncate">
-                  {{ item.text }}
+                  {{ item.lastMsg || item.text }}
                 </div>
               </div>
 
@@ -289,6 +289,22 @@ const allUserMap = computed(() => {
   return map
 })
 
+/** 解析后端返回的 session.text（可能是 JSON 字符串），提取纯文本第一行 */
+const parseSessionText = (text?: string) => {
+  if (!text) return ''
+  // 尝试解析 JSON（后端可能返回 {"content":"xxx"} 格式）
+  if (text.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(text)
+      text = parsed.content || parsed.text || text
+    } catch {
+      // 非 JSON，保持原值
+    }
+  }
+  // 只取第一行，去掉换行
+  return (text || '').split('\n')[0].trim()
+}
+
 // 会话列表
 const sessionList = computed(() => {
   return (
@@ -332,7 +348,7 @@ const sessionList = computed(() => {
           ...item,
           avatar: latestAvatar,
           name: displayName, // 使用可能修改过的显示名称
-          lastMsg: displayMsg || '欢迎使用HuLa',
+          lastMsg: displayMsg || parseSessionText(item.text) || '欢迎使用HuLa',
           lastMsgTime: formatTimestamp(item?.activeTime),
           isAtMe
         }
