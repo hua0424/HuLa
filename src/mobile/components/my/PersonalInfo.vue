@@ -162,7 +162,8 @@ import { useUserStore } from '@/stores/user'
 import { useUserStatusStore } from '@/stores/userStatus'
 import { AvatarUtils } from '@/utils/AvatarUtils'
 import 'vant/es/dialog/style'
-import { OnlineEnum, UserType } from '@/enums'
+import { ImUrlEnum, OnlineEnum, UserType } from '@/enums'
+import { imRequest } from '@/utils/ImRequestUtils'
 import { useMessage } from '@/hooks/useMessage.ts'
 import type { UserInfoType, UserItem } from '@/services/types'
 import { useChatStore } from '@/stores/chat'
@@ -275,6 +276,15 @@ onMounted(() => {
   const foundedUser = groupStore.allUserInfo.find((i) => i.uid === uid)
 
   userDetailInfo.value = foundedUser
+
+  // aiclaw 用户需要额外获取 ownerInfo（缓存中没有）
+  if (foundedUser?.userType === UserType.AICLAW || contactStore.contactsList.find((c) => c.uid === uid)?.userType === 4) {
+    imRequest<any>({ url: ImUrlEnum.GET_USER_BY_ID, params: { id: uid } }).then((detail) => {
+      if (detail?.ownerInfo) {
+        userDetailInfo.value = { ...userDetailInfo.value, ...detail } as any
+      }
+    }).catch(() => {})
+  }
 
   if (foundedUser?.userStateId && foundedUser?.userStateId !== '0') {
     const state = getUserState(foundedUser.userStateId)

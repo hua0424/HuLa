@@ -819,6 +819,7 @@ export enum ImUrlEnum {
   CHECK_EMAIL = 'checkEmail',
 
   MERGE_MSG = 'mergeMsg',
+  GET_USER_BY_ID = 'getUserById',
   GET_USER_BY_IDS = 'getUserByIds',
 
   /** 发送 AI 消息 */

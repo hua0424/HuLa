@@ -100,6 +100,7 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   getBadgesBatch: { method: 'POST', path: 'im/user/badges/batch' },
   getBadgeList: { method: 'GET', path: 'im/user/badges' },
   blockUser: { method: 'PUT', path: 'im/user/black' },
+  getUserById: { method: 'GET', path: 'im/user/getById/{id}' },
   getUserByIds: { method: 'POST', path: 'im/user/getUserByIds' },
 
   // 消息相关

@@ -207,16 +207,11 @@ const getGroupDetail = async (roomId: string) => {
 const applyMsg = computed(() => (item: any) => {
   if (props.type === 'friend') {
     // 好友申请目标是 AI 助理时，显示专属文案
-    // aiclaw 场景：operateId 是 aiclaw 的 uid，receiverUserType 可能是 owner 的类型
-    // 需要通过 receiverUserType === 4 或 operateId 查 userType 来判断
-    if (item.eventType === NoticeType.ADD_ME) {
-      const isAiclawApply = item.receiverUserType === 4 ||
-        (item.operateId && groupStore.getUserInfo(item.operateId)?.userType === 4)
-      if (isAiclawApply) {
-        const senderName = getUserInfo(item)?.name || t('mobile_mymessage.unknown_user')
-        const aiclawName = item.receiverName || groupStore.getUserInfo(item.operateId)?.name || t('mobile_mymessage.unknown_user')
-        return t('aiclaw.friendApply.title', { name: senderName, aiclawName })
-      }
+    if (item.eventType === NoticeType.ADD_ME && item.receiverUserType === 4) {
+      const senderName = getUserInfo(item)?.name || t('mobile_mymessage.unknown_user')
+      // aiclaw 名称：优先从 operateId 查缓存，fallback 到 receiverName
+      const aiclawName = (item.operateId && groupStore.getUserInfo(item.operateId)?.name) || item.receiverName || t('mobile_mymessage.unknown_user')
+      return t('aiclaw.friendApply.title', { name: senderName, aiclawName })
     }
     return isCurrentUser(item.senderId)
       ? isAccepted(item)
