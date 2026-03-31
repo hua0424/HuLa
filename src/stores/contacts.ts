@@ -55,6 +55,13 @@ export const useContactStore = defineStore(StoresEnum.CONTACTS, () => {
       } else {
         contactsList.value.push(...data.list)
       }
+      // 按 uid 去重（防止重复数据）
+      const seen = new Set<string>()
+      contactsList.value = contactsList.value.filter((item) => {
+        if (seen.has(item.uid)) return false
+        seen.add(item.uid)
+        return true
+      })
       contactsOptions.value.cursor = data.cursor
       contactsOptions.value.isLast = data.isLast
     } catch (error) {

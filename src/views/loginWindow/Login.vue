@@ -56,7 +56,7 @@
               class="p-8px cursor-pointer hover:bg-#90909020 dark:hover:bg-#90909030 hover:rounded-6px">
               <div class="flex-between-center">
                 <n-avatar :src="AvatarUtils.getAvatarUrl(item.avatar)" color="#fff" class="size-28px rounded-50%" />
-                <p class="text-14px color-#505050 dark:color-#fefefe">{{ item.account }}</p>
+                <p class="text-14px color-#505050 dark:color-#fefefe">{{ item.name ? `${item.name}(${item.account})` : item.account }}</p>
                 <svg @click.stop="delAccount(item)" class="w-12px h-12px dark:color-#fefefe">
                   <use href="#close"></use>
                 </svg>
@@ -106,6 +106,18 @@
           @click="normalLogin('PC', true, false)">
           <span>{{ loginText }}</span>
         </n-button>
+
+        <!-- 记住密码 / 自动登录 -->
+        <n-flex justify="space-between" align="center" class="w-full px-2px">
+          <n-flex align="center" :size="6">
+            <n-checkbox v-model:checked="rememberPassword" @update:checked="onRememberChange" />
+            <span class="text-12px color-#909090 cursor-default">记住密码</span>
+          </n-flex>
+          <n-flex align="center" :size="6">
+            <n-checkbox v-model:checked="autoLoginChecked" @update:checked="onAutoLoginChange" />
+            <span class="text-12px color-#909090 cursor-default">自动登录</span>
+          </n-flex>
+        </n-flex>
       </n-flex>
     </n-flex>
 
@@ -257,6 +269,26 @@ const { login } = storeToRefs(settingStore)
 const protocol = ref(true)
 const arrowStatus = ref(false)
 const moreShow = ref(false)
+
+/** 记住密码 / 自动登录 */
+const rememberPassword = ref(localStorage.getItem('rememberPassword') === 'true')
+const autoLoginChecked = ref(login.value.autoLogin)
+
+const onRememberChange = (checked: boolean) => {
+  localStorage.setItem('rememberPassword', String(checked))
+  if (!checked) {
+    autoLoginChecked.value = false
+    login.value.autoLogin = false
+  }
+}
+
+const onAutoLoginChange = (checked: boolean) => {
+  login.value.autoLogin = checked
+  if (checked) {
+    rememberPassword.value = true
+    localStorage.setItem('rememberPassword', 'true')
+  }
+}
 const { createWebviewWindow, createModalWindow, getWindowPayload } = useWindow()
 const { checkUpdate, CHECK_UPDATE_LOGIN_TIME } = useCheckUpdate()
 const { normalLogin, giteeLogin, githubLogin, gitcodeLogin, loading, loginText, loginDisabled, info, uiState } =

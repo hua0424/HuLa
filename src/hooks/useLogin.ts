@@ -286,7 +286,12 @@ export const useLogin = () => {
       client: isDesktop() ? 'PC' : 'MOBILE'
     }
     userStore.userInfo = account
-    loginHistoriesStore.addLoginHistory(account)
+    // 记住密码时保存密码到登录历史
+    const historyEntry = { ...account }
+    if (localStorage.getItem('rememberPassword') === 'true') {
+      historyEntry.password = info.value.password
+    }
+    loginHistoriesStore.addLoginHistory(historyEntry)
     // 初始化表情列表并在后台预取本地缓存（使用 worker + 并发限制）
     void emojiStore.initEmojis().catch(() => {
       void logInfo('[login] 初始化表情失败')

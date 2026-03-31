@@ -1,75 +1,175 @@
 <template>
-  <div class="flex flex-col h-full bg-[--right-bg-color]">
-    <!-- 标题栏 -->
-    <div class="flex items-center justify-between px-20px py-14px border-b border-[--line-color] select-none">
-      <span class="text-16px font-600 text-[--text-color]">{{ t('aiclaw.title') }}</span>
-      <n-button type="primary" size="small" @click="showCreateForm = true">
-        + {{ t('aiclaw.create.submit') }}
-      </n-button>
-    </div>
+  <div class="size-full flex bg-[--right-bg-color]">
+    <!-- Left Panel: AI assistant list -->
+    <div
+      data-tauri-drag-region
+      class="flex flex-col w-280px h-full bg-[--left-bg-color] border-r border-[--line-color] select-none">
+      <!-- Title area (draggable) -->
+      <div data-tauri-drag-region class="flex items-center justify-between px-16px pt-36px pb-12px">
+        <span class="text-16px font-600 text-[--text-color]">{{ t('aiclaw.title') }}</span>
+      </div>
 
-    <!-- AI 助理列表 -->
-    <div class="flex-1 overflow-auto p-16px">
-      <template v-if="aiclawList.length > 0">
-        <div
-          v-for="item in aiclawList"
-          :key="item.uid"
-          class="flex items-center gap-12px p-12px mb-8px rounded-8px hover:bg-[--list-hover-color] cursor-pointer transition-colors">
-          <n-avatar round :size="40" :src="item.avatar || '/logo.png'" fallback-src="/logo.png" />
-          <div class="flex flex-col flex-1 min-w-0">
-            <span class="text-14px font-500 text-[--text-color] truncate">{{ item.name }}</span>
-            <span class="text-12px text-#999 mt-2px">
-              {{ t(`aiclaw.status.${authStatusMap[item.authStatus] || 'inactive'}`) }}
-            </span>
+      <!-- List -->
+      <div class="flex-1 overflow-auto px-12px pb-12px">
+        <template v-if="aiclawList.length > 0">
+          <div
+            v-for="item in aiclawList"
+            :key="item.uid"
+            class="flex items-center gap-10px p-10px mb-6px rounded-8px cursor-pointer transition-colors"
+            :class="[
+              selectedUid === item.uid
+                ? 'bg-[--chat-hover-color] border-(1px dashed #13987f)'
+                : 'hover:bg-[--list-hover-color] border-(1px solid transparent)'
+            ]"
+            @click="handleSelect(item)">
+            <n-avatar round :size="36" :src="item.avatar || '/logo.png'" fallback-src="/logo.png" />
+            <div class="flex flex-col flex-1 min-w-0">
+              <span class="text-13px font-500 text-[--text-color] truncate">{{ item.name }}</span>
+              <span class="text-11px mt-2px" :class="statusTextClass(item.authStatus)">
+                {{ t(`aiclaw.status.${authStatusMap[item.authStatus] || 'inactive'}`) }}
+              </span>
+            </div>
           </div>
-          <div class="flex items-center gap-6px">
-            <!-- 未激活：查看激活码按钮 -->
-            <n-button
-              v-if="item.authStatus === 0"
-              size="tiny"
-              type="primary"
-              secondary
-              @click="handleViewToken(item.uid)">
-              {{ t('aiclaw.token.view') }}
-            </n-button>
-            <!-- 已激活：标签 -->
-            <span v-else-if="item.authStatus === 1" class="text-#18a058 text-11px font-500 px-6px py-2px rounded-4px bg-#18a05815">
-              {{ t('aiclaw.token.activated') }}
-            </span>
-            <!-- 已停用：标签 -->
-            <span v-else-if="item.authStatus === 2" class="text-#d03050 text-11px font-500 px-6px py-2px rounded-4px bg-#d0305015">
-              {{ t('aiclaw.token.deactivated') }}
-            </span>
-            <!-- 删除按钮 -->
-            <n-button
-              size="tiny"
-              type="error"
-              quaternary
-              @click="handleDelete(item)">
-              {{ t('aiclaw.delete.title') }}
-            </n-button>
-          </div>
+        </template>
+
+        <!-- Empty state -->
+        <div v-else class="flex flex-col items-center justify-center h-full text-13px text-#999">
+          <svg class="size-48px mb-12px opacity-20"><use href="#robot"></use></svg>
+          <span>{{ t('aiclaw.empty') }}</span>
         </div>
-      </template>
+      </div>
 
-      <!-- 空状态 -->
-      <div v-else class="flex flex-col items-center justify-center h-full text-14px text-#999">
-        <svg class="size-64px mb-16px opacity-20"><use href="#robot"></use></svg>
-        <span>{{ t('aiclaw.empty') }}</span>
+      <!-- Create button at bottom -->
+      <div class="px-12px pb-12px">
+        <n-button type="primary" block @click="showCreateForm = true">
+          + {{ t('aiclaw.create.submit') }}
+        </n-button>
       </div>
     </div>
 
-    <!-- 创建表单弹窗 -->
+    <!-- Right Panel: Detail / Empty state -->
+    <div class="flex flex-col flex-1 min-w-0 border-l border-[--line-color]">
+      <!-- ActionBar for window controls -->
+      <ActionBar
+        :shrink="false"
+        :current-label="windowLabel"
+        :top-win-label="windowLabel" />
+
+      <!-- Detail content -->
+      <div v-if="selectedItem" class="flex-1 overflow-auto">
+        <!-- Top: avatar + name + status + description -->
+        <div class="flex items-center gap-16px p-24px border-b border-[--line-color]">
+          <n-avatar round :size="56" :src="selectedItem.avatar || '/logo.png'" fallback-src="/logo.png" />
+          <div class="flex flex-col flex-1 min-w-0">
+            <span class="text-18px font-600 text-[--text-color] truncate">{{ selectedItem.name }}</span>
+            <span v-if="selectedItem.description" class="text-13px text-#999 mt-4px">
+              {{ selectedItem.description }}
+            </span>
+            <div class="flex items-center gap-8px mt-6px">
+              <!-- Status badge -->
+              <span
+                v-if="selectedItem.authStatus === 0"
+                class="text-11px font-500 px-8px py-2px rounded-4px bg-#90909015 text-#999">
+                {{ t('aiclaw.status.inactive') }}
+              </span>
+              <span
+                v-else-if="selectedItem.authStatus === 1"
+                class="text-11px font-500 px-8px py-2px rounded-4px bg-#18a05815 text-#18a058">
+                {{ t('aiclaw.status.online') }}
+              </span>
+              <span
+                v-else-if="selectedItem.authStatus === 2"
+                class="text-11px font-500 px-8px py-2px rounded-4px bg-#d0305015 text-#d03050">
+                {{ t('aiclaw.status.offline') }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Persona section -->
+        <div class="p-24px border-b border-[--line-color]">
+          <div class="text-14px font-500 text-[--text-color] mb-12px">{{ t('aiclaw.detail.persona') }}</div>
+          <n-input
+            v-model:value="personaText"
+            type="textarea"
+            :placeholder="t('aiclaw.detail.persona_placeholder')"
+            :autosize="{ minRows: 3, maxRows: 8 }"
+            :maxlength="500"
+            show-count />
+          <div class="flex items-center justify-between mt-10px">
+            <span class="text-11px text-#bbb">{{ t('aiclaw.detail.persona_clear_tip') }}</span>
+            <n-button
+              type="primary"
+              size="small"
+              :loading="savingPersona"
+              :disabled="!personaDirty"
+              @click="handleSavePersona">
+              {{ t('aiclaw.detail.persona_save') }}
+            </n-button>
+          </div>
+        </div>
+
+        <!-- Feature links -->
+        <div class="border-b border-[--line-color]">
+          <!-- Friend management -->
+          <div
+            class="flex items-center justify-between px-24px py-16px cursor-pointer hover:bg-[--list-hover-color] transition-colors"
+            @click="handleOpenFriends">
+            <span class="text-14px text-[--text-color]">{{ t('aiclaw.detail.friends') }}</span>
+            <svg class="size-16px text-#ccc"><use href="#right"></use></svg>
+          </div>
+          <div class="h-1px bg-[--line-color] mx-24px" />
+          <!-- Conversation history -->
+          <div
+            class="flex items-center justify-between px-24px py-16px cursor-pointer hover:bg-[--list-hover-color] transition-colors"
+            @click="handleOpenConversations">
+            <span class="text-14px text-[--text-color]">{{ t('aiclaw.detail.conversations') }}</span>
+            <svg class="size-16px text-#ccc"><use href="#right"></use></svg>
+          </div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="p-24px flex flex-col gap-12px">
+          <!-- View activation token (only if inactive) -->
+          <n-button
+            v-if="selectedItem.authStatus === 0"
+            type="primary"
+            secondary
+            block
+            @click="handleViewToken(selectedItem.uid)">
+            {{ t('aiclaw.token.view') }}
+          </n-button>
+
+          <!-- Regenerate activation token -->
+          <n-button block secondary @click="handleViewToken(selectedItem.uid)">
+            {{ t('aiclaw.token.refresh') }}
+          </n-button>
+
+          <!-- Deactivate / Delete -->
+          <n-button type="error" block ghost @click="handleDelete(selectedItem)">
+            {{ t('aiclaw.detail.deactivate') }}
+          </n-button>
+        </div>
+      </div>
+
+      <!-- Empty state when nothing selected -->
+      <div v-else class="flex-1 flex flex-col items-center justify-center text-#999">
+        <svg class="size-80px mb-16px opacity-15"><use href="#robot"></use></svg>
+        <span class="text-15px">{{ t('aiclaw.detail.select_hint') }}</span>
+      </div>
+    </div>
+
+    <!-- Create form dialog -->
     <AiclawCreateForm v-model:visible="showCreateForm" @created="onCreated" />
 
-    <!-- Token 展示弹窗 -->
+    <!-- Token dialog -->
     <AiclawTokenDialog
       v-model:visible="showTokenDialog"
       :token="createdToken"
       :uid="viewingUid"
       @refreshed="fetchList" />
 
-    <!-- 删除确认弹窗 -->
+    <!-- Delete confirm dialog -->
     <AiclawDeleteConfirmDialog
       v-model:visible="showDeleteDialog"
       @confirm="handleDeleteConfirm" />
@@ -78,13 +178,18 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import ActionBar from '@/components/windows/ActionBar.vue'
 import AiclawCreateForm from '@/components/aiclaw/AiclawCreateForm.vue'
 import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
 import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
 import { ImUrlEnum } from '@/enums'
 import { imRequest } from '@/utils/ImRequestUtils'
+import { isWeb } from '@/utils/PlatformConstants'
 
 const { t } = useI18n()
+
+// Window label for ActionBar (matches the url used in config.tsx)
+const windowLabel = ref('aiAssistant')
 
 type AiclawListItem = {
   uid: string
@@ -93,6 +198,7 @@ type AiclawListItem = {
   description: string
   authStatus: number
   adapterType: string
+  publicPersona: string | null
   createTime: number
 }
 
@@ -103,6 +209,12 @@ const createdToken = ref('')
 const viewingUid = ref('')
 const deletingUid = ref('')
 const aiclawList = ref<AiclawListItem[]>([])
+const selectedUid = ref<string | null>(null)
+
+// Persona editing state
+const personaText = ref('')
+const originalPersona = ref('')
+const savingPersona = ref(false)
 
 const authStatusMap: Record<number, 'inactive' | 'online' | 'offline'> = {
   0: 'inactive',
@@ -110,13 +222,64 @@ const authStatusMap: Record<number, 'inactive' | 'online' | 'offline'> = {
   2: 'offline'
 }
 
+const selectedItem = computed(() => aiclawList.value.find((item) => item.uid === selectedUid.value) || null)
+
+const personaDirty = computed(() => personaText.value !== originalPersona.value)
+
+const statusTextClass = (authStatus: number) => {
+  if (authStatus === 1) return 'text-#18a058'
+  if (authStatus === 2) return 'text-#d03050'
+  return 'text-#999'
+}
+
 const fetchList = async () => {
   try {
     const list = await imRequest<AiclawListItem[]>({ url: ImUrlEnum.AICLAW_LIST })
     aiclawList.value = list || []
   } catch (error) {
-    console.error('[AiAssistant] 获取列表失败:', error)
+    console.error('[AiAssistant] Failed to fetch list:', error)
   }
+}
+
+const handleSelect = (item: AiclawListItem) => {
+  selectedUid.value = item.uid
+  personaText.value = item.publicPersona || ''
+  originalPersona.value = item.publicPersona || ''
+}
+
+const handleSavePersona = async () => {
+  if (!selectedUid.value) return
+  savingPersona.value = true
+  try {
+    await imRequest({
+      url: ImUrlEnum.AICLAW_SET_PERSONA,
+      params: { uid: selectedUid.value },
+      body: { publicPersona: personaText.value }
+    })
+    originalPersona.value = personaText.value
+    // Update the item in the list so it persists if user switches
+    const item = aiclawList.value.find((a) => a.uid === selectedUid.value)
+    if (item) {
+      item.publicPersona = personaText.value
+    }
+    window.$message?.success?.(t('aiclaw.detail.persona_save_success'))
+  } catch (error) {
+    console.error('[AiAssistant] Failed to save persona:', error)
+  } finally {
+    savingPersona.value = false
+  }
+}
+
+const handleOpenFriends = () => {
+  if (!selectedUid.value) return
+  // Open friends management in a new window (desktop) or show a message for now
+  window.$message?.info?.(t('aiclaw.detail.friends'))
+}
+
+const handleOpenConversations = () => {
+  if (!selectedUid.value) return
+  // Open conversations in a new window (desktop) or show a message for now
+  window.$message?.info?.(t('aiclaw.detail.conversations'))
 }
 
 const onCreated = (data: { uid: string; activationToken: string }) => {
@@ -144,15 +307,32 @@ const handleDeleteConfirm = async (password: string) => {
       params: { uid: deletingUid.value },
       body: { password }
     })
-    window.$message?.success?.('已停用')
+    window.$message?.success?.(t('aiclaw.detail.deactivated_success'))
     showDeleteDialog.value = false
+    // If the deleted item was selected, clear selection
+    if (selectedUid.value === deletingUid.value) {
+      selectedUid.value = null
+      personaText.value = ''
+      originalPersona.value = ''
+    }
     fetchList()
   } catch (error) {
-    console.error('[AiAssistant] 停用失败:', error)
+    console.error('[AiAssistant] Failed to deactivate:', error)
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // Resolve the actual window label at runtime
+  if (!isWeb()) {
+    try {
+      const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+      const win = getCurrentWebviewWindow()
+      windowLabel.value = win.label
+      await win.show()
+    } catch {
+      // Fallback to default label
+    }
+  }
   fetchList()
 })
 </script>

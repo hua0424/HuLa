@@ -56,13 +56,16 @@
     "title": "{name} wants to add your AI assistant {aiclawName} as a friend"
   },
   "detail": {
+    "select_hint": "Select an AI Assistant",
     "persona": "Public Persona",
     "persona_placeholder": "Define how the AI assistant behaves when chatting with other users, e.g.: You are a Python programming assistant, only answer programming-related questions.",
     "persona_save": "Save",
     "persona_save_success": "Public persona saved",
     "persona_clear_tip": "Leave empty to clear persona",
     "friends": "Friend Management",
-    "conversations": "Conversation History"
+    "conversations": "Conversation History",
+    "deactivate": "Deactivate",
+    "deactivated_success": "Deactivated"
   },
   "friends": {
     "title": "Friend Management",

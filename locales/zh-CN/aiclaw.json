@@ -56,13 +56,16 @@
     "title": "{name} 想添加你的 AI 助理 {aiclawName} 为好友"
   },
   "detail": {
+    "select_hint": "请选择一个 AI 助理",
     "persona": "对外人设",
     "persona_placeholder": "定义 AI 助理与其他用户聊天时的行为，例如：你是一个 Python 编程助手，只回答编程相关问题。",
     "persona_save": "保存",
     "persona_save_success": "对外人设已保存",
     "persona_clear_tip": "留空表示不设置人设",
     "friends": "好友管理",
-    "conversations": "对话记录"
+    "conversations": "对话记录",
+    "deactivate": "停用",
+    "deactivated_success": "已停用"
   },
   "friends": {
     "title": "好友管理",
