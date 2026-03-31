@@ -213,6 +213,15 @@ export const useGroupStore = defineStore(
       return map
     })
 
+    /** 独立好友信息缓存（不在任何群组中的好友） */
+    const friendInfoCache = reactive(new Map<string, UserItem>())
+
+    /** 将用户信息写入好友缓存（用于非群组好友） */
+    const cacheFriendInfo = (uid: string, info: Partial<UserItem>) => {
+      const existing = friendInfoCache.get(uid)
+      friendInfoCache.set(uid, { ...(existing || {}), ...info, uid } as UserItem)
+    }
+
     const getUserInfo = computed(() => (uid: string, roomId?: string) => {
       const targetRoomId = roomId ?? globalStore.currentSessionRoomId
       if (targetRoomId) {
@@ -222,7 +231,7 @@ export const useGroupStore = defineStore(
         }
       }
 
-      return allUserMap.value.get(uid)
+      return allUserMap.value.get(uid) || friendInfoCache.get(uid)
     })
 
     const userDisplayNameMap = computed(() => {
@@ -861,6 +870,7 @@ export const useGroupStore = defineStore(
       getCachedMembers,
       updateMemberCache,
       getUserInfo,
+      cacheFriendInfo,
       allUserInfo,
       getUserDisplayName,
       isCurrentLord,

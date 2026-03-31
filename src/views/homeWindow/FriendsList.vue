@@ -49,13 +49,13 @@
                       :size="44"
                       class="grayscale"
                       :class="{ 'grayscale-0': item.activeStatus === OnlineEnum.ONLINE || isBotUser(item.uid) || isAiclawByUserType(item.userType) }"
-                      :src="AvatarUtils.getAvatarUrl(groupStore.getUserInfo(item.uid)!.avatar!)"
+                      :src="AvatarUtils.getAvatarUrl(groupStore.getUserInfo(item.uid)?.avatar || '')"
                       :color="themes.content === ThemeEnum.DARK ? '' : '#fff'"
                       :fallback-src="themes.content === ThemeEnum.DARK ? '/logoL.png' : '/logoD.png'" />
 
                     <n-flex vertical justify="space-between" class="h-fit flex-1 truncate">
                       <span class="text-14px leading-tight flex-1 truncate">
-                        {{ groupStore.getUserInfo(item.uid)!.name }}
+                        {{ groupStore.getUserInfo(item.uid)?.name || item.uid }}
                       </span>
 
                       <div class="text leading-tight text-12px flex-y-center gap-4px flex-1 truncate">
@@ -138,6 +138,7 @@ import { useSettingStore } from '@/stores/setting'
 import { useUserStatusStore } from '@/stores/userStatus'
 import { AvatarUtils } from '@/utils/AvatarUtils'
 import { isAiclawByUserType, getAiclawStatus } from '@/utils/AiclawUtils'
+import { getUserByIds } from '@/utils/ImRequestUtils'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 
 const route = useRoute()
@@ -288,12 +289,33 @@ watch(
   { immediate: false }
 )
 
+/** 批量补全缺失的好友用户信息（groupStore 中可能没有非群组好友的数据） */
+const ensureFriendUserInfo = async () => {
+  const missingUids = contactStore.contactsList
+    .filter((item) => !groupStore.getUserInfo(item.uid)?.name)
+    .map((item) => item.uid)
+  if (missingUids.length === 0) return
+  try {
+    const users = await getUserByIds(missingUids)
+    if (Array.isArray(users)) {
+      for (const user of users) {
+        if (user?.uid) {
+          groupStore.cacheFriendInfo(user.uid, user)
+        }
+      }
+    }
+  } catch {
+    // 静默失败
+  }
+}
+
 /** 组件挂载时获取数据 */
 onMounted(async () => {
   useMitt.on(MittEnum.SHRINK_WINDOW, async (event) => {
     shrinkStatus.value = event as boolean
   })
   await fetchContactData()
+  await ensureFriendUserInfo()
 })
 
 onUnmounted(() => {

@@ -61,7 +61,7 @@
                 <p v-else class="text-(12px [--text-color])">
                   {{
                     t('home.apply_list.handler_label', {
-                      name: groupStore.getUserInfo(item.senderId)?.name || t('home.apply_list.unknown_user')
+                      name: groupStore.getUserInfo(item.senderId)?.name || item.senderName || t('home.apply_list.unknown_user')
                     })
                   }}
                 </p>
@@ -270,18 +270,26 @@ const isCurrentUser = (uid: string) => {
  * @param item 通知消息
  */
 const getUserInfo = (item: any) => {
+  let info: any
   switch (item.eventType) {
     case NoticeType.FRIEND_APPLY:
     case NoticeType.GROUP_MEMBER_DELETE:
     case NoticeType.GROUP_SET_ADMIN:
     case NoticeType.GROUP_RECALL_ADMIN:
-      return groupStore.getUserInfo(item.operateId)
+      info = groupStore.getUserInfo(item.operateId)
+      break
     case NoticeType.ADD_ME:
     case NoticeType.GROUP_INVITE:
     case NoticeType.GROUP_INVITE_ME:
     case NoticeType.GROUP_APPLY:
-      return groupStore.getUserInfo(item.senderId)
+      info = groupStore.getUserInfo(item.senderId)
+      break
   }
+  // 如果 groupStore 中没有用户信息，用通知中的 sender 信息作为 fallback
+  if (!info?.name && item.senderName) {
+    return { name: item.senderName, avatar: item.senderAvatar || '' }
+  }
+  return info
 }
 
 // 判断是否为好友申请或者群申请、群邀请

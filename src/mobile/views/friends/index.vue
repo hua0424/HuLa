@@ -191,7 +191,7 @@ import { useUserStatusStore } from '@/stores/userStatus'
 import { AvatarUtils } from '@/utils/AvatarUtils'
 import { isAiclawByUserType, getAiclawStatus } from '@/utils/AiclawUtils'
 import { getUserByIds } from '@/utils/ImRequestUtils'
-import { isWeb } from '@/utils/PlatformConstants'
+// isWeb removed - friend info fetch now runs on all platforms
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -350,24 +350,14 @@ onMounted(async () => {
     await contactStore.getContactList(true)
     await contactStore.getApplyPage('friend', false)
 
-    // Web 端没有本地 SQLite 缓存，需要主动拉取好友的用户详情
-    if (isWeb() && contactStore.contactsList.length > 0) {
+    // 补全好友的用户详情（groupStore 中可能没有非群组好友的数据）
+    if (contactStore.contactsList.length > 0) {
       const uids = contactStore.contactsList.map((c) => c.uid)
       const users = await getUserByIds(uids)
       if (Array.isArray(users)) {
-        // 写入 userListMap 的 __contacts__ 虚拟 room，使 allUserMap / getUserInfo 可访问
-        const contactsRoomKey = '__contacts__'
-        if (!groupStore.userListMap[contactsRoomKey]) {
-          groupStore.userListMap[contactsRoomKey] = []
-        }
         users.forEach((u: any) => {
           if (u?.uid) {
-            const existing = groupStore.userListMap[contactsRoomKey].find((item: any) => item.uid === u.uid)
-            if (existing) {
-              Object.assign(existing, u)
-            } else {
-              groupStore.userListMap[contactsRoomKey].push(u)
-            }
+            groupStore.cacheFriendInfo(u.uid, u)
           }
         })
       }
