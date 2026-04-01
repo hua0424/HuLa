@@ -1476,7 +1476,7 @@ export const useChatStore = defineStore(
           id: msgId,
           roomId,
           type: MsgEnum.TEXT,
-          body: { content: '', reply: { id: '', uid: '', username: '', type: 0, body: null }, urlContentMap: {} },
+          body: { content: '', reply: null, urlContentMap: {} },
           sendTime: Date.now(),
           messageMarks: {},
           status: MessageStatusEnum.SUCCESS

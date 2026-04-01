@@ -183,7 +183,7 @@ import AiclawCreateForm from '@/components/aiclaw/AiclawCreateForm.vue'
 import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
 import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
 import { ImUrlEnum } from '@/enums'
-import { imRequest } from '@/utils/ImRequestUtils'
+import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
 import { isWeb } from '@/utils/PlatformConstants'
 
 const { t } = useI18n()
@@ -233,12 +233,8 @@ const statusTextClass = (authStatus: number) => {
 }
 
 const fetchList = async () => {
-  try {
-    const list = await imRequest<AiclawListItem[]>({ url: ImUrlEnum.AICLAW_LIST })
-    aiclawList.value = list || []
-  } catch (error) {
-    console.error('[AiAssistant] Failed to fetch list:', error)
-  }
+  const list = await imRequestSilent<AiclawListItem[]>({ url: ImUrlEnum.AICLAW_LIST })
+  aiclawList.value = list || []
 }
 
 const handleSelect = (item: AiclawListItem) => {

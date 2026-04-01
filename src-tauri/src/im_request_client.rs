@@ -541,6 +541,22 @@ pub enum ImUrl {
     WriteGenerateStream,
     WriteDelete,
     WritePage,
+
+    // AIclaw AI 助理
+    AiclawCreate,
+    AiclawList,
+    AiclawProfile,
+    AiclawActivationToken,
+    AiclawRefreshActivation,
+    AiclawDeactivate,
+    AiclawRestore,
+    AiclawAuthConfirm,
+    AiclawSetPersona,
+    AiclawConversations,
+    AiclawConversationMessages,
+    AiclawFriends,
+    AiclawRemoveFriend,
+    AiclawSetRelation,
 }
 
 impl ImUrl {
@@ -851,6 +867,32 @@ impl ImUrl {
 
             ImUrl::MergeMsg => (http::Method::POST, "im/room/mergeMessage"),
             ImUrl::GetUserByIds => (http::Method::POST, "im/user/getUserByIds"),
+
+            // AIclaw AI 助理
+            ImUrl::AiclawCreate => (http::Method::POST, "im/aiclaw/create"),
+            ImUrl::AiclawList => (http::Method::GET, "im/aiclaw/list"),
+            ImUrl::AiclawProfile => (http::Method::PUT, "im/aiclaw/{uid}/profile"),
+            ImUrl::AiclawActivationToken => {
+                (http::Method::GET, "im/aiclaw/{uid}/activation-token")
+            }
+            ImUrl::AiclawRefreshActivation => {
+                (http::Method::POST, "im/aiclaw/{uid}/refresh-activation")
+            }
+            ImUrl::AiclawDeactivate => (http::Method::POST, "im/aiclaw/{uid}/deactivate"),
+            ImUrl::AiclawRestore => (http::Method::POST, "im/aiclaw/{uid}/restore"),
+            ImUrl::AiclawAuthConfirm => (http::Method::POST, "im/aiclaw/{uid}/auth-confirm"),
+            ImUrl::AiclawSetPersona => (http::Method::PUT, "im/aiclaw/{uid}/persona"),
+            ImUrl::AiclawConversations => (http::Method::GET, "im/aiclaw/{uid}/conversations"),
+            ImUrl::AiclawConversationMessages => {
+                (http::Method::GET, "im/aiclaw/{uid}/conversations/{friendUid}/messages")
+            }
+            ImUrl::AiclawFriends => (http::Method::GET, "im/aiclaw/{uid}/friends"),
+            ImUrl::AiclawRemoveFriend => {
+                (http::Method::DELETE, "im/aiclaw/{uid}/friends/{friendUid}")
+            }
+            ImUrl::AiclawSetRelation => {
+                (http::Method::PUT, "im/aiclaw/{uid}/friends/{friendUid}/relation")
+            }
         }
     }
 
@@ -1132,6 +1174,22 @@ impl ImUrl {
             "WriteGenerateStream" => Ok(ImUrl::WriteGenerateStream),
             "WriteDelete" => Ok(ImUrl::WriteDelete),
             "WritePage" => Ok(ImUrl::WritePage),
+
+            // ================ AIclaw AI 助理 ================
+            "aiclawCreate" => Ok(ImUrl::AiclawCreate),
+            "aiclawList" => Ok(ImUrl::AiclawList),
+            "aiclawProfile" => Ok(ImUrl::AiclawProfile),
+            "aiclawActivationToken" => Ok(ImUrl::AiclawActivationToken),
+            "aiclawRefreshActivation" => Ok(ImUrl::AiclawRefreshActivation),
+            "aiclawDeactivate" => Ok(ImUrl::AiclawDeactivate),
+            "aiclawRestore" => Ok(ImUrl::AiclawRestore),
+            "aiclawAuthConfirm" => Ok(ImUrl::AiclawAuthConfirm),
+            "aiclawSetPersona" => Ok(ImUrl::AiclawSetPersona),
+            "aiclawConversations" => Ok(ImUrl::AiclawConversations),
+            "aiclawConversationMessages" => Ok(ImUrl::AiclawConversationMessages),
+            "aiclawFriends" => Ok(ImUrl::AiclawFriends),
+            "aiclawRemoveFriend" => Ok(ImUrl::AiclawRemoveFriend),
+            "aiclawSetRelation" => Ok(ImUrl::AiclawSetRelation),
 
             // 未匹配的字符串
             _ => Err(anyhow::anyhow!("未知的URL类型: {}", s)),

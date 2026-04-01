@@ -10,7 +10,7 @@
           <n-avatar
             :class="[
               'rounded-8px select-none',
-              { grayscale: activeItem?.type === RoomTypeEnum.SINGLE && !isOnline && !isBotUser }
+              { grayscale: activeItem?.type === RoomTypeEnum.SINGLE && !isOnline && !isBotUser && !isAiclawSession }
             ]"
             :size="28"
             :color="themes.content === ThemeEnum.DARK ? '' : '#fff'"
@@ -28,6 +28,12 @@
               v-if="isBotUser"
               class="dark:bg-[#13987f40] bg-[#e8f4f1] dark:border-(1px solid #13987f) border-(1px solid #13987f) flex-center px-8px py-4px rounded-6px">
               <p class="text-(11px #13987f)">{{ t('home.chat_header.bot_tag') }}</p>
+            </div>
+            <!-- AI 助理标签 -->
+            <div
+              v-if="isAiclawSession"
+              class="dark:bg-[#7c5cfc40] bg-[#7c5cfc15] dark:border-(1px solid #7c5cfc) border-(1px solid #7c5cfc) flex-center px-8px py-4px rounded-6px">
+              <p class="text-(11px #7c5cfc)">{{ t('aiclaw.badge') }}</p>
             </div>
           </label>
           <svg

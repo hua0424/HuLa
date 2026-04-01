@@ -253,7 +253,7 @@
           <n-flex
             align="center"
             :size="6"
-            v-if="message.message.body.reply"
+            v-if="message.message.body.reply?.id"
             @click="emit('jump2Reply', message.message.body.reply.id)"
             :class="isMobile() ? 'bg-#fafafa text-13px' : 'bg-[--right-chat-reply-color] text-12px'"
             class="reply-bubble relative w-fit custom-shadow select-none chat-message-max-width"

@@ -135,7 +135,7 @@ const basePluginsList: Array<Omit<STO.Plugins<PluginEnum>, 'title' | 'shortTitle
   },
   {
     icon: 'robot',
-    iconAction: 'robot-action',
+    iconAction: 'robot',
     url: 'aiAssistant',
     state: PluginEnum.BUILTIN,
     isAdd: true,

@@ -366,6 +366,20 @@ useMitt.on(WsResponseMessageType.ONLINE, async (onStatusChangeType: OnStatusChan
       },
       onStatusChangeType.roomId
     )
+  } else if (onStatusChangeType.type === 2) {
+    // 好友上线：更新 groupStore 缓存和联系人列表
+    groupStore.cacheFriendInfo(onStatusChangeType.uid, {
+      activeStatus: OnlineEnum.ONLINE,
+      lastOptTime: onStatusChangeType.lastOptTime
+    })
+    groupStore.updateUserItem(
+      onStatusChangeType.uid,
+      {
+        activeStatus: OnlineEnum.ONLINE,
+        lastOptTime: onStatusChangeType.lastOptTime
+      },
+      'all'
+    )
   }
 })
 
@@ -502,6 +516,20 @@ useMitt.on(WsResponseMessageType.OFFLINE, async (onStatusChangeType: OnStatusCha
         lastOptTime: onStatusChangeType.lastOptTime
       },
       onStatusChangeType.roomId
+    )
+  } else if (onStatusChangeType.type === 2) {
+    // 好友下线：更新 groupStore 缓存和联系人列表
+    groupStore.cacheFriendInfo(onStatusChangeType.uid, {
+      activeStatus: OnlineEnum.OFFLINE,
+      lastOptTime: onStatusChangeType.lastOptTime
+    })
+    groupStore.updateUserItem(
+      onStatusChangeType.uid,
+      {
+        activeStatus: OnlineEnum.OFFLINE,
+        lastOptTime: onStatusChangeType.lastOptTime
+      },
+      'all'
     )
   }
 })

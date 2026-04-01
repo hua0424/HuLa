@@ -64,6 +64,13 @@ export const useContactStore = defineStore(StoresEnum.CONTACTS, () => {
       })
       contactsOptions.value.cursor = data.cursor
       contactsOptions.value.isLast = data.isLast
+      // 将联系人的在线状态同步到 groupStore 缓存，确保 ChatHeader 能读取到正确状态
+      for (const item of data.list) {
+        groupStore.cacheFriendInfo(item.uid, {
+          activeStatus: item.activeStatus,
+          lastOptTime: item.lastOptTime
+        })
+      }
     } catch (error) {
       console.error('获取联系人列表失败:', error)
     } finally {
