@@ -56,7 +56,7 @@
         :top-win-label="windowLabel" />
 
       <!-- Detail content -->
-      <div v-if="selectedItem" class="flex-1 overflow-auto">
+      <div v-if="selectedItem && rightView === 'detail'" class="flex-1 overflow-auto">
         <!-- Top: avatar + name + status + description -->
         <div class="flex items-center gap-16px p-24px border-b border-[--line-color]">
           <n-avatar round :size="56" :src="selectedItem.avatar || '/logo.png'" fallback-src="/logo.png" />
@@ -152,6 +152,124 @@
         </div>
       </div>
 
+      <!-- F17: Conversations list view -->
+      <div v-else-if="selectedItem && rightView === 'conversations'" class="flex-1 flex flex-col overflow-hidden">
+        <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
+          <svg class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors" @click="handleBackToDetail">
+            <use href="#left"></use>
+          </svg>
+          <span class="text-15px font-500 text-[--text-color]">{{ t('aiclaw.detail.conversations') }}</span>
+        </div>
+        <div class="flex-1 overflow-auto">
+          <template v-if="conversationList.length > 0">
+            <div
+              v-for="item in conversationList"
+              :key="item.friendUid"
+              class="flex items-center gap-12px px-24px py-14px cursor-pointer hover:bg-[--list-hover-color] transition-colors border-b border-[--line-color]"
+              @click="handleOpenConversationDetail(item)">
+              <n-avatar round :size="40" :src="item.friendAvatar || '/logo.png'" fallback-src="/logo.png" />
+              <div class="flex flex-col flex-1 min-w-0">
+                <div class="flex items-center justify-between">
+                  <span class="text-14px font-500 text-[--text-color] truncate">{{ item.friendName }}</span>
+                  <span class="text-11px text-#bbb flex-shrink-0">{{ formatConversationTime(item.lastMessage?.sendTime) }}</span>
+                </div>
+                <span class="text-12px text-#999 mt-2px truncate">{{ item.lastMessage?.content || '' }}</span>
+              </div>
+            </div>
+          </template>
+          <div v-else-if="!conversationLoading" class="flex flex-col items-center justify-center h-full text-13px text-#999">
+            <svg class="size-48px mb-12px opacity-20"><use href="#robot"></use></svg>
+            <span>{{ t('aiclaw.conversations.empty') }}</span>
+          </div>
+          <div v-if="conversationLoading" class="flex justify-center py-20px">
+            <n-spin size="medium" />
+          </div>
+        </div>
+      </div>
+
+      <!-- F17: Conversation messages view -->
+      <div v-else-if="selectedItem && rightView === 'conversationMessages'" class="flex-1 flex flex-col overflow-hidden">
+        <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
+          <svg class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors" @click="handleBackToConversations">
+            <use href="#left"></use>
+          </svg>
+          <span class="text-15px font-500 text-[--text-color]">{{ viewingFriendName }}</span>
+        </div>
+        <div ref="messagesScrollContainer" class="flex-1 overflow-auto px-16px py-12px" @scroll="handleMessagesScroll">
+          <div v-if="messagesLoadingMore" class="flex justify-center py-8px">
+            <n-spin size="small" />
+          </div>
+          <div v-if="messagesIsLast && conversationMessages.length > 0" class="text-center text-11px text-#ccc py-8px">
+            {{ t('aiclaw.conversations.no_more') }}
+          </div>
+          <div v-for="msg in conversationMessages" :key="msg.message.id" class="py-4px">
+            <div class="flex" :class="isAiclawMessage(msg) ? 'justify-start' : 'justify-end'">
+              <div class="flex gap-8px max-w-70%" :class="isAiclawMessage(msg) ? '' : 'flex-row-reverse'">
+                <n-avatar
+                  round
+                  :size="28"
+                  :src="isAiclawMessage(msg) ? (selectedItem?.avatar || '/logo.png') : viewingFriendAvatar"
+                  fallback-src="/logo.png"
+                  class="flex-shrink-0" />
+                <div
+                  class="px-12px py-8px rounded-8px text-13px break-all"
+                  :class="isAiclawMessage(msg)
+                    ? 'bg-[--left-bg-color] text-[--text-color]'
+                    : 'bg-#13987f20 text-[--text-color]'">
+                  {{ msg.message.body?.content || '' }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-if="messagesLoading" class="flex justify-center py-20px">
+            <n-spin size="medium" />
+          </div>
+          <div v-if="!messagesLoading && conversationMessages.length === 0" class="flex flex-col items-center justify-center h-full text-13px text-#999">
+            <span>{{ t('aiclaw.conversations.empty') }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- F18: Friends management view -->
+      <div v-else-if="selectedItem && rightView === 'friends'" class="flex-1 flex flex-col overflow-hidden">
+        <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
+          <svg class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors" @click="handleBackToDetail">
+            <use href="#left"></use>
+          </svg>
+          <span class="text-15px font-500 text-[--text-color]">{{ t('aiclaw.detail.friends') }}</span>
+        </div>
+        <div class="flex-1 overflow-auto">
+          <template v-if="friendList.length > 0">
+            <div
+              v-for="item in friendList"
+              :key="item.uid"
+              class="flex items-center gap-12px px-24px py-14px border-b border-[--line-color]">
+              <n-avatar round :size="40" :src="item.avatar || '/logo.png'" fallback-src="/logo.png" />
+              <div class="flex flex-col flex-1 min-w-0">
+                <span class="text-14px font-500 text-[--text-color] truncate">{{ item.name }}</span>
+                <span v-if="item.relationDesc" class="text-12px text-#999 mt-2px truncate">{{ item.relationDesc }}</span>
+                <span v-else class="text-12px text-#ccc mt-2px italic">{{ t('aiclaw.friends.relation') }}</span>
+              </div>
+              <div class="flex items-center gap-6px flex-shrink-0">
+                <n-button size="tiny" secondary @click="handleEditRelation(item)">
+                  {{ t('aiclaw.friends.relation_edit') }}
+                </n-button>
+                <n-button size="tiny" type="error" quaternary @click="handleRemoveFriend(item)">
+                  {{ t('aiclaw.friends.remove') }}
+                </n-button>
+              </div>
+            </div>
+          </template>
+          <div v-else-if="!friendLoading" class="flex flex-col items-center justify-center h-full text-13px text-#999">
+            <svg class="size-48px mb-12px opacity-20"><use href="#robot"></use></svg>
+            <span>{{ t('aiclaw.friends.empty') }}</span>
+          </div>
+          <div v-if="friendLoading" class="flex justify-center py-20px">
+            <n-spin size="medium" />
+          </div>
+        </div>
+      </div>
+
       <!-- Empty state when nothing selected -->
       <div v-else class="flex-1 flex flex-col items-center justify-center text-#999">
         <svg class="size-80px mb-16px opacity-15"><use href="#robot"></use></svg>
@@ -173,6 +291,28 @@
     <AiclawDeleteConfirmDialog
       v-model:visible="showDeleteDialog"
       @confirm="handleDeleteConfirm" />
+
+    <!-- F18: Relation edit dialog -->
+    <n-modal v-model:show="showRelationDialog" preset="dialog" :show-icon="false" :closable="true" :mask-closable="false">
+      <template #header>
+        <span class="text-16px font-600">{{ t('aiclaw.friends.relation_edit') }}</span>
+      </template>
+      <div class="py-8px">
+        <n-input
+          v-model:value="relationInput"
+          type="textarea"
+          :placeholder="t('aiclaw.friends.relation_placeholder')"
+          :maxlength="200"
+          :autosize="{ minRows: 2, maxRows: 5 }"
+          show-count />
+      </div>
+      <template #action>
+        <n-button @click="showRelationDialog = false">{{ t('aiclaw.delete.cancel') }}</n-button>
+        <n-button type="primary" :loading="savingRelation" @click="handleSaveRelation">
+          {{ t('aiclaw.detail.persona_save') }}
+        </n-button>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -202,6 +342,38 @@ type AiclawListItem = {
   createTime: number
 }
 
+type ConversationItem = {
+  friendUid: string
+  friendName: string
+  friendAvatar: string
+  lastMessage: { content: string; sendTime: number; type: number } | null
+  roomId: string
+}
+
+type ConversationMessageItem = {
+  fromUser: { uid: string }
+  message: {
+    id: string
+    roomId: string
+    sendTime: number | string
+    type: number
+    body: { content?: string }
+    messageMarks: Record<string, unknown>
+  }
+}
+
+type AiclawFriendItem = {
+  uid: string
+  name: string
+  avatar: string
+  account: string
+  activeStatus: number
+  userType: number
+  relationDesc: string | null
+}
+
+type RightView = 'detail' | 'conversations' | 'conversationMessages' | 'friends'
+
 const showCreateForm = ref(false)
 const showTokenDialog = ref(false)
 const showDeleteDialog = ref(false)
@@ -215,6 +387,30 @@ const selectedUid = ref<string | null>(null)
 const personaText = ref('')
 const originalPersona = ref('')
 const savingPersona = ref(false)
+
+// 右面板视图状态
+const rightView = ref<RightView>('detail')
+
+// F17 对话记录状态
+const conversationList = ref<ConversationItem[]>([])
+const conversationLoading = ref(false)
+const conversationMessages = ref<ConversationMessageItem[]>([])
+const messagesLoading = ref(false)
+const messagesLoadingMore = ref(false)
+const messagesIsLast = ref(false)
+const messagesCursor = ref('')
+const viewingFriendUid = ref('')
+const viewingFriendName = ref('')
+const viewingFriendAvatar = ref('')
+const messagesScrollContainer = ref<HTMLElement | null>(null)
+
+// F18 好友管理状态
+const friendList = ref<AiclawFriendItem[]>([])
+const friendLoading = ref(false)
+const showRelationDialog = ref(false)
+const relationInput = ref('')
+const savingRelation = ref(false)
+const editingFriendUid = ref('')
 
 const authStatusMap: Record<number, 'inactive' | 'online' | 'offline'> = {
   0: 'inactive',
@@ -241,6 +437,7 @@ const handleSelect = (item: AiclawListItem) => {
   selectedUid.value = item.uid
   personaText.value = item.publicPersona || ''
   originalPersona.value = item.publicPersona || ''
+  rightView.value = 'detail'
 }
 
 const handleSavePersona = async () => {
@@ -266,16 +463,186 @@ const handleSavePersona = async () => {
   }
 }
 
+// 时间格式化
+const formatConversationTime = (timestamp?: number) => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  const now = new Date()
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  }
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) {
+    return t('aiclaw.conversations.yesterday') || '昨天'
+  }
+  return `${date.getMonth() + 1}/${date.getDate()}`
+}
+
+// F17: 获取对话列表
+const fetchConversations = async () => {
+  if (!selectedUid.value) return
+  conversationLoading.value = true
+  try {
+    const result = await imRequest<{ list: ConversationItem[] }>({
+      url: ImUrlEnum.AICLAW_CONVERSATIONS,
+      params: { uid: selectedUid.value }
+    })
+    conversationList.value = result?.list || []
+  } catch (error) {
+    console.error('[AiAssistant] Failed to fetch conversations:', error)
+  } finally {
+    conversationLoading.value = false
+  }
+}
+
+// F17: 获取聊天记录
+const fetchConversationMessages = async (isLoadMore = false) => {
+  if (!selectedUid.value || !viewingFriendUid.value) return
+  if (isLoadMore) {
+    messagesLoadingMore.value = true
+  } else {
+    messagesLoading.value = true
+  }
+  try {
+    const result = await imRequest<{ list: ConversationMessageItem[]; cursor: string; isLast: boolean }>({
+      url: ImUrlEnum.AICLAW_CONVERSATION_MESSAGES,
+      params: {
+        uid: selectedUid.value,
+        friendUid: viewingFriendUid.value,
+        pageSize: 20,
+        cursor: messagesCursor.value || undefined
+      }
+    })
+    const newMessages = result?.list || []
+    if (isLoadMore) {
+      conversationMessages.value = [...newMessages.reverse(), ...conversationMessages.value]
+    } else {
+      conversationMessages.value = [...newMessages].reverse()
+    }
+    messagesCursor.value = result?.cursor || ''
+    messagesIsLast.value = result?.isLast ?? true
+  } catch (error) {
+    console.error('[AiAssistant] Failed to fetch messages:', error)
+  } finally {
+    messagesLoading.value = false
+    messagesLoadingMore.value = false
+  }
+}
+
+const isAiclawMessage = (msg: ConversationMessageItem) => String(msg.fromUser.uid) === String(selectedUid.value)
+
+const handleMessagesScroll = () => {
+  const el = messagesScrollContainer.value
+  if (!el || messagesLoadingMore.value || messagesIsLast.value) return
+  if (el.scrollTop < 50) {
+    fetchConversationMessages(true)
+  }
+}
+
+// F18: 获取好友列表
+const fetchFriends = async () => {
+  if (!selectedUid.value) return
+  friendLoading.value = true
+  try {
+    const result = await imRequest<AiclawFriendItem[]>({
+      url: ImUrlEnum.AICLAW_FRIENDS,
+      params: { uid: selectedUid.value }
+    })
+    friendList.value = result || []
+  } catch (error) {
+    console.error('[AiAssistant] Failed to fetch friends:', error)
+  } finally {
+    friendLoading.value = false
+  }
+}
+
+// F18: 编辑关系说明
+const handleEditRelation = (item: AiclawFriendItem) => {
+  editingFriendUid.value = item.uid
+  relationInput.value = item.relationDesc || ''
+  showRelationDialog.value = true
+}
+
+const handleSaveRelation = async () => {
+  if (!selectedUid.value) return
+  savingRelation.value = true
+  try {
+    await imRequest({
+      url: ImUrlEnum.AICLAW_SET_RELATION,
+      params: { uid: selectedUid.value, friendUid: editingFriendUid.value },
+      body: { relationDesc: relationInput.value }
+    })
+    const friend = friendList.value.find((f) => f.uid === editingFriendUid.value)
+    if (friend) {
+      friend.relationDesc = relationInput.value || null
+    }
+    showRelationDialog.value = false
+    window.$message?.success?.(t('aiclaw.friends.relation_save_success'))
+  } catch (error) {
+    console.error('[AiAssistant] Failed to save relation:', error)
+  } finally {
+    savingRelation.value = false
+  }
+}
+
+// F18: 移除好友
+const handleRemoveFriend = (item: AiclawFriendItem) => {
+  window.$dialog?.warning({
+    title: t('aiclaw.friends.remove'),
+    content: t('aiclaw.friends.remove_confirm'),
+    positiveText: t('aiclaw.delete.confirm'),
+    negativeText: t('aiclaw.delete.cancel'),
+    onPositiveClick: async () => {
+      try {
+        await imRequest({
+          url: ImUrlEnum.AICLAW_REMOVE_FRIEND,
+          params: { uid: selectedUid.value!, friendUid: item.uid }
+        })
+        friendList.value = friendList.value.filter((f) => f.uid !== item.uid)
+        window.$message?.success?.(t('aiclaw.friends.remove_success'))
+      } catch (error) {
+        console.error('[AiAssistant] Failed to remove friend:', error)
+      }
+    }
+  })
+}
+
+// 视图导航
 const handleOpenFriends = () => {
   if (!selectedUid.value) return
-  // Open friends management in a new window (desktop) or show a message for now
-  window.$message?.info?.(t('aiclaw.detail.friends'))
+  rightView.value = 'friends'
+  fetchFriends()
 }
 
 const handleOpenConversations = () => {
   if (!selectedUid.value) return
-  // Open conversations in a new window (desktop) or show a message for now
-  window.$message?.info?.(t('aiclaw.detail.conversations'))
+  rightView.value = 'conversations'
+  fetchConversations()
+}
+
+const handleOpenConversationDetail = (item: ConversationItem) => {
+  viewingFriendUid.value = item.friendUid
+  viewingFriendName.value = item.friendName
+  viewingFriendAvatar.value = item.friendAvatar
+  messagesCursor.value = ''
+  messagesIsLast.value = false
+  conversationMessages.value = []
+  rightView.value = 'conversationMessages'
+  fetchConversationMessages().then(() => {
+    nextTick(() => {
+      const el = messagesScrollContainer.value
+      if (el) el.scrollTop = el.scrollHeight
+    })
+  })
+}
+
+const handleBackToDetail = () => {
+  rightView.value = 'detail'
+}
+
+const handleBackToConversations = () => {
+  rightView.value = 'conversations'
 }
 
 const onCreated = (data: { uid: string; activationToken: string }) => {
