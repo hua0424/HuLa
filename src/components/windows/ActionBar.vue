@@ -54,7 +54,7 @@
             </svg>
           </div>
           <!-- 最小化 -->
-          <div v-if="minW" @click="appWindow.minimize()" class="hover-box">
+          <div v-if="minW" @click="appWindow?.minimize()" class="hover-box">
             <svg
               :class="[iconColor !== '' ? `color-${iconColor}` : 'color-[--action-bar-icon-color]']"
               class="size-24px opacity-66 cursor-pointer">
@@ -146,10 +146,10 @@ import { useWindow } from '@/hooks/useWindow.ts'
 import router from '@/router'
 import { useAlwaysOnTopStore } from '@/stores/alwaysOnTop.ts'
 import { useSettingStore } from '@/stores/setting.ts'
-import { isCompatibility, isMac, isWindows } from '@/utils/PlatformConstants'
+import { isCompatibility, isMac, isWeb, isWindows } from '@/utils/PlatformConstants'
 
 const { t } = useI18n()
-const appWindow = WebviewWindow.getCurrent()
+const appWindow = isWeb() ? null : WebviewWindow.getCurrent()
 const {
   topWinLabel,
   proxy = false,
@@ -204,7 +204,7 @@ const handleEscKeyDown = (event: KeyboardEvent) => {
 watchEffect((onCleanup) => {
   tipsRef.type = tips.value.type
   if (alwaysOnTopStatus.value) {
-    appWindow.setAlwaysOnTop(alwaysOnTopStatus.value as boolean)
+    appWindow?.setAlwaysOnTop(alwaysOnTopStatus.value as boolean)
   }
   if (escClose.value && isWindows()) {
     window.addEventListener('keydown', handleEscKeyDown)
@@ -219,9 +219,9 @@ watchEffect((onCleanup) => {
 /** 恢复窗口大小 */
 const restoreWindow = async () => {
   if (windowMaximized.value) {
-    await appWindow.unmaximize()
+    await appWindow?.unmaximize()
   } else {
-    await appWindow.maximize()
+    await appWindow?.maximize()
   }
 }
 
@@ -241,7 +241,7 @@ const handleAlwaysOnTop = async () => {
   if (topWinLabel !== void 0) {
     const isTop = !alwaysOnTopStatus.value
     setWindowTop(topWinLabel, isTop)
-    await appWindow.setAlwaysOnTop(isTop)
+    await appWindow?.setAlwaysOnTop(isTop)
   }
 }
 
@@ -256,13 +256,14 @@ const handleConfirm = async () => {
     await emit(EventEnum.EXIT)
   } else {
     await nextTick(() => {
-      appWindow.hide()
+      appWindow?.hide()
     })
   }
 }
 
 // 统一更新窗口放大状态（仅 macOS 视为“最大化或全屏”；其他平台仅“最大化”）
 const updateWindowMaximized = async () => {
+  if (!appWindow) return
   const maximized = await appWindow.isMaximized()
   if (isMac()) {
     const fullscreen = await appWindow.isFullscreen()
@@ -274,7 +275,7 @@ const updateWindowMaximized = async () => {
 
 /** 处理关闭窗口事件 */
 const handleCloseWin = async () => {
-  if (appWindow.label === 'home') {
+  if (appWindow?.label === 'home') {
     if (!tips.value.notTips) {
       tipsRef.show = true
     } else {
@@ -282,21 +283,21 @@ const handleCloseWin = async () => {
         await emit(EventEnum.EXIT)
       } else {
         await nextTick(() => {
-          appWindow.hide()
+          appWindow?.hide()
         })
       }
     }
-  } else if (appWindow.label === 'login') {
+  } else if (appWindow?.label === 'login') {
     await exit(0)
   } else {
-    if (appWindow.label.includes('modal-')) {
+    if (appWindow?.label?.includes('modal-')) {
       const webviews = await WebviewWindow.getAll()
       const need = webviews.find((item) => item.label === 'home' || item.label === 'login')
       await need?.setEnabled(true)
       await need?.setFocus()
     }
-    await emit(EventEnum.WIN_CLOSE, appWindow.label)
-    await appWindow.close()
+    await emit(EventEnum.WIN_CLOSE, appWindow?.label)
+    await appWindow?.close()
   }
 }
 
@@ -306,12 +307,12 @@ onMounted(async () => {
   // 初始化状态
   await updateWindowMaximized()
 
-  unlistenResized = await appWindow.onResized?.(() => {
+  unlistenResized = (await appWindow?.onResized?.(() => {
     updateWindowMaximized()
-  })
+  })) ?? null
 
   // 监听 home 窗口的关闭事件
-  if (appWindow.label === 'home') {
+  if (appWindow?.label === 'home') {
     appWindow.onCloseRequested((event) => {
       info('[ActionBar]监听[home]窗口关闭事件')
       if (isProgrammaticClose) {
@@ -321,7 +322,7 @@ onMounted(async () => {
       }
       info('[ActionBar]阻止[home]窗口关闭事件')
       event.preventDefault()
-      appWindow.hide()
+      appWindow?.hide()
     })
   }
 })

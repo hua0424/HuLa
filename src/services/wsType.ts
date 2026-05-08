@@ -78,7 +78,15 @@ export enum WsResponseMessageType {
   /** 朋友圈消息推送 */
   FEED_SEND_MSG = 'feedSendMsg',
   /** 朋友圈通知（点赞/评论，通过 comment 字段判断） */
-  FEED_NOTIFY = 'feedNotify'
+  FEED_NOTIFY = 'feedNotify',
+  /** AI 助理流式消息开始 */
+  STREAM_START = 'streamStart',
+  /** AI 助理流式消息片段 */
+  STREAM_DELTA = 'streamDelta',
+  /** AI 助理流式消息结束 */
+  STREAM_END = 'streamEnd',
+  /** AI 助理设备授权请求 */
+  AICLAW_AUTH_REQUEST = 'aiclawAuthRequest'
 }
 
 export enum NoticeTypeEnum {
@@ -248,4 +256,36 @@ export function getCallResponseStatus(code: number): CallResponseStatus | undefi
 export function getCallResponseStatusDesc(code: number): string {
   const status = getCallResponseStatus(code)
   return status !== undefined ? CallResponseStatusDesc[status] : '未知状态'
+}
+
+// ==================== AIclaw 流式消息 Payload ====================
+
+/** 流式消息开始 */
+export type StreamStartPayload = {
+  msgId: string
+  fromUid: number
+  toUid: number
+  roomId: number
+}
+
+/** 流式消息片段 */
+export type StreamDeltaPayload = {
+  msgId: string
+  chunk: string
+  seq: number
+}
+
+/** 流式消息结束 */
+export type StreamEndPayload = {
+  msgId: string
+  fullContent: string
+  status: 'complete' | 'error'
+}
+
+/** AI 助理设备授权请求 */
+export type AiclawAuthPayload = {
+  aiclawUid: number
+  aiclawName: string
+  oldMachineCode: string
+  newMachineCode: string
 }

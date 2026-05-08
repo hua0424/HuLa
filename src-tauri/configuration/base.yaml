@@ -1,5 +1,6 @@
 database:
   sqlite_file: db.sqlite
 backend:
-  base_url: https://hulaspark.com/api
+  base_url: http://hula.huahome.top:18080/api
+  ws_url: ws://hula.huahome.top:18080/api/ws/ws
 active_config: local

@@ -24,7 +24,7 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { MsgEnum, NotificationTypeEnum, TauriCommand } from '@/enums'
 import { useMitt } from '@/hooks/useMitt'
 import type { MessageType } from '@/services/types'
-import { WsResponseMessageType } from '@/services/wsType'
+import { WsResponseMessageType, type StreamStartPayload, type StreamDeltaPayload, type StreamEndPayload } from '@/services/wsType'
 import { useChatStore } from '@/stores/chat'
 import { useFileStore } from '@/stores/file'
 import { useGlobalStore } from '@/stores/global'
@@ -157,10 +157,14 @@ const addFileToStore = (data: MessageType) => {
 
 /** 处理收到的消息 */
 useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
-  if (chatStore.checkMsgExist(data.message.roomId, data.message.id)) {
+  // 跳过已存在的消息
+  if (chatStore.checkMsgExist(String(data.message.roomId), String(data.message.id))) {
     return
   }
-  console.log('[mobile/layout] 收到的消息：', data)
+  // 流式占位替换：stream_end 落库后 server 会推 receiveMessage（ID 不同），用真实消息替换占位
+  if (chatStore.tryReplaceStreamPlaceholder(data)) {
+    return
+  }
   // 只有在聊天室页面且当前选中的会话就是消息来源的会话时，才不增加未读数
   chatStore.pushMsg(data, {
     isActiveChatView:
@@ -168,9 +172,11 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
     activeRoomId: globalStore.currentSessionRoomId || ''
   })
   data.message.sendTime = new Date(data.message.sendTime).getTime()
-  await invokeSilently(TauriCommand.SAVE_MSG, {
-    data
-  })
+  if (!isWeb()) {
+    await invokeSilently(TauriCommand.SAVE_MSG, {
+      data
+    })
+  }
 
   // 如果是图片或视频消息，添加到 file store
   addFileToStore(data)
@@ -228,6 +234,52 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
   }
 
   await globalStore.updateGlobalUnreadCount()
+})
+
+// ==================== AIclaw 流式消息处理 ====================
+const streamDeltaBuffers = new Map<string, { roomId: string; content: string }>()
+let streamRafId: number | null = null
+
+useMitt.on(WsResponseMessageType.STREAM_START, (data: StreamStartPayload) => {
+  chatStore.startStream(data)
+})
+
+useMitt.on(WsResponseMessageType.STREAM_DELTA, (data: StreamDeltaPayload) => {
+  const key = data.msgId
+  const existing = streamDeltaBuffers.get(key)
+  if (existing) {
+    existing.content += data.chunk
+  } else {
+    let roomId = ''
+    for (const rid of Object.keys(chatStore.messageMap)) {
+      if (chatStore.messageMap[rid]?.[data.msgId]) {
+        roomId = rid
+        break
+      }
+    }
+    streamDeltaBuffers.set(key, { roomId, content: data.chunk })
+  }
+
+  if (!streamRafId) {
+    streamRafId = requestAnimationFrame(() => {
+      for (const [msgId, buf] of streamDeltaBuffers) {
+        if (buf.roomId) {
+          chatStore.appendStreamContent(buf.roomId, msgId, buf.content)
+        }
+      }
+      streamDeltaBuffers.clear()
+      streamRafId = null
+    })
+  }
+})
+
+useMitt.on(WsResponseMessageType.STREAM_END, (data: StreamEndPayload) => {
+  const buf = streamDeltaBuffers.get(data.msgId)
+  if (buf?.roomId) {
+    chatStore.appendStreamContent(buf.roomId, data.msgId, buf.content)
+    streamDeltaBuffers.delete(data.msgId)
+  }
+  chatStore.finalizeStream(data)
 })
 </script>
 

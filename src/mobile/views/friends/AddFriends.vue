@@ -69,6 +69,7 @@
                       <n-flex vertical justify="center" :size="10" class="flex-1">
                         <n-space align="center" :size="10">
                           <span class="text-(14px [--text-color])">{{ item.name }}</span>
+                          <span v-if="item.userType === 4" class="text-#7c5cfc text-11px font-500 px-4px py-1px rounded-4px bg-#7c5cfc15">AI</span>
                           <template v-for="account in item.itemIds" :key="account">
                             <img class="size-20px" :src="cachedStore.badgeById(account)?.img" alt="" />
                           </template>
@@ -153,7 +154,7 @@ import { useGroupStore } from '@/stores/group'
 import { useSettingStore } from '@/stores/setting'
 import { useUserStore } from '@/stores/user'
 import { AvatarUtils } from '@/utils/AvatarUtils'
-import { searchFriend, searchGroup } from '@/utils/ImRequestUtils'
+import { searchGroup, searchUser } from '@/utils/ImRequestUtils'
 import { isMobile } from '@/utils/PlatformConstants'
 import router from '@/router'
 
@@ -261,13 +262,15 @@ const handleSearch = useDebounceFn(async () => {
         roomId: group.roomId
       }))
     } else if (searchType.value === 'user') {
-      // 调用好友搜索接口
-      const res = await searchFriend({ key: searchValue.value })
-      searchResults.value = res.map((user: any) => ({
+      // 调用全局用户搜索接口（含非好友、aiclaw 用户）
+      const res = await searchUser({ keyword: searchValue.value, pageSize: 20 })
+      const list = (res as any)?.list || res || []
+      searchResults.value = (Array.isArray(list) ? list : []).map((user: any) => ({
         uid: user.uid,
         name: user.name,
         avatar: user.avatar,
-        account: user.account
+        account: user.account,
+        userType: user.userType
       }))
     } else {
       // 推荐标签搜索结果

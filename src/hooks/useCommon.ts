@@ -16,7 +16,7 @@ import { SUPPORTED_IMAGE_EXTENSIONS, getFileExtension } from '@/utils/FileType'
 import { getSessionDetailWithFriends } from '@/utils/ImRequestUtils'
 import { getImageCache } from '@/utils/PathUtil.ts'
 import { isPathUploadFile, type UploadFile } from '@/utils/FileType'
-import { isMobile } from '@/utils/PlatformConstants'
+import { isMobile, isWeb } from '@/utils/PlatformConstants'
 import { invokeWithErrorHandler } from '../utils/TauriInvokeHandler'
 
 export interface SelectionRange {
@@ -825,7 +825,7 @@ export const useCommon = () => {
    */
   const openMsgSession = async (uid: string, type: number = 2) => {
     // 获取home窗口实例
-    const label = WebviewWindow.getCurrent().label
+    const label = isWeb() ? 'home' : WebviewWindow.getCurrent().label
     if (router.currentRoute.value.name !== '/message' && label === 'home') {
       router.push('/message')
     }

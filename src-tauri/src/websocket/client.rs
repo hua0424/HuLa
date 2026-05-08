@@ -845,6 +845,23 @@ impl WebSocketClient {
                 let _ = app_handle.emit_to("home", "ws-feed-notify", data);
             }
 
+            // AIclaw 流式消息
+            "streamStart" => {
+                info!("Stream start");
+                let _ = app_handle.emit_to("home", "ws-stream-start", data);
+            }
+            "streamDelta" => {
+                let _ = app_handle.emit_to("home", "ws-stream-delta", data);
+            }
+            "streamEnd" => {
+                info!("Stream end");
+                let _ = app_handle.emit_to("home", "ws-stream-end", data);
+            }
+            "aiclawAuthRequest" => {
+                info!("AIclaw auth request");
+                let _ = app_handle.emit_to("home", "ws-aiclaw-auth-request", data);
+            }
+
             // 未知消息类型
             _ => {
                 warn!("Received unhandled message type: {}", message_type);

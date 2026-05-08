@@ -475,6 +475,31 @@ class RustWebSocketClient {
         useMitt.emit(WsResponseMessageType.FEED_NOTIFY, event.payload)
       })
     )
+
+    // AIclaw 流式消息事件
+    this.listenerController.add(
+      await listen('ws-stream-start', (event: any) => {
+        useMitt.emit(WsResponseMessageType.STREAM_START, event.payload)
+      })
+    )
+
+    this.listenerController.add(
+      await listen('ws-stream-delta', (event: any) => {
+        useMitt.emit(WsResponseMessageType.STREAM_DELTA, event.payload)
+      })
+    )
+
+    this.listenerController.add(
+      await listen('ws-stream-end', (event: any) => {
+        useMitt.emit(WsResponseMessageType.STREAM_END, event.payload)
+      })
+    )
+
+    this.listenerController.add(
+      await listen('ws-aiclaw-auth-request', (event: any) => {
+        useMitt.emit(WsResponseMessageType.AICLAW_AUTH_REQUEST, event.payload)
+      })
+    )
   }
 }
 const isInTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window

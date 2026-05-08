@@ -717,8 +717,10 @@ export enum ImUrlEnum {
   REQUEST_NOTICE_READ = 'RequestNoticeRead',
   /** 获取联系人列表 */
   GET_CONTACT_LIST = 'getContactList',
-  /** 搜索好友 */
+  /** 搜索好友（好友范围内） */
   SEARCH_FRIEND = 'searchFriend',
+  /** 全局用户搜索（含非好友、aiclaw） */
+  SEARCH_USER = 'searchUser',
 
   // 用户状态相关
   /** 改变用户状态 */
@@ -817,6 +819,7 @@ export enum ImUrlEnum {
   CHECK_EMAIL = 'checkEmail',
 
   MERGE_MSG = 'mergeMsg',
+  GET_USER_BY_ID = 'getUserById',
   GET_USER_BY_IDS = 'getUserByIds',
 
   /** 发送 AI 消息 */
@@ -915,7 +918,37 @@ export enum ImUrlEnum {
   /** 更新聊天角色 */
   CHAT_ROLE_UPDATE = 'chatRoleUpdate',
   /** 删除聊天角色 */
-  CHAT_ROLE_DELETE = 'chatRoleDelete'
+  CHAT_ROLE_DELETE = 'chatRoleDelete',
+
+  // ==================== AIclaw AI助理 ====================
+  /** 创建 AI 助理 */
+  AICLAW_CREATE = 'aiclawCreate',
+  /** 获取 AI 助理列表 */
+  AICLAW_LIST = 'aiclawList',
+  /** 修改 AI 助理资料 */
+  AICLAW_PROFILE = 'aiclawProfile',
+  /** 查看激活 token（未激活时） */
+  AICLAW_ACTIVATION_TOKEN = 'aiclawActivationToken',
+  /** 重新生成激活码（含重置 token 功能） */
+  AICLAW_REFRESH_ACTIVATION = 'aiclawRefreshActivation',
+  /** 停用 AI 助理 */
+  AICLAW_DEACTIVATE = 'aiclawDeactivate',
+  /** 恢复 AI 助理 */
+  AICLAW_RESTORE = 'aiclawRestore',
+  /** 机器码变更授权确认 */
+  AICLAW_AUTH_CONFIRM = 'aiclawAuthConfirm',
+  /** 设置 aiclaw 对外人设 */
+  AICLAW_SET_PERSONA = 'aiclawSetPersona',
+  /** 获取 aiclaw 对话列表 */
+  AICLAW_CONVERSATIONS = 'aiclawConversations',
+  /** 获取 aiclaw 与某用户的聊天记录 */
+  AICLAW_CONVERSATION_MESSAGES = 'aiclawConversationMessages',
+  /** 获取 aiclaw 好友列表 */
+  AICLAW_FRIENDS = 'aiclawFriends',
+  /** 移除 aiclaw 好友 */
+  AICLAW_REMOVE_FRIEND = 'aiclawRemoveFriend',
+  /** 设置 aiclaw 好友关系说明 */
+  AICLAW_SET_RELATION = 'aiclawSetRelation'
 }
 
 // 滚动意图管理枚举
@@ -933,5 +966,7 @@ export enum MergeMessageType {
 
 // 用户类型
 export enum UserType {
-  BOT = 'bot'
+  BOT = 'bot',
+  /** AI 助理，对应后端 user_type=4 */
+  AICLAW = 4
 }

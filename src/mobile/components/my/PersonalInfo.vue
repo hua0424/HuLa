@@ -6,7 +6,9 @@
       <!-- 头像 -->
       <div
         class="self-center h-auto transition-transform duration-300 ease-in-out origin-top"
-        :style="{ transform: props.isShow ? 'scale(1) translateY(0)' : 'scale(0.62) translateY(0px)' }">
+        :class="{ 'cursor-pointer': props.isMyPage }"
+        :style="{ transform: props.isShow ? 'scale(1) translateY(0)' : 'scale(0.62) translateY(0px)' }"
+        @click="props.isMyPage && router.push('/mobile/mobileMy/simpleBio')">
         <n-avatar :size="86" :src="AvatarUtils.getAvatarUrl(userDetailInfo!.avatar)" fallback-src="/logo.png" round />
       </div>
 
@@ -37,6 +39,19 @@
             <img class="w-14px h-14px dark:invert" src="@/assets/mobile/my/qr-code.webp" alt="" />
           </span>
         </div>
+        <!-- AI助理主人信息 -->
+        <div
+          v-if="
+            userDetailInfo?.userType === UserType.AICLAW &&
+            userDetailInfo?.ownerInfo &&
+            userDetailInfo?.ownerInfo?.uid !== userStore.userInfo?.uid
+          "
+          class="flex items-center gap-4px">
+          <span class="text-bold-style">{{ t('aiclaw.owner.label') }}:</span>
+          <n-avatar :size="16" :src="AvatarUtils.getAvatarUrl(userDetailInfo.ownerInfo.avatar)" round />
+          <span class="text-bold-style">{{ userDetailInfo.ownerInfo.name }}</span>
+        </div>
+
         <Transition name="medal-fade">
           <div
             v-if="props.isShow"
@@ -147,7 +162,8 @@ import { useUserStore } from '@/stores/user'
 import { useUserStatusStore } from '@/stores/userStatus'
 import { AvatarUtils } from '@/utils/AvatarUtils'
 import 'vant/es/dialog/style'
-import { OnlineEnum, UserType } from '@/enums'
+import { ImUrlEnum, OnlineEnum, UserType } from '@/enums'
+import { imRequest } from '@/utils/ImRequestUtils'
 import { useMessage } from '@/hooks/useMessage.ts'
 import type { UserInfoType, UserItem } from '@/services/types'
 import { useChatStore } from '@/stores/chat'
@@ -260,6 +276,15 @@ onMounted(() => {
   const foundedUser = groupStore.allUserInfo.find((i) => i.uid === uid)
 
   userDetailInfo.value = foundedUser
+
+  // aiclaw 用户需要额外获取 ownerInfo（缓存中没有）
+  if (foundedUser?.userType === UserType.AICLAW || contactStore.contactsList.find((c) => c.uid === uid)?.userType === 4) {
+    imRequest<any>({ url: ImUrlEnum.GET_USER_BY_ID, params: { id: uid } }).then((detail) => {
+      if (detail?.ownerInfo) {
+        userDetailInfo.value = { ...userDetailInfo.value, ...detail } as any
+      }
+    }).catch(() => {})
+  }
 
   if (foundedUser?.userStateId && foundedUser?.userStateId !== '0') {
     const state = getUserState(foundedUser.userStateId)

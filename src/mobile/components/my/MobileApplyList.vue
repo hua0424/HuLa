@@ -206,6 +206,13 @@ const getGroupDetail = async (roomId: string) => {
 // 异步获取群组信息的计算属性
 const applyMsg = computed(() => (item: any) => {
   if (props.type === 'friend') {
+    // 好友申请目标是 AI 助理时，显示专属文案
+    if (item.eventType === NoticeType.ADD_ME && item.receiverUserType === 4) {
+      const senderName = getUserInfo(item)?.name || t('mobile_mymessage.unknown_user')
+      // aiclaw 名称：优先从 operateId 查缓存，fallback 到 receiverName
+      const aiclawName = (item.operateId && groupStore.getUserInfo(item.operateId)?.name) || item.receiverName || t('mobile_mymessage.unknown_user')
+      return t('aiclaw.friendApply.title', { name: senderName, aiclawName })
+    }
     return isCurrentUser(item.senderId)
       ? isAccepted(item)
         ? t('mobile_mymessage.friend_request_status.accepted')
@@ -264,18 +271,26 @@ const isCurrentUser = (uid: string) => {
  * @param item 通知消息
  */
 const getUserInfo = (item: any) => {
+  let info: any
   switch (item.eventType) {
     case NoticeType.FRIEND_APPLY:
     case NoticeType.GROUP_MEMBER_DELETE:
     case NoticeType.GROUP_SET_ADMIN:
     case NoticeType.GROUP_RECALL_ADMIN:
-      return groupStore.getUserInfo(item.operateId)
+      info = groupStore.getUserInfo(item.operateId)
+      break
     case NoticeType.ADD_ME:
     case NoticeType.GROUP_INVITE:
     case NoticeType.GROUP_INVITE_ME:
     case NoticeType.GROUP_APPLY:
-      return groupStore.getUserInfo(item.senderId)
+      info = groupStore.getUserInfo(item.senderId)
+      break
   }
+  // 如果 groupStore 中没有用户信息，用通知中的 sender 信息作为 fallback
+  if (!info?.name && item.senderName) {
+    return { name: item.senderName, avatar: item.senderAvatar || '' }
+  }
+  return info
 }
 
 // 判断是否为好友申请或者群申请、群邀请

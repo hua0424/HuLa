@@ -264,6 +264,26 @@ const getMobileRoutes = (): Array<RouteRecordRaw> => [
         component: AiAssistant
       },
       {
+        path: 'aiAssistant/:uid',
+        name: 'mobileAiAssistantDetail',
+        component: () => import('@/mobile/views/my/AiAssistantDetail.vue')
+      },
+      {
+        path: 'aiAssistant/:uid/conversations',
+        name: 'mobileAiclawConversations',
+        component: () => import('@/mobile/views/my/AiclawConversations.vue')
+      },
+      {
+        path: 'aiAssistant/:uid/conversations/:friendUid',
+        name: 'mobileAiclawConversationDetail',
+        component: () => import('@/mobile/views/my/AiclawConversationDetail.vue')
+      },
+      {
+        path: 'aiAssistant/:uid/friends',
+        name: 'mobileAiclawFriends',
+        component: () => import('@/mobile/views/my/AiclawFriends.vue')
+      },
+      {
         path: 'myAlbum',
         name: 'mobileMyAlbum',
         component: MyAlbum
@@ -393,6 +413,11 @@ const getDesktopRoutes = (): Array<RouteRecordRaw> => [
         component: () => import('@/plugins/robot/views/VideoGeneration.vue')
       }
     ]
+  },
+  {
+    path: '/aiAssistant',
+    name: 'aiAssistant',
+    component: () => import('@/views/aiAssistantWindow/index.vue')
   },
   {
     path: '/mail',

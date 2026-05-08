@@ -213,9 +213,45 @@ pub async fn im_request_command(
     // 记录请求前的 token，用于检测是否被刷新
     let old_tokens = capture_token_snapshot_direct(&rc);
 
-    if let Ok(url) = url.parse::<ImUrl>() {
-        let result: Result<Option<serde_json::Value>, anyhow::Error> =
-            rc.im_request(url, body, params).await;
+    if let Ok(parsed_url) = url.parse::<ImUrl>() {
+        let (method, base_path) = parsed_url.get_url();
+
+        // 支持路径变量替换（如 {uid}、{friendUid}）
+        let mut resolved_path = base_path.to_string();
+        let mut clean_params = params.clone();
+        if let Some(serde_json::Value::Object(ref mut map)) = clean_params {
+            let mut keys_to_remove = Vec::new();
+            for (key, value) in map.iter() {
+                let placeholder = format!("{{{}}}", key);
+                if resolved_path.contains(&placeholder) {
+                    let replacement = value
+                        .as_str()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| value.to_string().trim_matches('"').to_string());
+                    resolved_path = resolved_path.replace(&placeholder, &replacement);
+                    keys_to_remove.push(key.clone());
+                }
+            }
+            for key in keys_to_remove {
+                map.remove(&key);
+            }
+        }
+
+        let result: Result<Option<serde_json::Value>, anyhow::Error> = if resolved_path
+            != base_path
+        {
+            // 路径有变量替换，直接使用 request 方法
+            use crate::pojo::common::ApiResult;
+            match rc
+                .request::<serde_json::Value, _, _>(method, &resolved_path, body, clean_params)
+                .await
+            {
+                Ok(api_result) => Ok(api_result.data),
+                Err(e) => Err(e),
+            }
+        } else {
+            rc.im_request(parsed_url, body, params).await
+        };
 
         // 无论请求成功还是失败，都检查 token 是否被刷新，如果是则保存到数据库
         // 这确保了即使请求重试后失败，刷新后的 token 也能被持久化

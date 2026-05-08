@@ -1,0 +1,86 @@
+{
+  "title": "AI Assistant",
+  "empty": "No AI assistants yet. Tap the button below to create one.",
+  "create": {
+    "title": "Create AI Assistant",
+    "name": "Name",
+    "name_placeholder": "Enter AI assistant name",
+    "avatar": "Avatar",
+    "avatar_tip": "Optional, leave blank for default avatar",
+    "description": "Description",
+    "description_placeholder": "Enter description (optional)",
+    "submit": "Create",
+    "success": "Created successfully",
+    "failed": "Creation failed"
+  },
+  "token": {
+    "dialog_title": "Activation Token",
+    "warning": "Copy the activation token and run the activate command on your AI assistant machine. You can view it again before activation.",
+    "copy": "Copy Activation Token",
+    "copied": "Copied",
+    "copy_failed": "Copy failed",
+    "view": "View Activation Token",
+    "refresh": "Regenerate Activation Token",
+    "refresh_confirm": "This will invalidate the old connection token. The AI assistant will be disconnected and need to re-activate. Continue?",
+    "refresh_success": "Activation token regenerated",
+    "activated": "Activated",
+    "deactivated": "Deactivated"
+  },
+  "badge": "AI",
+  "status": {
+    "inactive": "Inactive",
+    "online": "Online",
+    "offline": "Offline"
+  },
+  "chat": {
+    "notice": "AI Assistant Chat - Responses are AI-generated",
+    "streaming": "Responding..."
+  },
+  "delete": {
+    "title": "Delete AI Assistant",
+    "warning": "The token will be invalidated and the AI assistant will be disconnected. Data will be retained for 24 hours for recovery.",
+    "password": "Enter password to confirm",
+    "password_placeholder": "Enter login password",
+    "confirm": "Confirm Delete",
+    "cancel": "Cancel"
+  },
+  "auth": {
+    "request": "Your AI assistant {name} is trying to log in from a new device. Authorize?",
+    "approve": "Authorize",
+    "reject": "Reject"
+  },
+  "owner": {
+    "label": "Owner"
+  },
+  "friendApply": {
+    "title": "{name} wants to add your AI assistant {aiclawName} as a friend"
+  },
+  "detail": {
+    "select_hint": "Select an AI Assistant",
+    "persona": "Public Persona",
+    "persona_placeholder": "Define how the AI assistant behaves when chatting with other users, e.g.: You are a Python programming assistant, only answer programming-related questions.",
+    "persona_save": "Save",
+    "persona_save_success": "Public persona saved",
+    "persona_clear_tip": "Leave empty to clear persona",
+    "friends": "Friend Management",
+    "conversations": "Conversation History",
+    "deactivate": "Deactivate",
+    "deactivated_success": "Deactivated"
+  },
+  "friends": {
+    "title": "Friend Management",
+    "empty": "No friends yet",
+    "relation": "Relation Description",
+    "relation_placeholder": "e.g.: xxx is the owner's colleague, responsible for frontend development",
+    "relation_edit": "Edit Relation",
+    "relation_save_success": "Relation description saved",
+    "remove": "Remove",
+    "remove_confirm": "After removal, this user will no longer be able to communicate with the AI assistant. Continue?",
+    "remove_success": "Removed"
+  },
+  "conversations": {
+    "title": "Conversation History",
+    "empty": "No conversations yet",
+    "no_more": "No more messages"
+  }
+}

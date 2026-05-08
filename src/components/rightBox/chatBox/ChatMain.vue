@@ -37,6 +37,14 @@
       </div>
     </Transition>
 
+    <!-- AI 助理对话提示条 -->
+    <div v-if="isAiclawSession" class="flex-shrink-0 px-12px pt-6px">
+      <div class="flex items-center gap-6px px-12px py-6px rounded-6px bg-#7c5cfc10 text-(12px #7c5cfc)">
+        <svg class="size-14px flex-shrink-0"><use href="#robot"></use></svg>
+        {{ isCurrentRoomStreaming ? t('aiclaw.chat.streaming') : t('aiclaw.chat.notice') }}
+      </div>
+    </div>
+
     <!-- 聊天内容 -->
     <div class="flex flex-col flex-1 min-h-0">
       <div
@@ -210,7 +218,8 @@ import { audioManager } from '@/utils/AudioManager'
 import { timeToStr } from '@/utils/ComputedTime'
 import { useCachedStore } from '@/stores/cached'
 import { isMessageMultiSelectEnabled } from '@/utils/MessageSelect'
-import { isMac, isMobile, isWindows } from '@/utils/PlatformConstants'
+import { isMac, isMobile, isWeb, isWindows } from '@/utils/PlatformConstants'
+import { isAiclawUser as checkAiclaw } from '@/utils/AiclawUtils'
 import FileUploadProgress from '@/components/rightBox/FileUploadProgress.vue'
 
 const selfEmit = defineEmits(['scroll'])
@@ -228,7 +237,7 @@ type SessionChangedPayload = {
 
 // Store 实例
 const cacheStore = useCachedStore()
-const appWindow = WebviewWindow.getCurrent()
+const appWindow = isWeb() ? null : WebviewWindow.getCurrent()
 const globalStore = useGlobalStore()
 const chatStore = useChatStore()
 const userStore = useUserStore()
@@ -260,6 +269,22 @@ const scrollIntent = ref<ScrollIntentEnum>(ScrollIntentEnum.NONE)
 
 // 计算属性
 const isGroup = computed<boolean>(() => chatStore.isGroup)
+/** 当前会话是否为 AI 助理 */
+const isAiclawSession = computed(() => {
+  const session = globalStore.currentSession
+  return session && !isGroup.value && checkAiclaw(session.detailId)
+})
+/** 当前房间是否有正在流式中的消息 */
+const isCurrentRoomStreaming = computed(() => {
+  const roomId = globalStore.currentSessionRoomId
+  if (!roomId) return false
+  const roomMsgs = chatStore.messageMap[roomId]
+  if (!roomMsgs) return false
+  for (const msgId of chatStore.streamingMessages) {
+    if (roomMsgs[msgId]) return true
+  }
+  return false
+})
 const userUid = computed(() => userStore.userInfo!.uid || '')
 const currentNewMsgCount = computed(() => chatStore.currentNewMsgCount || null)
 const newMsgCountLabel = computed(() => {
@@ -812,8 +837,9 @@ useMitt.on(MittEnum.CHAT_SCROLL_BOTTOM, () => {
 
 onMounted(() => {
   useMitt.on(MittEnum.SESSION_CHANGED, handleSessionChanged)
-  // 初始化监听器
+  // 初始化监听器（仅 Tauri 环境）
   const initListeners = async () => {
+    if (!appWindow) return
     try {
       // 监听公告清空事件
       announcementClearListener = await appWindow.listen('announcementClear', () => {

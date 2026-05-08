@@ -131,10 +131,12 @@ export const useReplaceMsg = () => {
     }
 
     // 正常消息，处理内容
+    const body = message.message?.body
+    const content = typeof body?.content === 'string' ? body.content : (typeof body === 'string' ? body : '')
     return renderReplyContent(
       senderName,
       message.message?.type,
-      message.message?.body?.content || message.message?.body,
+      content,
       roomType
     ) as string
   }

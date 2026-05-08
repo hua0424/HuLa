@@ -225,7 +225,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { emit } from '@tauri-apps/api/event'
+import { emit as tauriEmit } from '@tauri-apps/api/event'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { onKeyStroke } from '@vueuse/core'
 import { type VirtualListInst } from 'naive-ui'
@@ -238,7 +238,7 @@ import { useMsgInput } from '@/hooks/useMsgInput.ts'
 import { useGlobalStore } from '@/stores/global'
 import { useSettingStore } from '@/stores/setting.ts'
 import { AvatarUtils } from '@/utils/AvatarUtils'
-import { isMac, isMobile } from '@/utils/PlatformConstants'
+import { isMac, isMobile, isWeb } from '@/utils/PlatformConstants'
 import { useSendOptions } from '@/views/moreWindow/settings/config.ts'
 import { useGroupStore } from '@/stores/group'
 import { MobilePanelStateEnum } from '@/enums'
@@ -256,7 +256,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const { t } = useI18n()
-const appWindow = WebviewWindow.getCurrent()
+const appWindow = isWeb() ? null : WebviewWindow.getCurrent()
 const settingStore = useSettingStore()
 const { themes } = storeToRefs(settingStore)
 const { handlePaste, processFiles } = useCommon()
@@ -712,7 +712,7 @@ onMounted(async () => {
     }
   })
   // TODO: 暂时已经关闭了独立窗口聊天功能
-  emit('aloneWin')
+  if (!isWeb()) tauriEmit('aloneWin')
   nextTick(() => {
     // 移动端不自动聚焦
     if (!isMobile()) {
@@ -737,7 +737,7 @@ onMounted(async () => {
       isVoiceMode.value = false
     }
   })
-  appWindow.listen('screenshot', async (e: any) => {
+  appWindow?.listen('screenshot', async (e: any) => {
     // 确保输入框获得焦点
     if (messageInputDom.value) {
       messageInputDom.value.focus()

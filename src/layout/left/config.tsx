@@ -135,16 +135,16 @@ const basePluginsList: Array<Omit<STO.Plugins<PluginEnum>, 'title' | 'shortTitle
   },
   {
     icon: 'robot',
-    iconAction: 'GPT',
-    url: 'robot',
+    iconAction: 'robot',
+    url: 'aiAssistant',
     state: PluginEnum.BUILTIN,
     isAdd: true,
     dot: false,
     progress: 0,
     size: {
-      minWidth: 1240,
-      width: 1380,
-      height: 800
+      minWidth: 800,
+      width: 1000,
+      height: 700
     },
     window: {
       resizable: true
@@ -227,8 +227,8 @@ const usePluginsList = () =>
       },
       {
         ...basePluginsList[1],
-        title: t('home.plugins.chatbot'),
-        shortTitle: t('home.plugins.chatbot_short_title')
+        title: t('aiclaw.title'),
+        shortTitle: t('aiclaw.badge')
       }
     ])
   })()

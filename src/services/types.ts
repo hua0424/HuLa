@@ -180,6 +180,10 @@ export type CacheUserItem = {
   userStateId: string
   /** 账号 */
   account: string
+  /** 用户类型（0=普通用户, 4=AI助理） */
+  userType?: number
+  /** AI助理的主人信息 */
+  ownerInfo?: { uid: string; name: string; avatar: string }
 }
 
 export type UserItem = {
@@ -199,6 +203,10 @@ export type UserItem = {
   roleId?: number
   /** 账号 */
   account: string
+  /** 用户类型（0=普通用户, 4=AI助理） */
+  userType?: number
+  /** AI助理的主人信息 */
+  ownerInfo?: { uid: string; name: string; avatar: string }
   /** 我的群昵称 */
   myName?: string
   /** 当前佩戴的徽章 */
@@ -287,6 +295,10 @@ export type UserInfoType = {
   linkedGitcode?: boolean
   /** 已绑定的 OAuth 提供商 */
   oauthProviders?: ('gitee' | 'github' | 'gitcode')[]
+  /** 用户类型（0=普通用户, 4=AI助理） */
+  userType?: number
+  /** AI助理的主人信息 */
+  ownerInfo?: { uid: string; name: string; avatar: string }
 }
 
 export type BadgeType = {
@@ -363,6 +375,8 @@ export type MsgUserType = {
   avatar: string
   /** 归属地 */
   locPlace: string
+  /** 用户类型（0=普通用户, 4=AI助理） */
+  userType?: number
   /** 徽章 */
   badge?: {
     /** 徽章地址 */
@@ -561,7 +575,9 @@ export enum NoticeType {
   /** 设置群管理员 */
   GROUP_SET_ADMIN = 8,
   /** 取消群管理员 */
-  GROUP_RECALL_ADMIN = 9
+  GROUP_RECALL_ADMIN = 9,
+  /** AI 助理设备授权 */
+  AICLAW_DEVICE_AUTH = 10
 }
 
 /** 请求添加好友的列表项 */
@@ -595,6 +611,12 @@ export interface NoticeItem {
   senderId: string
   /** 接收人UID */
   receiverId: string
+  /** 接收人用户类型（0=普通用户, 4=AI助理） */
+  receiverUserType?: number
+  /** 接收人名称 */
+  receiverName?: string
+  /** 接收人头像 */
+  receiverAvatar?: string
   /** 申请ID */
   applyId: string
   /** 房间ID */
@@ -621,6 +643,8 @@ export type FriendItem = {
   activeStatus: OnlineEnum
   /** 最后一次上下线时间 */
   lastOptTime: number
+  /** 用户类型 1=系统 2=机器人 3=普通 4=AI助理 */
+  userType?: number
   /** 不让他看我（0-允许，1-禁止） */
   hideMyPosts: boolean
   /** 不看他（0-允许，1-禁止） */

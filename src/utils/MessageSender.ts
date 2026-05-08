@@ -1,5 +1,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
-import { MsgEnum, TauriCommand } from '@/enums'
+import { ImUrlEnum, MsgEnum, TauriCommand } from '@/enums'
+import { isWeb } from '@/utils/PlatformConstants'
+import { imRequest } from '@/utils/ImRequestUtils'
 
 export type SendMessagePayload = {
   id: string
@@ -15,9 +17,26 @@ export type SendMessageOptions = {
 }
 
 /**
- * 统一封装 SEND_MSG 的 channel 调用，负责创建/释放监听
+ * Web 模式下通过 HTTP API 发送消息
  */
-export const sendMessageWithChannel = async (options: SendMessageOptions) => {
+const sendMessageViaHttp = async (options: SendMessageOptions) => {
+  const { data, onSuccess, onError } = options
+  try {
+    const result = await imRequest<any>({
+      url: ImUrlEnum.SEND_MSG,
+      body: data
+    })
+    onSuccess?.(result)
+  } catch (error) {
+    console.error('[MessageSender] HTTP 发送失败:', error)
+    onError?.(data.id)
+  }
+}
+
+/**
+ * Tauri 模式下通过 channel 调用发送消息
+ */
+const sendMessageViaTauri = async (options: SendMessageOptions) => {
   const { data, onSuccess, onError } = options
   const successChannel = new Channel<any>()
   const errorChannel = new Channel<string>()
@@ -45,4 +64,15 @@ export const sendMessageWithChannel = async (options: SendMessageOptions) => {
   })
 
   await sendPromise
+}
+
+/**
+ * 统一封装消息发送，自动选择 Tauri channel 或 HTTP API
+ */
+export const sendMessageWithChannel = async (options: SendMessageOptions) => {
+  if (isWeb()) {
+    await sendMessageViaHttp(options)
+  } else {
+    await sendMessageViaTauri(options)
+  }
 }

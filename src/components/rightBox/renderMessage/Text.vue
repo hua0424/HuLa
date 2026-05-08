@@ -1,6 +1,17 @@
 <template>
   <div :class="isMobile() ? 'text-16px' : 'text-14px'">
-    <template v-for="(item, index) in fragments" :key="index">
+    <!-- 流式模式：跳过 URL/mention 解析，直接渲染纯文本 + 光标 -->
+    <template v-if="props.isStreaming">
+      <template v-if="!body.content">
+        <span class="streaming-typing">{{ t('aiclaw.chat.streaming') }}</span>
+      </template>
+      <template v-else>
+        <span style="-webkit-user-select: text !important; user-select: text !important">{{ body.content }}</span>
+        <span class="streaming-cursor" />
+      </template>
+    </template>
+    <!-- 正常模式：完整 fragment 解析 -->
+    <template v-else v-for="(item, index) in fragments" :key="index">
       <n-popover
         trigger="click"
         placement="left"
@@ -81,10 +92,13 @@
   </div>
 </template>
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { openExternalUrl } from '@/hooks/useLinkSegments'
 import { useGroupStore } from '@/stores/group'
 import type { TextBody } from '@/services/types'
 import { isMobile } from '@/utils/PlatformConstants'
+
+const { t } = useI18n()
 
 // 标记结构用于描述需特殊渲染的片段区间
 type ContentMarker = {
@@ -98,6 +112,7 @@ const props = defineProps<{
   body: TextBody
   searchKeyword?: string
   historyMode?: boolean
+  isStreaming?: boolean
 }>()
 // 获取所有匹配的字符串
 const urlMap = props.body.urlContentMap || {}
@@ -260,6 +275,28 @@ const onImageLoadError = (e: Event) => {
 </script>
 
 <style scoped>
+.streaming-typing {
+  color: #999;
+  font-style: italic;
+  font-size: 13px;
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: currentColor;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 0.8s step-end infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 .text-card {
   display: flex;
   margin: 8px 0;

@@ -43,14 +43,20 @@ import { useMitt } from '@/hooks/useMitt.ts'
 import rustWebSocketClient from '@/services/webSocketRust'
 import { useContactStore } from '@/stores/contacts.ts'
 import { useGlobalStore } from '@/stores/global.ts'
-import { isMobile, isWindows } from '@/utils/PlatformConstants'
+import { isMobile, isWeb, isWindows } from '@/utils/PlatformConstants'
 import { MittEnum, MsgEnum, NotificationTypeEnum, TauriCommand } from '@/enums'
 import { clearListener, initListener, readCountQueue } from '@/utils/ReadCountQueue'
 import { emitTo, listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import { UserAttentionType } from '@tauri-apps/api/window'
 import type { MessageType } from '@/services/types.ts'
-import { WsResponseMessageType } from '@/services/wsType.ts'
+import {
+  WsResponseMessageType,
+  type StreamStartPayload,
+  type StreamDeltaPayload,
+  type StreamEndPayload,
+  type AiclawAuthPayload
+} from '@/services/wsType.ts'
 import { useChatStore } from '@/stores/chat'
 import { useFileStore } from '@/stores/file'
 import { useUserStore } from '@/stores/user'
@@ -77,7 +83,7 @@ const settingStore = useSettingStore()
 const initialSyncStore = useInitialSyncStore()
 const userUid = computed(() => userStore.userInfo?.uid ?? '')
 const hasCachedSessions = computed(() => chatStore.sessionList.length > 0)
-const appWindow = WebviewWindow.getCurrent()
+const appWindow = isWeb() ? null : WebviewWindow.getCurrent()
 const loadingPercentage = ref(10)
 const loadingText = ref(t('home.loading.app'))
 const { resetLoginState, logout, init } = useLogin()
@@ -237,7 +243,7 @@ timerWorker.onmessage = (e) => {
 }
 
 watch(
-  () => appWindow.label === 'home',
+  () => appWindow?.label === 'home',
   (newValue) => {
     if (newValue) {
       // 初始化监听器
@@ -341,7 +347,10 @@ const addFileToStore = (data: MessageType) => {
 }
 
 useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
-  if (chatStore.checkMsgExist(data.message.roomId, data.message.id)) {
+  if (chatStore.checkMsgExist(String(data.message.roomId), String(data.message.id))) {
+    return
+  }
+  if (chatStore.tryReplaceStreamPlaceholder(data)) {
     return
   }
 
@@ -370,7 +379,7 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
     // 只有非免打扰的会话才发送通知和触发图标闪烁
     if (session && session.muteNotification !== NotificationTypeEnum.NOT_DISTURB) {
       // 检查 home 窗口状态
-      const home = await WebviewWindow.getByLabel('home')
+      const home = isWeb() ? null : await WebviewWindow.getByLabel('home')
       let shouldPlaySound = false
 
       if (home) {
@@ -406,13 +415,83 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
         globalStore.setTipVisible(true)
       }
 
-      if (WebviewWindow.getCurrent().label === 'home') {
+      if (!isWeb() && WebviewWindow.getCurrent().label === 'home') {
         await emitTo('notify', 'notify_content', data)
       }
     }
   }
 
   globalStore.updateGlobalUnreadCount()
+})
+
+// ==================== AIclaw 流式消息处理 ====================
+const streamDeltaBuffers = new Map<string, { roomId: string; content: string }>()
+let streamRafId: number | null = null
+
+useMitt.on(WsResponseMessageType.STREAM_START, (data: StreamStartPayload) => {
+  chatStore.startStream(data)
+})
+
+useMitt.on(WsResponseMessageType.STREAM_DELTA, (data: StreamDeltaPayload) => {
+  // rAF 节流：将 delta 累积到 buffer，每帧批量刷新一次
+  const key = data.msgId
+  const existing = streamDeltaBuffers.get(key)
+  if (existing) {
+    existing.content += data.chunk
+  } else {
+    // roomId 从 startStream 的消息中推断，这里通过遍历 messageMap 查找
+    // 为避免每次遍历，缓存 roomId
+    let roomId = ''
+    for (const rid of Object.keys(chatStore.messageMap)) {
+      if (chatStore.messageMap[rid]?.[data.msgId]) {
+        roomId = rid
+        break
+      }
+    }
+    streamDeltaBuffers.set(key, { roomId, content: data.chunk })
+  }
+
+  if (!streamRafId) {
+    streamRafId = requestAnimationFrame(() => {
+      for (const [msgId, buf] of streamDeltaBuffers) {
+        if (buf.roomId) {
+          chatStore.appendStreamContent(buf.roomId, msgId, buf.content)
+        }
+      }
+      streamDeltaBuffers.clear()
+      streamRafId = null
+    })
+  }
+})
+
+useMitt.on(WsResponseMessageType.STREAM_END, (data: StreamEndPayload) => {
+  // 刷新剩余 buffer
+  const buf = streamDeltaBuffers.get(data.msgId)
+  if (buf?.roomId) {
+    chatStore.appendStreamContent(buf.roomId, data.msgId, buf.content)
+    streamDeltaBuffers.delete(data.msgId)
+  }
+  chatStore.finalizeStream(data)
+})
+
+// AIclaw 设备授权请求
+useMitt.on(WsResponseMessageType.AICLAW_AUTH_REQUEST, (data: AiclawAuthPayload) => {
+  const msg = t('aiclaw.auth.request', { name: data.aiclawName })
+  window.$dialog?.warning({
+    title: t('aiclaw.title'),
+    content: msg,
+    positiveText: t('aiclaw.auth.approve'),
+    negativeText: t('aiclaw.auth.reject'),
+    onPositiveClick: async () => {
+      // TODO: 调用 AICLAW_AUTH_CONFIRM API，待后端 B7 就绪
+      console.log('[AIclaw] 授权确认:', data.aiclawUid, data.newMachineCode)
+      window.$message?.success?.(t('aiclaw.auth.approve'))
+    },
+    onNegativeClick: () => {
+      // TODO: 调用拒绝 API
+      console.log('[AIclaw] 授权拒绝:', data.aiclawUid)
+    }
+  })
 })
 
 const cleanupNativeFileDropListeners = () => {
@@ -451,6 +530,7 @@ const handleNativeFileDrop = async (paths: string[]) => {
 }
 
 const setupNativeFileDropListeners = async () => {
+  if (!appWindow) return
   try {
     const unlisten = await appWindow.onDragDropEvent((event) => {
       // 只有选中会话时才响应拖拽事件
@@ -511,7 +591,7 @@ onMounted(async () => {
   })
 
   // 监听home窗口被聚焦的事件，当窗口被聚焦时自动关闭状态栏通知
-  const homeWindow = await WebviewWindow.getByLabel('home')
+  const homeWindow = isWeb() ? null : await WebviewWindow.getByLabel('home')
   if (homeWindow) {
     // 设置业务消息监听器
     await rustWebSocketClient.setupBusinessMessageListeners()

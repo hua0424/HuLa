@@ -238,10 +238,17 @@
       </div>
     </template>
   </AutoFixHeightPage>
+
+  <!-- AI 助理删除强确认弹窗 -->
+  <AiclawDeleteConfirmDialog
+    v-model:visible="showAiclawDeleteDialog"
+    @confirm="handleAiclawDeleteConfirm" />
 </template>
 
 <script setup lang="ts">
 import { MittEnum, NotificationTypeEnum, OnlineEnum, RoleEnum, RoomTypeEnum } from '@/enums'
+import { isAiclawUser } from '@/utils/AiclawUtils'
+import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
 import { useAvatarUpload } from '@/hooks/useAvatarUpload'
 import { useMitt } from '@/hooks/useMitt.ts'
 import { useMyRoomInfoUpdater } from '@/hooks/useMyRoomInfoUpdater'
@@ -372,8 +379,35 @@ const goToNotice = () => {
   })
 }
 
+// AI 助理删除强确认
+const showAiclawDeleteDialog = ref(false)
+const isCurrentAiclaw = computed(() => {
+  const session = activeItem.value
+  return session && !isGroup.value && isAiclawUser(session.detailId)
+})
+
+const handleAiclawDeleteConfirm = async (_password: string) => {
+  const session = activeItem.value
+  if (!session?.detailId) return
+  try {
+    // TODO: 调用 AICLAW_DEACTIVATE API（需密码验证），待后端就绪
+    await deleteFriend({ targetUid: session.detailId })
+    window.$message.success(t('mobile_chat_setting.delete_friend_success'))
+    showAiclawDeleteDialog.value = false
+    router.push('/mobile/message')
+  } catch (error) {
+    console.error('删除 AI 助理失败:', error)
+    showAiclawDeleteDialog.value = false
+  }
+}
+
 // 退出登录逻辑
 async function handleExit() {
+  // AI 助理使用强确认弹窗
+  if (isCurrentAiclaw.value) {
+    showAiclawDeleteDialog.value = true
+    return
+  }
   dialog.error({
     title: '提示',
     content: isGroup.value

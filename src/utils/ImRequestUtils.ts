@@ -343,6 +343,13 @@ export async function searchFriend(params: { key: string }) {
   })
 }
 
+export async function searchUser(params: { keyword: string; pageNo?: number; pageSize?: number }) {
+  return await imRequest({
+    url: ImUrlEnum.SEARCH_USER,
+    params
+  })
+}
+
 export async function sendAddFriendRequest(body: { targetUid: string; msg: string }) {
   return await imRequest({
     url: ImUrlEnum.SEND_ADD_FRIEND_REQUEST,

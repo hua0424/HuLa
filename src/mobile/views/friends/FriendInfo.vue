@@ -13,8 +13,19 @@
       <div class="flex flex-col overflow-auto h-full">
         <PersonalInfo :is-my-page="isMyPage" :is-show="isShow"></PersonalInfo>
 
+        <!-- AI 助理激活码管理（仅 owner 可见） -->
+        <div v-if="isAiclawOwner" class="px-20px py-12px">
+          <n-button
+            block
+            secondary
+            :disabled="aiclawDeactivated"
+            @click="handleRefreshActivation">
+            {{ t('aiclaw.token.refresh') }}
+          </n-button>
+        </div>
+
         <div class="top-0 flex-1 flex w-full border-#13987F border-1">
-          <div ref="measureRef" class="h-full w-full absolute top-0 z-0"></div>
+          <div ref="measureRef" class="h-full w-full absolute top-0 z-0 pointer-events-none"></div>
 
           <div
             ref="scrollContainer"
@@ -88,14 +99,23 @@
       </div>
     </template>
   </AutoFixHeightPage>
+
+  <!-- 激活码展示弹窗 -->
+  <AiclawTokenDialog v-model:visible="showTokenDialog" :token="refreshedToken" />
 </template>
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import { useI18n } from 'vue-i18n'
 import CommunityContent from '#/components/community/CommunityContent.vue'
 import CommunityTab from '#/components/community/CommunityTab.vue'
 import PersonalInfo from '#/components/my/PersonalInfo.vue'
+import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
+import { ImUrlEnum } from '@/enums'
+import { useContactStore } from '@/stores/contacts'
 import { useUserStore } from '@/stores/user'
 import { useFeedStore } from '@/stores/feed'
+import { isAiclawUser } from '@/utils/AiclawUtils'
+import { imRequest } from '@/utils/ImRequestUtils'
 
 const feedStore = useFeedStore()
 const { feedList, feedOptions } = storeToRefs(feedStore)
@@ -115,9 +135,47 @@ const userStore = useUserStore()
 
 const route = useRoute()
 
+const { t } = useI18n()
+const contactStore = useContactStore()
 const uid = route.params.uid as string
 
 const isMyPage = ref(false)
+
+// AI 助理激活码管理（仅 owner 可见）
+const isAiclawFriend = computed(() => isAiclawUser(uid))
+const isAiclawOwner = ref(false)
+const aiclawDeactivated = computed(() => {
+  const contact = contactStore.contactsList.find((c) => c.uid === uid)
+  return (contact as any)?.authStatus === 2
+})
+const showTokenDialog = ref(false)
+const refreshedToken = ref('')
+const refreshLoading = ref(false)
+
+const handleRefreshActivation = () => {
+  window.$dialog?.warning({
+    title: t('aiclaw.token.refresh'),
+    content: t('aiclaw.token.refresh_confirm'),
+    positiveText: t('aiclaw.delete.confirm'),
+    negativeText: t('aiclaw.delete.cancel'),
+    onPositiveClick: async () => {
+      refreshLoading.value = true
+      try {
+        const result = await imRequest<{ activationToken: string }>({
+          url: ImUrlEnum.AICLAW_REFRESH_ACTIVATION,
+          params: { uid }
+        })
+        refreshedToken.value = result.activationToken
+        showTokenDialog.value = true
+        window.$message?.success?.(t('aiclaw.token.refresh_success'))
+      } catch (error) {
+        console.error('[FriendInfo] 重新生成激活码失败:', error)
+      } finally {
+        refreshLoading.value = false
+      }
+    }
+  })
+}
 
 const onUpdate = (newTab: string) => {
   console.log('已更新：', newTab)
@@ -193,6 +251,16 @@ onMounted(async () => {
     isMyPage.value = true
   } else {
     isMyPage.value = false
+  }
+
+  // 检查当前用户是否为该 aiclaw 的 owner
+  if (isAiclawFriend.value) {
+    try {
+      const list = await imRequest<Array<{ uid: string }>>({ url: ImUrlEnum.AICLAW_LIST })
+      isAiclawOwner.value = (list || []).some((a) => String(a.uid) === String(uid))
+    } catch {
+      isAiclawOwner.value = false
+    }
   }
 
   // 初始加载动态列表

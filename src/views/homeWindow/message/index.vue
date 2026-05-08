@@ -176,10 +176,11 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { AvatarUtils } from '@/utils/AvatarUtils'
 import { formatTimestamp } from '@/utils/ComputedTime.ts'
 import { useI18n } from 'vue-i18n'
+import { isWeb } from '@/utils/PlatformConstants'
 
 const { t } = useI18n()
 const route = useRoute()
-const appWindow = WebviewWindow.getCurrent()
+const appWindow = isWeb() ? null : WebviewWindow.getCurrent()
 const chatStore = useChatStore()
 const globalStore = useGlobalStore()
 const groupStore = useGroupStore()
@@ -407,7 +408,7 @@ onMounted(async () => {
   // SysNTF
 
   // TODO：频繁切换会话会导致频繁请求，切换的时候也会有点卡顿
-  if (appWindow.label === 'home') {
+  if (appWindow?.label === 'home') {
     await addListener(
       appWindow.listen('search_to_msg', (event: { payload: { uid: string; roomType: number } }) => {
         openMsgSession(event.payload.uid, event.payload.roomType)
