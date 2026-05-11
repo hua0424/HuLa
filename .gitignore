@@ -28,7 +28,7 @@ src-tauri/target
 /coverage
 
 target
-.claude/
+# .claude/ (removed from gitignore)
 .serena/
 *.sqlite
 db.sqlite
