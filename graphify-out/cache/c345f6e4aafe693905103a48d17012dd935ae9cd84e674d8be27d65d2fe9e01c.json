@@ -1,0 +1,1 @@
+{"nodes": [{"id": "postcss_pxtorem_d", "label": "postcss-pxtorem.d.ts", "file_type": "code", "source_file": "src/typings/postcss-pxtorem.d.ts", "source_location": "L1"}], "edges": [{"source": "postcss_pxtorem_d", "target": "postcss", "relation": "imports_from", "confidence": "EXTRACTED", "source_file": "src/typings/postcss-pxtorem.d.ts", "source_location": "L2", "weight": 1.0}]}
