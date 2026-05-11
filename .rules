@@ -60,6 +60,29 @@ The project supports:
     - **`migration/`**: Database migrations.
     - **`tauri.conf.json`**: Tauri configuration.
 - **`tauri-plugin-hula/`**: Custom local Tauri plugin.
+- **`teamdocs/`**: Git submodule pointing to `https://github.com/hua0424/aichat-hula-docs.git`. See [Git Submodules](#git-submodules) below.
+
+## Git Submodules
+
+The `teamdocs/` directory is a **git submodule**. It is managed independently and must be handled with submodule-specific commands.
+
+### Common Operations
+
+| Action | Command | Description |
+| :--- | :--- | :--- |
+| **Clone with submodules** | `git clone --recurse-submodules <repo>` | Clone the main repo and all submodules |
+| **Initialize submodules** | `git submodule update --init --recursive` | Initialize and fetch submodule contents |
+| **Update submodule** | `git submodule update --remote` | Pull latest changes from the submodule remote |
+| **Enter submodule** | `cd teamdocs && git pull` | Work inside the submodule directory |
+| **Commit in submodule** | `cd teamdocs && git add . && git commit -m "..."` | Commit changes within the submodule |
+| **Push submodule** | `cd teamdocs && git push` | Push submodule changes to its own remote |
+| **Update parent ref** | `cd .. && git add teamdocs && git commit -m "chore: update teamdocs submodule"` | Record new submodule commit in parent repo |
+
+### Important Notes
+
+- **Never** run `git add teamdocs/` directly when you intend to commit files inside the submodule. Enter the directory and commit there first.
+- After committing inside `teamdocs/`, return to the parent repo and commit the updated submodule reference.
+- The parent repo tracks the exact commit hash of the submodule, not its branch.
 
 ## Coding Style & Naming Conventions
 
