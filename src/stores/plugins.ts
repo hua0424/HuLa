@@ -41,18 +41,27 @@ export const usePluginsStore = defineStore(
     }
 
     const syncPluginsWithLocale = (latest: STO.Plugins<PluginEnum>[]) => {
-      plugins.value = plugins.value.map((plugin) => {
-        const updated = latest.find((p) => p.url === plugin.url)
-        return updated
-          ? {
-              ...plugin,
-              size: updated.size ? { ...plugin.size, ...updated.size } : plugin.size,
-              window: updated.window ? { ...plugin.window, ...updated.window } : plugin.window,
-              title: updated.title,
-              shortTitle: updated.shortTitle
-            }
-          : plugin
-      })
+      // 1. 保留仍在最新配置中的旧插件，并同步属性
+      const synced = plugins.value
+        .map((plugin) => {
+          const updated = latest.find((p) => p.url === plugin.url)
+          return updated
+            ? {
+                ...plugin,
+                size: updated.size ? { ...plugin.size, ...updated.size } : plugin.size,
+                window: updated.window ? { ...plugin.window, ...updated.window } : plugin.window,
+                title: updated.title,
+                shortTitle: updated.shortTitle
+              }
+            : null
+        })
+        .filter(Boolean) as STO.Plugins<PluginEnum>[]
+
+      // 2. 把新配置中有但本地没有的新插件加进来
+      const existingUrls = new Set(synced.map((p) => p.url))
+      const newPlugins = latest.filter((p) => !existingUrls.has(p.url))
+
+      plugins.value = [...synced, ...newPlugins]
     }
 
     watch(pluginsList, (latest) => syncPluginsWithLocale(latest), { immediate: true })
