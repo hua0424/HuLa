@@ -37,3 +37,4 @@ db.sqlite
 
 src/typings/components.pc.d.ts
 src/typings/components.mobile.d.ts
+.mcp.json
