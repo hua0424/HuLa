@@ -170,8 +170,11 @@ Theme tokens live in `src/styles/scss/global/variable.scss`, but prefer inline U
 ### language
 - The language of the reply is determined based on the language of the user's question. For example, if a user asks a question in simplified Chinese, reply in simplified Chinese.
 
+## compact
 
-
-
-
-
+When summarizing, always preserve:
+- The current design plan and architecture decisions
+- All files modified so far and their key changes
+- Unresolved TODOs and next steps
+- Any errors encountered and how they were fixed
+- Current task state (what's done, what's in progress)
