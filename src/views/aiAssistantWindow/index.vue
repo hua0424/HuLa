@@ -25,9 +25,18 @@
             <n-avatar round :size="36" :src="item.avatar || '/logo.png'" fallback-src="/logo.png" />
             <div class="flex flex-col flex-1 min-w-0">
               <span class="text-13px font-500 text-[--text-color] truncate">{{ item.name }}</span>
-              <span class="text-11px mt-2px" :class="statusTextClass(item.authStatus)">
-                {{ t(`aiclaw.status.${authStatusMap[item.authStatus] || 'inactive'}`) }}
-              </span>
+              <!-- ISS-010 A1: 主状态读 activeStatus (实时在线), authStatus 仅在非"已激活"时降级为小标签 -->
+              <div class="flex items-center gap-4px mt-2px">
+                <span class="text-11px" :class="onlineTextClass(item.activeStatus)">
+                  {{ t(`aiclaw.status.${getOnlineKey(item.activeStatus)}`) }}
+                </span>
+                <span
+                  v-if="item.authStatus !== 1"
+                  class="text-10px px-4px py-1px rounded-3px"
+                  :class="authBadgeClass(item.authStatus)">
+                  {{ t(`aiclaw.auth_status.${getAuthKey(item.authStatus)}`) }}
+                </span>
+              </div>
             </div>
           </div>
         </template>
@@ -66,21 +75,21 @@
               {{ selectedItem.description }}
             </span>
             <div class="flex items-center gap-8px mt-6px">
-              <!-- Status badge -->
+              <!-- ISS-010 A1: 主状态徽章读 activeStatus (实时在线) -->
               <span
-                v-if="selectedItem.authStatus === 0"
-                class="text-11px font-500 px-8px py-2px rounded-4px bg-#90909015 text-#999">
-                {{ t('aiclaw.status.inactive') }}
+                class="text-11px font-500 px-8px py-2px rounded-4px flex items-center gap-4px"
+                :class="
+                  selectedItem.activeStatus === 1 ? 'bg-#18a05815 text-#18a058' : 'bg-#90909015 text-#999'
+                ">
+                <n-badge :color="onlineDotColor(selectedItem.activeStatus)" dot />
+                {{ t(`aiclaw.status.${getOnlineKey(selectedItem.activeStatus)}`) }}
               </span>
+              <!-- 二级标签: 激活生命周期 (authStatus), 仅在非"已激活"时显示, 减少视觉噪音 -->
               <span
-                v-else-if="selectedItem.authStatus === 1"
-                class="text-11px font-500 px-8px py-2px rounded-4px bg-#18a05815 text-#18a058">
-                {{ t('aiclaw.status.online') }}
-              </span>
-              <span
-                v-else-if="selectedItem.authStatus === 2"
-                class="text-11px font-500 px-8px py-2px rounded-4px bg-#d0305015 text-#d03050">
-                {{ t('aiclaw.status.offline') }}
+                v-if="selectedItem.authStatus !== 1"
+                class="text-11px font-500 px-8px py-2px rounded-4px"
+                :class="authBadgeClass(selectedItem.authStatus)">
+                {{ t(`aiclaw.auth_status.${getAuthKey(selectedItem.authStatus)}`) }}
               </span>
             </div>
           </div>
@@ -336,7 +345,13 @@ type AiclawListItem = {
   name: string
   avatar: string
   description: string
+  /** 激活生命周期(authStatus, 来自 im_aiclaw.auth_status): 0=未激活 / 1=已激活 / 2=已停用 */
   authStatus: number
+  /**
+   * 运行时在线状态(activeStatus, 来自 Redis ZSET, ISS-010 A1 后端 PR #7 新增):
+   * OnlineEnum.ONLINE=1 / OFFLINE=2; 后端老版本无此字段时为 undefined,前端统一按离线处理
+   */
+  activeStatus?: number
   adapterType: string
   publicPersona: string | null
   createTime: number
@@ -412,20 +427,35 @@ const relationInput = ref('')
 const savingRelation = ref(false)
 const editingFriendUid = ref('')
 
-const authStatusMap: Record<number, 'inactive' | 'online' | 'offline'> = {
+// ISS-010 A1: 两个数据源分离
+// - activeStatus: 运行时在线状态 (Redis ZSET, 实时), 对应 i18n key `aiclaw.status.online/offline`
+// - authStatus:    激活生命周期 (im_aiclaw.auth_status 列), 对应 i18n key `aiclaw.auth_status.*`
+const authStatusMap: Record<number, 'inactive' | 'activated' | 'deactivated'> = {
   0: 'inactive',
-  1: 'online',
-  2: 'offline'
+  1: 'activated',
+  2: 'deactivated'
 }
+
+const getOnlineKey = (activeStatus?: number): 'online' | 'offline' =>
+  activeStatus === 1 ? 'online' : 'offline'
+
+const getAuthKey = (authStatus?: number): 'inactive' | 'activated' | 'deactivated' =>
+  authStatusMap[authStatus ?? 0] || 'inactive'
 
 const selectedItem = computed(() => aiclawList.value.find((item) => item.uid === selectedUid.value) || null)
 
 const personaDirty = computed(() => personaText.value !== originalPersona.value)
 
-const statusTextClass = (authStatus: number) => {
-  if (authStatus === 1) return 'text-#18a058'
-  if (authStatus === 2) return 'text-#d03050'
-  return 'text-#999'
+const onlineTextClass = (activeStatus?: number) =>
+  activeStatus === 1 ? 'text-#18a058' : 'text-#999'
+
+const onlineDotColor = (activeStatus?: number) =>
+  activeStatus === 1 ? '#18a058' : '#909090'
+
+// authStatus 二级标签的色彩: 未激活 / 已停用 走灰/红, 已激活省略不显示 (主在线状态已足够表达)
+const authBadgeClass = (authStatus?: number) => {
+  if (authStatus === 2) return 'bg-#d0305015 text-#d03050'
+  return 'bg-#90909015 text-#999'
 }
 
 const fetchList = async () => {

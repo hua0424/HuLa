@@ -32,6 +32,11 @@
     "online": "Online",
     "offline": "Offline"
   },
+  "auth_status": {
+    "inactive": "Inactive",
+    "activated": "Activated",
+    "deactivated": "Deactivated"
+  },
   "chat": {
     "notice": "AI Assistant Chat - Responses are AI-generated",
     "streaming": "Responding..."

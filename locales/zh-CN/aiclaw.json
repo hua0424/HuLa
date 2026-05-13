@@ -32,6 +32,11 @@
     "online": "在线",
     "offline": "离线"
   },
+  "auth_status": {
+    "inactive": "未激活",
+    "activated": "已激活",
+    "deactivated": "已停用"
+  },
   "chat": {
     "notice": "AI 助理对话 · 回复由 AI 生成",
     "streaming": "正在回复..."

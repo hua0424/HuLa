@@ -26,8 +26,9 @@
                 class="flex flex-col flex-1 min-w-0 cursor-pointer"
                 @click="router.push(`/mobile/mobileMy/aiAssistant/${item.uid}`)">
                 <span class="text-15px font-500 truncate">{{ item.name }}</span>
-                <span class="text-12px text-#999 mt-2px">
-                  {{ t(`aiclaw.status.${authStatusMap[item.authStatus] || 'inactive'}`) }}
+                <!-- ISS-010 A1: 主状态读 activeStatus (实时在线), authStatus 通过右侧按钮区已表达, 这里只显示运行时在线 -->
+                <span class="text-12px mt-2px" :class="onlineTextClass(item.activeStatus)">
+                  {{ t(`aiclaw.status.${getOnlineKey(item.activeStatus)}`) }}
                 </span>
               </div>
               <div class="flex items-center gap-6px">
@@ -111,7 +112,10 @@ type AiclawListItem = {
   name: string
   avatar: string
   description: string
+  /** 激活生命周期: 0=未激活 / 1=已激活 / 2=已停用 */
   authStatus: number
+  /** 运行时在线状态 (Redis ZSET, ISS-010 A1): OnlineEnum.ONLINE=1 / OFFLINE=2; 老后端无此字段时 undefined 按离线处理 */
+  activeStatus?: number
   adapterType: string
   publicPersona: string | null
   createTime: number
@@ -125,11 +129,12 @@ const viewingUid = ref('')
 const deletingUid = ref('')
 const aiclawList = ref<AiclawListItem[]>([])
 
-const authStatusMap: Record<number, 'inactive' | 'online' | 'offline'> = {
-  0: 'inactive',
-  1: 'online',
-  2: 'offline'
-}
+// ISS-010 A1: activeStatus → 实时在线; 右侧按钮区已用 aiclaw.token.* 表达 authStatus, 这里只保留在线状态文案
+const getOnlineKey = (activeStatus?: number): 'online' | 'offline' =>
+  activeStatus === 1 ? 'online' : 'offline'
+
+const onlineTextClass = (activeStatus?: number) =>
+  activeStatus === 1 ? 'text-#18a058' : 'text-#999'
 
 const fetchList = async () => {
   try {

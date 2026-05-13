@@ -17,9 +17,18 @@
           <div class="flex flex-col flex-1 min-w-0">
             <span class="text-17px font-600 truncate">{{ aiclawInfo?.name }}</span>
             <span class="text-13px text-#999 mt-2px">{{ aiclawInfo?.description }}</span>
-            <span class="text-12px mt-4px" :class="statusClass">
-              {{ t(`aiclaw.status.${authStatusMap[aiclawInfo?.authStatus ?? 0] || 'inactive'}`) }}
-            </span>
+            <!-- ISS-010 A1: 主状态读 activeStatus (实时在线), authStatus 仅在非"已激活"时降级为二级标签 -->
+            <div class="flex items-center gap-6px mt-4px">
+              <span class="text-12px" :class="statusClass">
+                {{ t(`aiclaw.status.${getOnlineKey(aiclawInfo?.activeStatus)}`) }}
+              </span>
+              <span
+                v-if="(aiclawInfo?.authStatus ?? 0) !== 1"
+                class="text-10px px-4px py-1px rounded-3px"
+                :class="authBadgeClass(aiclawInfo?.authStatus)">
+                {{ t(`aiclaw.auth_status.${getAuthKey(aiclawInfo?.authStatus)}`) }}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -88,7 +97,10 @@ type AiclawInfo = {
   name: string
   avatar: string
   description: string
+  /** 激活生命周期: 0=未激活 / 1=已激活 / 2=已停用 */
   authStatus: number
+  /** 运行时在线状态 (Redis ZSET, ISS-010 A1): OnlineEnum.ONLINE=1 / OFFLINE=2; 老后端无此字段时 undefined 按离线处理 */
+  activeStatus?: number
   adapterType: string
   publicPersona: string | null
   createTime: number
@@ -99,17 +111,27 @@ const personaText = ref('')
 const originalPersona = ref('')
 const savingPersona = ref(false)
 
-const authStatusMap: Record<number, 'inactive' | 'online' | 'offline'> = {
+// ISS-010 A1: 两个数据源分离 — activeStatus(实时在线) + authStatus(激活生命周期)
+const authStatusMap: Record<number, 'inactive' | 'activated' | 'deactivated'> = {
   0: 'inactive',
-  1: 'online',
-  2: 'offline'
+  1: 'activated',
+  2: 'deactivated'
+}
+
+const getOnlineKey = (activeStatus?: number): 'online' | 'offline' =>
+  activeStatus === 1 ? 'online' : 'offline'
+
+const getAuthKey = (authStatus?: number): 'inactive' | 'activated' | 'deactivated' =>
+  authStatusMap[authStatus ?? 0] || 'inactive'
+
+const authBadgeClass = (authStatus?: number) => {
+  if (authStatus === 2) return 'bg-#d0305015 text-#d03050'
+  return 'bg-#90909015 text-#999'
 }
 
 const statusClass = computed(() => {
-  const status = aiclawInfo.value?.authStatus
-  if (status === 1) return 'text-#18a058'
-  if (status === 2) return 'text-#d03050'
-  return 'text-#999'
+  // 在线/离线: 在线绿色, 离线灰色 (与桌面端保持一致)
+  return aiclawInfo.value?.activeStatus === 1 ? 'text-#18a058' : 'text-#999'
 })
 
 const personaDirty = computed(() => personaText.value !== originalPersona.value)
