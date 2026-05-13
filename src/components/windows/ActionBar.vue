@@ -107,14 +107,18 @@
         </svg>
         <n-flex vertical :size="20" class="p-[22px_10px_10px_22px] select-none">
           <span class="text-16px">{{ t('components.actionBar.close_prompt.title') }}</span>
-          <label class="text-(14px #707070) flex gap-6px lh-16px items-center">
-            <n-radio :checked="tipsRef.type === CloseBxEnum.HIDE" @change="tipsRef.type = CloseBxEnum.HIDE" />
-            <span>{{ t('components.actionBar.close_prompt.hide_to_tray') }}</span>
-          </label>
-          <label class="text-(14px #707070) flex gap-6px lh-16px items-center">
-            <n-radio :checked="tipsRef.type === CloseBxEnum.CLOSE" @change="tipsRef.type = CloseBxEnum.CLOSE" />
-            <span>{{ t('components.actionBar.close_prompt.exit_app') }}</span>
-          </label>
+          <n-radio-group v-model:value="tipsRef.type">
+            <n-flex vertical :size="20">
+              <label class="text-(14px #707070) flex gap-6px lh-16px items-center">
+                <n-radio :value="CloseBxEnum.HIDE" />
+                <span>{{ t('components.actionBar.close_prompt.hide_to_tray') }}</span>
+              </label>
+              <label class="text-(14px #707070) flex gap-6px lh-16px items-center">
+                <n-radio :value="CloseBxEnum.CLOSE" />
+                <span>{{ t('components.actionBar.close_prompt.exit_app') }}</span>
+              </label>
+            </n-flex>
+          </n-radio-group>
           <label class="text-(12px #909090) flex gap-6px justify-end items-center">
             <n-checkbox size="small" v-model:checked="tipsRef.notTips" />
             <span>{{ t('components.actionBar.close_prompt.no_prompt') }}</span>
