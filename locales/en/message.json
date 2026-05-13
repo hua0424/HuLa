@@ -82,6 +82,8 @@
     "shield_user": "User muted",
     "empty_description": "Start chatting with friends!",
     "empty_action": "Find friends",
+    "error_description": "Failed to load recent messages. Please check your network and retry.",
+    "error_action": "Retry",
     "default_last_msg": "Welcome to HuLa"
   },
   "message_menu": {

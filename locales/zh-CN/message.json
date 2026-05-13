@@ -82,6 +82,8 @@
     "shield_user": "您已屏蔽此人",
     "empty_description": "快和朋友聊天吧！",
     "empty_action": "寻找好友",
+    "error_description": "最近消息加载失败，请检查网络后重试",
+    "error_action": "重试",
     "default_last_msg": "欢迎使用HuLa"
   },
   "message_menu": {

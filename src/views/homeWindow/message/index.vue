@@ -150,6 +150,23 @@
       </n-flex>
     </n-flex>
 
+    <!-- 加载失败兜底卡片 (ISS-009): 当 getSessionList 失败时,允许用户点重试再拉一次 -->
+    <n-result
+      v-else-if="chatStore.sessionOptions.isError"
+      class="absolute-center"
+      status="warning"
+      :description="t('message.message_list.error_description')">
+      <template #footer>
+        <n-button
+          secondary
+          type="primary"
+          :loading="chatStore.sessionOptions.isLoading"
+          @click="handleRetrySession">
+          {{ t('message.message_list.error_action') }}
+        </n-button>
+      </template>
+    </n-result>
+
     <!-- 没有数据显示的提示 -->
     <n-result v-else class="absolute-center" status="418" :description="t('message.message_list.empty_description')">
       <template #footer>
@@ -380,6 +397,13 @@ watch(
 // 处理右键菜单显示状态变化
 const handleMenuShow = (roomId: string, isShow: boolean) => {
   activeContextMenuRoomId.value = isShow ? roomId : null
+}
+
+// 加载失败兜底卡片的重试按钮 (ISS-009)
+// 直接调 chatStore.getSessionList(true);失败时 sessionOptions.isError 会再次置 true,
+// 按钮 :loading 绑定 isLoading,二次点击会被 isLoading 守卫短路,不会并发请求。
+const handleRetrySession = () => {
+  chatStore.getSessionList(true)
 }
 
 // 判断对应样式
