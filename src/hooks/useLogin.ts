@@ -287,10 +287,36 @@ export const useLogin = () => {
     }
     userStore.userInfo = account
     // 记住密码时保存密码到登录历史
-    const historyEntry = { ...account }
-    if (localStorage.getItem('rememberPassword') === 'true') {
-      historyEntry.password = info.value.password
+    // 注意: 桌面端 init() 运行在 home 窗口,这里的 useLogin()/info 与登录窗口是不同实例,
+    // info.value.password 为空。Login 窗口在登录成功后会将密码(+timestamp)暂存到
+    // localStorage.__pendingHistoryPassword,这里读取并校验 TTL,过期视为残留废弃。
+    // TTL 30s: 覆盖 home 窗口创建 + WS 连接 + getAllUserState/getUserDetail 两次 HTTP,
+    // 同时避免明文密码长期残留 (init() 内 await 链已经消耗 1-3s,不能太短)
+    const HISTORY_PASSWORD_TTL_MS = 30_000
+    const historyEntry: any = { ...account }
+    let pendingPassword = ''
+    try {
+      const raw = localStorage.getItem('__pendingHistoryPassword')
+      if (raw) {
+        const parsed = JSON.parse(raw) as { password?: string; ts?: number }
+        if (parsed?.password && parsed?.ts && Date.now() - parsed.ts < HISTORY_PASSWORD_TTL_MS) {
+          pendingPassword = parsed.password
+        }
+      }
+    } catch (_e) {
+      // 解析失败,忽略
     }
+    const existingEntry = loginHistoriesStore.loginHistories.find(
+      (h: any) => h.account === account.account
+    )
+    if (localStorage.getItem('rememberPassword') === 'true') {
+      historyEntry.password = info.value.password || pendingPassword || existingEntry?.password || ''
+    } else {
+      // 取消记住密码: 显式清空 history 中的旧密码
+      historyEntry.password = ''
+    }
+    // 用完即删,避免明文密码长期残留
+    localStorage.removeItem('__pendingHistoryPassword')
     loginHistoriesStore.addLoginHistory(historyEntry)
     // 初始化表情列表并在后台预取本地缓存（使用 worker + 并发限制）
     void emojiStore.initEmojis().catch(() => {
@@ -468,6 +494,21 @@ export const useLogin = () => {
         // 仅在移动端的首次手动登录时，才默认打开自动登录开关
         if (!auto && isMobile()) {
           settingStore.setAutoLogin(true)
+        }
+
+        // 桌面端: 跨窗口暂存密码,供 home 窗口 init() 写 loginHistory 时读取
+        // (useLogin() 在不同窗口是独立实例,info.value 不共享,只能通过 localStorage/store 桥接)
+        // 安全考虑:附带 timestamp,init() 端校验 30s TTL,避免崩溃/异常导致明文密码残留
+        if (!isMobile() && !isWeb()) {
+          if (localStorage.getItem('rememberPassword') === 'true' && password) {
+            localStorage.setItem(
+              '__pendingHistoryPassword',
+              JSON.stringify({ password, ts: Date.now() })
+            )
+          } else {
+            // 未勾选"记住密码"时,主动清空,避免历史残留
+            localStorage.removeItem('__pendingHistoryPassword')
+          }
         }
 
         // 移动端登录之后，初始化数据
