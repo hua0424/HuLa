@@ -712,8 +712,11 @@ onMounted(() => {
       const closeWindow = await WebviewWindow.getByLabel(event.close)
       closeWindow?.close()
     })
+    // ISS-008 二次修复: appWindow 通过 import().then() 异步赋值, onMounted 同步执行时 appWindow.value 仍为 null,
+    // 旧代码 appWindow.value.listen(...) 抛 TypeError, EXIT 监听永不注册 -> 主程序无法退出.
+    // 改用顶部已 import 的全局 listen (@tauri-apps/api/event), 无需 window 引用, EXIT 事件在应用层广播即可收到.
     addListener(
-      appWindow.value.listen(EventEnum.EXIT, async () => {
+      listen(EventEnum.EXIT, async () => {
         await exit(0)
       }),
       'app-exit'
