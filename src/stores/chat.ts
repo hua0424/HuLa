@@ -416,13 +416,14 @@ export const useChatStore = defineStore(
       if (!currentMessageMap.value || Object.keys(currentMessageMap.value).length === 0) return []
 
       // 直接使用 Rust 后端计算的 timeBlock，不做前端计算
-      return Object.values(currentMessageMap.value).sort((a, b) => Number(a.message.id) - Number(b.message.id))
+      // FIX: 按 sendTime 排序，避免不同服务（IM Server / AI Bridge）snowflake ID 区段不同导致分组错乱
+      return Object.values(currentMessageMap.value).sort((a, b) => (a.message.sendTime ?? 0) - (b.message.sendTime ?? 0))
     })
 
     const chatMessageListByRoomId = computed(() => (roomId: string) => {
       if (!messageMap[roomId] || Object.keys(messageMap[roomId]).length === 0) return []
 
-      return Object.values(messageMap[roomId]).sort((a, b) => Number(a.message.id) - Number(b.message.id))
+      return Object.values(messageMap[roomId]).sort((a, b) => (a.message.sendTime ?? 0) - (b.message.sendTime ?? 0))
     })
 
     const findRoomIdByMsgId = (msgId: string) => {
@@ -1342,8 +1343,8 @@ export const useChatStore = defineStore(
       const currentMessages = messageMap[roomId]
       if (!currentMessages) return
 
-      // 将消息转换为数组并按消息ID倒序排序，前面的元素代表最新的消息
-      const sortedMessages = Object.values(currentMessages).sort((a, b) => Number(b.message.id) - Number(a.message.id))
+      // 将消息转换为数组并按 sendTime 倒序排序，前面的元素代表最新的消息
+      const sortedMessages = Object.values(currentMessages).sort((a, b) => (b.message.sendTime ?? 0) - (a.message.sendTime ?? 0))
 
       if (sortedMessages.length <= limit) {
         return
