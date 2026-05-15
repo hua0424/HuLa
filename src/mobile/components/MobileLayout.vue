@@ -161,6 +161,13 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
   if (chatStore.checkMsgExist(String(data.message.roomId), String(data.message.id))) {
     return
   }
+  // ISS-015: 统一把 sendTime 规范化成 number 时间戳，防止后端/API/SQLite 返回 string 导致 sort NaN
+  const rawSendTime = data.message.sendTime ?? data.sendTime
+  if (typeof rawSendTime === 'string') {
+    const num = Number(rawSendTime)
+    data.message.sendTime = Number.isNaN(num) ? new Date(rawSendTime).getTime() : num
+    data.sendTime = data.message.sendTime
+  }
   // 流式占位替换：stream_end 落库后 server 会推 receiveMessage（ID 不同），用真实消息替换占位
   if (chatStore.tryReplaceStreamPlaceholder(data)) {
     return
@@ -171,7 +178,6 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
       route.path.startsWith('/mobile/chatRoom') && globalStore.currentSessionRoomId === data.message.roomId,
     activeRoomId: globalStore.currentSessionRoomId || ''
   })
-  data.message.sendTime = new Date(data.message.sendTime).getTime()
   if (!isWeb()) {
     await invokeSilently(TauriCommand.SAVE_MSG, {
       data

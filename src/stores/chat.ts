@@ -411,6 +411,36 @@ export const useChatStore = defineStore(
     // 当前消息回复
     const currentMsgReply = ref<Partial<MessageType>>({})
 
+    /**
+     * 统一规范化消息的 sendTime 为 number 时间戳
+     * 后端/API/SQLite 可能返回 string（数字字符串或 ISO 日期），排序前必须归一化
+     * ISS-015 根因：sendTime 类型不一致导致 sort comparator 产出 NaN，排序不稳定
+     */
+    const normalizeMsgSendTime = (msg: MessageType) => {
+      const raw = msg.message.sendTime ?? msg.sendTime
+      if (typeof raw === 'number') {
+        msg.message.sendTime = raw
+        msg.sendTime = raw
+        return
+      }
+      if (typeof raw === 'string') {
+        const num = Number(raw)
+        if (!Number.isNaN(num)) {
+          msg.message.sendTime = num
+          msg.sendTime = num
+          return
+        }
+        const parsed = new Date(raw).getTime()
+        if (!Number.isNaN(parsed)) {
+          msg.message.sendTime = parsed
+          msg.sendTime = parsed
+          return
+        }
+      }
+      msg.message.sendTime = Date.now()
+      msg.sendTime = Date.now()
+    }
+
     // 将消息列表转换为数组并计算时间间隔
     const chatMessageList = computed(() => {
       if (!currentMessageMap.value || Object.keys(currentMessageMap.value).length === 0) return []
@@ -540,6 +570,7 @@ export const useChatStore = defineStore(
 
       const list = Array.isArray(data.list) ? data.list : []
       for (const msg of list) {
+        normalizeMsgSendTime(msg)
         messageMap[roomId][msg.message.id] = msg
       }
     }
@@ -751,6 +782,7 @@ export const useChatStore = defineStore(
 
     // 推送消息
     const pushMsg = async (msg: MessageType, options: { isActiveChatView?: boolean; activeRoomId?: string } = {}) => {
+      normalizeMsgSendTime(msg)
       if (!msg.message.id) {
         msg.message.id = `${msg.message.roomId}_${msg.message.sendTime}_${msg.fromUser.uid}`
       }
@@ -1460,11 +1492,13 @@ export const useChatStore = defineStore(
     /** 正在流式中的消息 ID 集合 */
     const streamingMessages = reactive(new Set<string>())
     /**
-     * 已完成流式的占位消息映射：streamMsgId → roomId
+     * 已完成流式的占位消息映射：roomId → streamMsgId[]
      * 用于在 receiveMessage 到达时，用真实消息替换流式占位消息
      * （后端流式 msgId 和持久化消息 ID 不同）
+     * ISS-015 Bug1: 原为 Map<roomId, streamMsgId> 单槽，多流依次完成时互相覆盖。
+     * 改为数组后每个 room 可追踪多个 pending 占位。
      */
-    const pendingStreamReplace = new Map<string, string>()
+    const pendingStreamReplace = new Map<string, string[]>()
 
     /** 创建流式消息占位（stream_start 时调用） */
     const startStream = (payload: { msgId: string; fromUid: number; toUid: number; roomId: number }) => {
@@ -1519,7 +1553,11 @@ export const useChatStore = defineStore(
         if (msg) {
           msg.message.body.content = payload.fullContent
           // 记录：当同 room 的 receiveMessage 到达时，用真实消息替换此占位
-          pendingStreamReplace.set(roomId, msgId)
+          const arr = pendingStreamReplace.get(roomId) || []
+          if (!arr.includes(msgId)) {
+            arr.push(msgId)
+            pendingStreamReplace.set(roomId, arr)
+          }
           break
         }
       }
@@ -1530,15 +1568,45 @@ export const useChatStore = defineStore(
      * 返回 true 表示已替换（调用方不需要再 pushMsg），false 表示无需替换
      */
     const tryReplaceStreamPlaceholder = (realMsg: MessageType): boolean => {
+      normalizeMsgSendTime(realMsg)
       const roomId = String(realMsg.message.roomId)
-      const streamMsgId = pendingStreamReplace.get(roomId)
-      if (!streamMsgId) return false
+      const pendingIds = pendingStreamReplace.get(roomId)
+      if (!pendingIds || pendingIds.length === 0) return false
 
-      // 从 messageMap 中删除流式占位消息，插入真实消息
-      if (messageMap[roomId]?.[streamMsgId]) {
-        delete messageMap[roomId][streamMsgId]
+      // 过滤出仍存在于 messageMap 中的占位消息
+      const candidates = pendingIds
+        .map((id) => ({ id, msg: messageMap[roomId]?.[id] }))
+        .filter((c) => !!c.msg) as { id: string; msg: MessageType }[]
+
+      if (candidates.length === 0) {
+        // 所有占位都已被清理，清空该 room 的 pending 记录
+        pendingStreamReplace.delete(roomId)
+        return false
       }
-      pendingStreamReplace.delete(roomId)
+
+      // 选择 sendTime 最接近 realMsg 的占位进行替换
+      let bestId = candidates[0].id
+      let bestDiff = Math.abs((candidates[0].msg.message.sendTime ?? 0) - realMsg.message.sendTime)
+      for (let i = 1; i < candidates.length; i++) {
+        const diff = Math.abs((candidates[i].msg.message.sendTime ?? 0) - realMsg.message.sendTime)
+        if (diff < bestDiff) {
+          bestDiff = diff
+          bestId = candidates[i].id
+        }
+      }
+
+      // 从 messageMap 中删除选中的占位消息，插入真实消息
+      if (messageMap[roomId]?.[bestId]) {
+        delete messageMap[roomId][bestId]
+      }
+
+      // 从 pending 数组中移除该 id
+      const newPending = pendingIds.filter((id) => id !== bestId)
+      if (newPending.length > 0) {
+        pendingStreamReplace.set(roomId, newPending)
+      } else {
+        pendingStreamReplace.delete(roomId)
+      }
 
       // 插入真实消息
       if (!messageMap[roomId]) {
