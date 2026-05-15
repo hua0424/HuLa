@@ -617,11 +617,15 @@ const handleSendEmailCode = async () => {
 
   sendCodeLoading.value = true
   try {
-    await sendCaptcha({
+    const result = await sendCaptcha({
       email: registerInfo.value.email,
       operationType: 'register',
       templateCode: 'REGISTER_EMAIL'
     })
+    // 如果后端返回 uuid，保存用于注册验证
+    if (result && typeof result === 'object' && 'uuid' in result) {
+      registerInfo.value.uuid = (result as any).uuid
+    }
     window.$message.success(t('login.mobile.code_sent_email'))
     startSendCodeCountdown()
   } catch (error) {
@@ -648,8 +652,11 @@ const handleRegisterComplete = async () => {
     const avatarId = avatarNum.toString().padStart(3, '0')
     registerInfo.value.avatar = avatarId
 
-    // 注册 - 只传递API需要的字段
-    const { ...apiRegisterInfo } = registerInfo.value
+    // 注册 - 只传递API需要的字段，uuid 为空时不传递
+    const apiRegisterInfo = { ...registerInfo.value }
+    if (!apiRegisterInfo.uuid) {
+      delete (apiRegisterInfo as any).uuid
+    }
 
     await register(apiRegisterInfo)
 

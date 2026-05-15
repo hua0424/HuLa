@@ -451,11 +451,15 @@ const handleStepAction = async () => {
   try {
     const email = info.email.trim()
     info.email = email
-    await ImRequestUtils.sendCaptcha({
+    const result = await ImRequestUtils.sendCaptcha({
       email,
       operationType: 'register',
       templateCode: 'REGISTER_EMAIL'
     })
+    // 如果后端返回 uuid，保存用于注册验证
+    if (result && typeof result === 'object' && 'uuid' in result) {
+      info.uuid = (result as any).uuid
+    }
     startSendCodeCountdown()
     window.$message.success(t('auth.register.messages.code_sent'))
     emailCodeModal.value = true
@@ -465,6 +469,9 @@ const handleStepAction = async () => {
     })
   } catch (error) {
     console.error('发送验证码失败', error)
+    if (error instanceof Error) {
+      window.$message.error(error.message)
+    }
   } finally {
     loading.value = false
   }
@@ -510,8 +517,12 @@ const register = async () => {
 
     info.confirmPassword = confirmPassword.value
 
-    // 注册
-    await ImRequestUtils.register({ ...info })
+    // 注册：uuid 为空时不传递，避免后端验证失败
+    const registerBody = { ...info }
+    if (!registerBody.uuid) {
+      delete (registerBody as any).uuid
+    }
+    await ImRequestUtils.register(registerBody)
     window.$message.success(t('auth.register.messages.register_success'))
 
     // 关闭弹窗并跳转到登录页
@@ -522,8 +533,10 @@ const register = async () => {
       })
       WebviewWindow.getCurrent().close()
     }, 1200)
-  } catch (error) {
-    window.$message.error(t('auth.register.messages.register_fail'))
+  } catch (error: any) {
+    console.error('注册失败', error)
+    const msg = error?.message || error?.msg || t('auth.register.messages.register_fail')
+    window.$message.error(msg)
   } finally {
     registerLoading.value = false
   }
