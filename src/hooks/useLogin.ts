@@ -152,7 +152,7 @@ export const useLogin = () => {
       try {
         await sendLogoutEvent()
         // 创建登录窗口
-        await createWebviewWindow('登录', 'login', 320, 448, undefined, false, 320, 448)
+        await createWebviewWindow('登录', 'login', 320, 490, undefined, false, 320, 490)
         // 发送登出事件
         await emit(EventEnum.LOGOUT)
 
