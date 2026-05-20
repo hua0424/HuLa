@@ -1664,6 +1664,8 @@ export const useChatStore = defineStore(
       lastSeq: number
       /** 是否已折叠 */
       collapsed: boolean
+      /** 30s 延迟归档的 timeout ID（用于 startThinking 覆盖时清理） */
+      archiveTimeoutId?: ReturnType<typeof setTimeout>
     }
 
     /**
@@ -1731,11 +1733,19 @@ export const useChatStore = defineStore(
 
       // 如果该 aiclaw 在该房间已有未完成的思考，先归档旧的
       const existing = thinkingStreams.get(key)
-      if (existing && existing.status === 'thinking') {
-        existing.status = 'error'
-        existing.errorMsg = 'Superseded by new thinking'
-        existing.endTime = Date.now()
-        archiveThinking(existing)
+      if (existing) {
+        // P0: 清理旧的延迟归档 timeout，防止闭包删除新状态
+        if (existing.archiveTimeoutId) {
+          clearTimeout(existing.archiveTimeoutId)
+          existing.archiveTimeoutId = undefined
+        }
+        if (existing.status === 'thinking') {
+          existing.status = 'error'
+          existing.errorMsg = 'Superseded by new thinking'
+          existing.endTime = Date.now()
+          archiveThinking(existing)
+        }
+        thinkingStreams.delete(key)
       }
 
       // 从 groupStore 获取名称和头像（降级：使用 payload 中的值或默认值）
@@ -1783,10 +1793,13 @@ export const useChatStore = defineStore(
           state.durationMs = payload.durationMs
           state.errorMsg = payload.errorMsg
           state.collapsed = true
-          // 延迟归档：30 秒后移入 archive
-          setTimeout(() => {
-            archiveThinking(state)
-            thinkingStreams.delete(key)
+          // P0: 延迟归档 30 秒后移入 archive，闭包内验证 state 身份防止竞态
+          state.archiveTimeoutId = setTimeout(() => {
+            const current = thinkingStreams.get(key)
+            if (current === state) {
+              archiveThinking(state)
+              thinkingStreams.delete(key)
+            }
           }, 30_000)
           return
         }
@@ -1809,15 +1822,24 @@ export const useChatStore = defineStore(
 
     /** 清理思考状态（切换房间或手动关闭时） */
     const clearThinking = (roomId?: string, aiclawId?: number) => {
+      const clearWithTimeout = (state: ThinkingState) => {
+        if (state.archiveTimeoutId) clearTimeout(state.archiveTimeoutId)
+      }
       if (roomId && aiclawId) {
+        const state = thinkingStreams.get(`${roomId}:${aiclawId}`)
+        if (state) clearWithTimeout(state)
         thinkingStreams.delete(`${roomId}:${aiclawId}`)
       } else if (roomId) {
         for (const [key, state] of thinkingStreams) {
           if (state.roomId === roomId) {
+            clearWithTimeout(state)
             thinkingStreams.delete(key)
           }
         }
       } else {
+        for (const [, state] of thinkingStreams) {
+          clearWithTimeout(state)
+        }
         thinkingStreams.clear()
       }
     }

@@ -8,7 +8,7 @@
       :class="{ 'cursor-pointer': !readonly }"
       @click="!readonly && emit('toggle-collapse')">
       <n-avatar :size="20" :src="thinking.aiclawAvatar || '/logo.png'" fallback-src="/logo.png" round />
-      <span class="text-(12px font-500) truncate" :class="textColorClass">
+      <span class="text-(12px font-500) text-#333 dark:text-[--text-color] truncate">
         {{ thinking.aiclawName }}
       </span>
       <!-- 状态徽章 -->
@@ -71,6 +71,7 @@ type ThinkingState = {
   triggerMsgId?: string
   lastSeq: number
   collapsed: boolean
+  archiveTimeoutId?: ReturnType<typeof setTimeout>
 }
 
 const props = defineProps<{
@@ -90,11 +91,6 @@ const formattedDuration = computed(() => {
   if (!props.thinking.durationMs) return ''
   const seconds = (props.thinking.durationMs / 1000).toFixed(1)
   return `${seconds}s`
-})
-
-// 文字颜色（暗色模式自适应）
-const textColorClass = computed(() => {
-  return '#333 dark:[--text-color]'
 })
 
 // 背景颜色（根据状态）
