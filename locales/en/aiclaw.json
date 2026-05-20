@@ -87,5 +87,16 @@
     "title": "Conversation History",
     "empty": "No conversations yet",
     "no_more": "No more messages"
+  },
+  "thinking": {
+    "status": {
+      "thinking": "Thinking...",
+      "complete": "Thought for {duration}",
+      "error": "Thinking error"
+    },
+    "waiting": "Waiting for AI response...",
+    "archive_entry": "View AI thinking history ({count})",
+    "archive_title": "AI Thinking History",
+    "archive_empty": "No thinking history"
   }
 }

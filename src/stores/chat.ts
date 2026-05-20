@@ -8,6 +8,7 @@ import { useRoute } from 'vue-router'
 import { ErrorType } from '@/common/exception'
 import { MittEnum, MessageStatusEnum, MsgEnum, RoomTypeEnum, StoresEnum, TauriCommand } from '@/enums'
 import type { MarkItemType, MessageType, RevokedMsgType, SessionItem } from '@/services/types'
+import type { ThinkingStartPayload } from '@/services/wsType'
 import { useGlobalStore } from '@/stores/global.ts'
 import { useFeedStore } from '@/stores/feed.ts'
 import { useGroupStore } from '@/stores/group.ts'
@@ -1621,6 +1622,206 @@ export const useChatStore = defineStore(
       return streamingMessages.has(String(msgId))
     }
 
+    // ==================== REQ-004 AIclaw Thinking 状态 ====================
+    // 与 chatMessageList / streamingMessages / pendingStreamReplace 完全隔离
+
+    /** 思考状态 */
+    type ThinkingStatus = 'thinking' | 'complete' | 'error'
+
+    /** 单个 aiclaw 的思考状态 */
+    type ThinkingState = {
+      /** 思考会话 ID（server 生成） */
+      thinkingId: string
+      /** aiclaw 用户 ID */
+      aiclawId: number
+      /** aiclaw 显示名 */
+      aiclawName: string
+      /** aiclaw 头像 */
+      aiclawAvatar: string
+      /** 房间 ID */
+      roomId: string
+      /** 当前思考内容（流式追加） */
+      content: string
+      /** 思考状态 */
+      status: ThinkingStatus
+      /** 开始时间戳 */
+      startTime: number
+      /** 结束时间戳（THINKING_END 时设置） */
+      endTime?: number
+      /** 处理耗时（毫秒，THINKING_END 时设置） */
+      durationMs?: number
+      /** 错误信息（status=error 时） */
+      errorMsg?: string
+      /** 触发消息 ID */
+      triggerMsgId?: string
+      /** delta 序号（用于去重） */
+      lastSeq: number
+      /** 是否已折叠 */
+      collapsed: boolean
+    }
+
+    /**
+     * 思考流状态 Map
+     * key: `${roomId}:${aiclawId}`（同房间不同 aiclaw 独立）
+     */
+    const thinkingStreams = reactive(new Map<string, ThinkingState>())
+
+    /**
+     * 已完成思考的归档列表（按 roomId 分组）
+     * 保留最近 10 条已完成思考，供回顾
+     */
+    const thinkingArchive = reactive(new Map<string, ThinkingState[]>())
+
+    /** 当前房间是否有活跃思考 */
+    const isCurrentRoomThinking = computed(() => {
+      const roomId = globalStore.currentSessionRoomId
+      if (!roomId) return false
+      for (const [, state] of thinkingStreams) {
+        if (state.roomId === roomId && state.status === 'thinking') {
+          return true
+        }
+      }
+      return false
+    })
+
+    /** 当前房间的思考列表（活跃 + 已完成未归档，供 ThinkingPanel 使用） */
+    const currentRoomThinkings = computed(() => {
+      const roomId = globalStore.currentSessionRoomId
+      if (!roomId) return []
+      const result: ThinkingState[] = []
+      for (const [, state] of thinkingStreams) {
+        if (state.roomId === roomId) {
+          result.push(state)
+        }
+      }
+      return result
+    })
+
+    /** autoReply 消息标记集（内存，不持久化） */
+    const autoReplyMessages = reactive(new Set<string>())
+
+    /** 标记消息为 autoReply */
+    const markMessageAsAutoReply = (msgId: string) => {
+      autoReplyMessages.add(msgId)
+    }
+
+    /** 检查消息是否为 autoReply */
+    const isAutoReplyMessage = (msgId: string): boolean => {
+      return autoReplyMessages.has(msgId)
+    }
+
+    /** 开始思考（THINKING_START 时调用） */
+    const startThinking = (payload: {
+      thinkingId: string
+      fromUid: number
+      roomId: number
+      triggerMsgId?: string
+      aiclawName?: string
+      aiclawAvatar?: string
+    }) => {
+      const roomId = String(payload.roomId)
+      const aiclawId = payload.fromUid
+      const key = `${roomId}:${aiclawId}`
+
+      // 如果该 aiclaw 在该房间已有未完成的思考，先归档旧的
+      const existing = thinkingStreams.get(key)
+      if (existing && existing.status === 'thinking') {
+        existing.status = 'error'
+        existing.errorMsg = 'Superseded by new thinking'
+        existing.endTime = Date.now()
+        archiveThinking(existing)
+      }
+
+      // 从 groupStore 获取名称和头像（降级：使用 payload 中的值或默认值）
+      const groupStore = useGroupStore()
+      const userInfo = groupStore.getUserInfo(String(aiclawId))
+
+      thinkingStreams.set(key, {
+        thinkingId: payload.thinkingId,
+        aiclawId,
+        aiclawName: payload.aiclawName || userInfo?.name || 'AI',
+        aiclawAvatar: payload.aiclawAvatar || userInfo?.avatar || '',
+        roomId,
+        content: '',
+        status: 'thinking',
+        startTime: Date.now(),
+        triggerMsgId: payload.triggerMsgId,
+        lastSeq: 0,
+        collapsed: false
+      })
+    }
+
+    /** 追加思考内容（THINKING_DELTA 时调用，已由 rAF 节流） */
+    const appendThinking = (thinkingId: string, delta: string, seq: number) => {
+      for (const [, state] of thinkingStreams) {
+        if (state.thinkingId === thinkingId) {
+          // 序号去重：只接受 > lastSeq 的 delta
+          if (seq > state.lastSeq) {
+            state.content += delta
+            state.lastSeq = seq
+          }
+          return
+        }
+      }
+    }
+
+    /** 结束思考（THINKING_END 时调用） */
+    const finalizeThinking = (thinkingId: string, payload: { durationMs?: number; status: 'complete' | 'error'; errorMsg?: string }) => {
+      for (const [key, state] of thinkingStreams) {
+        if (state.thinkingId === thinkingId) {
+          state.status = payload.status
+          state.endTime = Date.now()
+          state.durationMs = payload.durationMs
+          state.errorMsg = payload.errorMsg
+          state.collapsed = true
+          // 延迟归档：30 秒后移入 archive
+          setTimeout(() => {
+            archiveThinking(state)
+            thinkingStreams.delete(key)
+          }, 30_000)
+          return
+        }
+      }
+    }
+
+    /** 归档已完成的思考（内部方法） */
+    const archiveThinking = (state: ThinkingState) => {
+      const roomId = state.roomId
+      if (!thinkingArchive.has(roomId)) {
+        thinkingArchive.set(roomId, [])
+      }
+      const archive = thinkingArchive.get(roomId)!
+      archive.unshift(state)
+      // 限制归档数量
+      if (archive.length > 10) {
+        archive.length = 10
+      }
+    }
+
+    /** 清理思考状态（切换房间或手动关闭时） */
+    const clearThinking = (roomId?: string, aiclawId?: number) => {
+      if (roomId && aiclawId) {
+        thinkingStreams.delete(`${roomId}:${aiclawId}`)
+      } else if (roomId) {
+        for (const [key, state] of thinkingStreams) {
+          if (state.roomId === roomId) {
+            thinkingStreams.delete(key)
+          }
+        }
+      } else {
+        thinkingStreams.clear()
+      }
+    }
+
+    /** 切换思考卡片折叠状态 */
+    const toggleThinkingCollapse = (roomId: string, aiclawId: number) => {
+      const key = `${roomId}:${aiclawId}`
+      const state = thinkingStreams.get(key)
+      if (state) {
+        state.collapsed = !state.collapsed
+      }
+    }
+
     return {
       getMsgIndex,
       chatMessageList,
@@ -1681,7 +1882,20 @@ export const useChatStore = defineStore(
       appendStreamContent,
       finalizeStream,
       isMessageStreaming,
-      tryReplaceStreamPlaceholder
+      tryReplaceStreamPlaceholder,
+      // REQ-004 thinking
+      thinkingStreams,
+      thinkingArchive,
+      isCurrentRoomThinking,
+      currentRoomThinkings,
+      autoReplyMessages,
+      startThinking,
+      appendThinking,
+      finalizeThinking,
+      clearThinking,
+      toggleThinkingCollapse,
+      markMessageAsAutoReply,
+      isAutoReplyMessage
     }
   },
   {

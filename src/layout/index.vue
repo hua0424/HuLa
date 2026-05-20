@@ -55,7 +55,10 @@ import {
   type StreamStartPayload,
   type StreamDeltaPayload,
   type StreamEndPayload,
-  type AiclawAuthPayload
+  type AiclawAuthPayload,
+  type ThinkingStartPayload,
+  type ThinkingDeltaPayload,
+  type ThinkingEndPayload
 } from '@/services/wsType.ts'
 import { useChatStore } from '@/stores/chat'
 import { useFileStore } from '@/stores/file'
@@ -478,6 +481,55 @@ useMitt.on(WsResponseMessageType.STREAM_END, (data: StreamEndPayload) => {
     streamDeltaBuffers.delete(data.msgId)
   }
   chatStore.finalizeStream(data)
+})
+
+// ==================== REQ-004 AIclaw Thinking 事件处理 ====================
+
+const thinkingDeltaBuffers = new Map<string, {
+  thinkingId: string
+  content: string
+  lastSeq: number
+}>()
+let thinkingRafId: number | null = null
+
+useMitt.on(WsResponseMessageType.THINKING_START, (data: ThinkingStartPayload) => {
+  chatStore.startThinking(data)
+})
+
+useMitt.on(WsResponseMessageType.THINKING_DELTA, (data: ThinkingDeltaPayload) => {
+  // rAF 节流：与 STREAM_DELTA 相同模式
+  const key = data.thinkingId
+  const existing = thinkingDeltaBuffers.get(key)
+  if (existing) {
+    existing.content += data.chunk
+    existing.lastSeq = data.seq
+  } else {
+    thinkingDeltaBuffers.set(key, {
+      thinkingId: data.thinkingId,
+      content: data.chunk,
+      lastSeq: data.seq
+    })
+  }
+
+  if (!thinkingRafId) {
+    thinkingRafId = requestAnimationFrame(() => {
+      for (const [, buf] of thinkingDeltaBuffers) {
+        chatStore.appendThinking(buf.thinkingId, buf.content, buf.lastSeq)
+      }
+      thinkingDeltaBuffers.clear()
+      thinkingRafId = null
+    })
+  }
+})
+
+useMitt.on(WsResponseMessageType.THINKING_END, (data: ThinkingEndPayload) => {
+  // 刷新剩余 buffer
+  const buf = thinkingDeltaBuffers.get(data.thinkingId)
+  if (buf) {
+    chatStore.appendThinking(buf.thinkingId, buf.content, buf.lastSeq)
+    thinkingDeltaBuffers.delete(data.thinkingId)
+  }
+  chatStore.finalizeThinking(data.thinkingId, data)
 })
 
 // AIclaw 设备授权请求

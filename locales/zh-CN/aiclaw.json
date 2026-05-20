@@ -87,5 +87,16 @@
     "title": "对话记录",
     "empty": "暂无对话记录",
     "no_more": "没有更多了"
+  },
+  "thinking": {
+    "status": {
+      "thinking": "正在思考...",
+      "complete": "思考完成 ({duration})",
+      "error": "思考出错"
+    },
+    "waiting": "等待 AI 响应...",
+    "archive_entry": "查看 AI 思考记录 ({count})",
+    "archive_title": "AI 思考记录",
+    "archive_empty": "暂无思考记录"
   }
 }

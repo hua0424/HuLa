@@ -37,13 +37,8 @@
       </div>
     </Transition>
 
-    <!-- AI 助理对话提示条 -->
-    <div v-if="isAiclawSession" class="flex-shrink-0 px-12px pt-6px">
-      <div class="flex items-center gap-6px px-12px py-6px rounded-6px bg-#7c5cfc10 text-(12px #7c5cfc)">
-        <svg class="size-14px flex-shrink-0"><use href="#robot"></use></svg>
-        {{ isCurrentRoomStreaming ? t('aiclaw.chat.streaming') : t('aiclaw.chat.notice') }}
-      </div>
-    </div>
+    <!-- REQ-004 AI 助理 Thinking 面板（群聊含 aiclaw + 私聊 AI 助理） -->
+    <ThinkingPanel v-if="showThinkingPanel" />
 
     <!-- 聊天内容 -->
     <div class="flex flex-col flex-1 min-h-0">
@@ -221,6 +216,7 @@ import { isMessageMultiSelectEnabled } from '@/utils/MessageSelect'
 import { isMac, isMobile, isWeb, isWindows } from '@/utils/PlatformConstants'
 import { isAiclawUser as checkAiclaw } from '@/utils/AiclawUtils'
 import FileUploadProgress from '@/components/rightBox/FileUploadProgress.vue'
+import ThinkingPanel from '@/components/rightBox/chatBox/ThinkingPanel.vue'
 
 const selfEmit = defineEmits(['scroll'])
 const { t } = useI18n()
@@ -282,6 +278,18 @@ const isCurrentRoomStreaming = computed(() => {
   if (!roomMsgs) return false
   for (const msgId of chatStore.streamingMessages) {
     if (roomMsgs[msgId]) return true
+  }
+  return false
+})
+/** REQ-004 是否显示 ThinkingPanel（群聊含 aiclaw + 私聊 AI 助理，D1 决策统一） */
+const showThinkingPanel = computed(() => {
+  // 私聊 AI 助理
+  if (isAiclawSession.value) return true
+  // 群聊中有 aiclaw 成员或活跃思考
+  if (isGroup.value) {
+    if (chatStore.isCurrentRoomThinking) return true
+    const roomId = globalStore.currentSessionRoomId
+    if (roomId && chatStore.thinkingArchive.get(roomId)?.length) return true
   }
   return false
 })
