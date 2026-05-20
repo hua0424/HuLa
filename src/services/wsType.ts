@@ -86,7 +86,15 @@ export enum WsResponseMessageType {
   /** AI 助理流式消息结束 */
   STREAM_END = 'streamEnd',
   /** AI 助理设备授权请求 */
-  AICLAW_AUTH_REQUEST = 'aiclawAuthRequest'
+  AICLAW_AUTH_REQUEST = 'aiclawAuthRequest',
+  /** AI 助理思考开始 */
+  THINKING_START = 'thinkingStart',
+  /** AI 助理思考内容增量 */
+  THINKING_DELTA = 'thinkingDelta',
+  /** AI 助理思考结束 */
+  THINKING_END = 'thinkingEnd',
+  /** AI 助理群聊配置变更通知 */
+  AICLAW_GROUP_CONFIG_UPDATE = 'aiclawGroupConfigUpdate'
 }
 
 export enum NoticeTypeEnum {
@@ -288,4 +296,70 @@ export type AiclawAuthPayload = {
   aiclawName: string
   oldMachineCode: string
   newMachineCode: string
+}
+
+// ==================== REQ-004 AIclaw Thinking Payload ====================
+
+/** 思考开始 payload（server → client） */
+export type ThinkingStartPayload = {
+  /** 思考会话 ID（由 server 生成，im_aiclaw_thinking 自增主键序列化为 string） */
+  thinkingId: string
+  /** aiclaw 用户 ID */
+  fromUid: number
+  /** 房间 ID */
+  roomId: number
+  /** 触发消息 ID（可选） */
+  triggerMsgId?: string
+  /** aiclaw 显示名（server 从 im_user 回填，可选） */
+  aiclawName?: string
+  /** aiclaw 头像 URL（server 从 im_user 回填，可选） */
+  aiclawAvatar?: string
+}
+
+/** 思考内容增量 payload（server → client） */
+export type ThinkingDeltaPayload = {
+  /** 关联的思考会话 ID */
+  thinkingId: string
+  /** 房间 ID */
+  roomId: number
+  /** 内容增量 */
+  chunk: string
+  /** 序号（从 1 开始，用于去重） */
+  seq: number
+}
+
+/** 思考结束 payload（server → client） */
+export type ThinkingEndPayload = {
+  /** 关联的思考会话 ID */
+  thinkingId: string
+  /** 房间 ID */
+  roomId: number
+  /** 处理耗时（毫秒） */
+  durationMs?: number
+  /** 结束状态 */
+  status: 'complete' | 'error'
+  /** 错误信息（status=error 时） */
+  errorMsg?: string
+}
+
+/** 群聊 aiclaw 配置类型 */
+export type AiclawGroupConfig = {
+  /** 频率限制（条/分钟，0=无限制） */
+  rateLimitPerMinute: number
+  /** 每日上限 */
+  dailyLimit: number
+  /** 是否响应其他 aiclaw */
+  respondToAi: boolean
+  /** 是否需要 @ 触发（默认 false） */
+  mentionRequired?: boolean
+}
+
+/** 群配置变更通知 payload（server → client，推送给群内所有在线成员 + aichat-node） */
+export type AiclawGroupConfigUpdatePayload = {
+  /** aiclaw 用户 ID */
+  aiclawUid: number
+  /** 房间 ID */
+  roomId: number
+  /** 完整配置对象（前端直接替换本地缓存） */
+  config: AiclawGroupConfig
 }
