@@ -72,6 +72,14 @@
             <span class="text-14px">{{ t('aiclaw.detail.conversations') }}</span>
             <svg class="size-16px text-#ccc"><use href="#right"></use></svg>
           </div>
+          <div class="h-1px bg-#f0f0f0 mx-16px" />
+          <!-- 群聊设置 -->
+          <div
+            class="flex items-center justify-between px-16px py-14px cursor-pointer active:bg-#f5f5f5"
+            @click="router.push(`/mobile/mobileMy/aiAssistant/${uid}/groupSettings`)">
+            <span class="text-14px">{{ t('aiclaw.detail.group_settings') }}</span>
+            <svg class="size-16px text-#ccc"><use href="#right"></use></svg>
+          </div>
         </div>
 
         <div class="h-20px" />

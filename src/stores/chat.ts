@@ -16,6 +16,7 @@ import { getSessionDetail, markMsgRead } from '@/utils/ImRequestUtils'
 import { renderReplyContent } from '@/utils/RenderReplyContent.ts'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useSessionUnreadStore } from '@/stores/sessionUnread'
+import type { AiclawGroupConfig } from '@/services/wsType'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 import { isWeb } from '@/utils/PlatformConstants'
 import { useMitt } from '@/hooks/useMitt'
@@ -1718,6 +1719,64 @@ export const useChatStore = defineStore(
       return autoReplyMessages.has(msgId)
     }
 
+    // ==================== AIclaw 群聊配置 ====================
+
+    /** aiclaw 群配置缓存，key: `${aiclawUid}:${roomId}` */
+    const aiclawGroupConfigs = reactive(new Map<string, AiclawGroupConfig & { roomId: string; roomName?: string }>())
+
+    /** 加载 aiclaw 群配置列表 */
+    const loadAiclawGroupConfigs = async (aiclawUid: number) => {
+      const { imRequest } = await import('@/utils/ImRequestUtils')
+      const { ImUrlEnum } = await import('@/enums')
+      try {
+        const result = await imRequest<(AiclawGroupConfig & { roomId: string; roomName?: string })[]>({
+          url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
+          params: { uid: aiclawUid }
+        })
+        // 清除旧缓存再填充
+        const keysToDelete: string[] = []
+        for (const key of aiclawGroupConfigs.keys()) {
+          if (key.startsWith(`${aiclawUid}:`)) keysToDelete.push(key)
+        }
+        keysToDelete.forEach((k) => aiclawGroupConfigs.delete(k))
+        if (result) {
+          for (const config of result) {
+            aiclawGroupConfigs.set(`${aiclawUid}:${config.roomId}`, config)
+          }
+        }
+      } catch (error) {
+        console.error('[ChatStore] Failed to load aiclaw group configs:', error)
+      }
+    }
+
+    /** 更新 aiclaw 群配置（本地缓存，WS 通知时调用） */
+    const updateAiclawGroupConfig = (aiclawUid: number, roomId: number, config: AiclawGroupConfig) => {
+      const key = `${aiclawUid}:${roomId}`
+      const existing = aiclawGroupConfigs.get(key)
+      aiclawGroupConfigs.set(key, { ...config, roomId: String(roomId), roomName: existing?.roomName })
+    }
+
+    /** 保存 aiclaw 群配置到 server */
+    const saveAiclawGroupConfig = async (aiclawUid: number, roomId: string, config: AiclawGroupConfig) => {
+      const { imRequest } = await import('@/utils/ImRequestUtils')
+      const { ImUrlEnum } = await import('@/enums')
+      await imRequest({
+        url: ImUrlEnum.AICLAW_GROUP_CONFIG_UPDATE,
+        params: { uid: aiclawUid },
+        body: { roomId, ...config }
+      })
+    }
+
+    /** 获取某 aiclaw 的所有群配置列表 */
+    const getAiclawGroupConfigList = (aiclawUid: number): (AiclawGroupConfig & { roomId: string; roomName?: string })[] => {
+      const prefix = `${aiclawUid}:`
+      const result: (AiclawGroupConfig & { roomId: string; roomName?: string })[] = []
+      for (const [key, config] of aiclawGroupConfigs) {
+        if (key.startsWith(prefix)) result.push(config)
+      }
+      return result
+    }
+
     /** 开始思考（THINKING_START 时调用） */
     const startThinking = (payload: {
       thinkingId: string
@@ -1926,7 +1985,14 @@ export const useChatStore = defineStore(
       clearThinking,
       toggleThinkingCollapse,
       markMessageAsAutoReply,
-      isAutoReplyMessage
+      isAutoReplyMessage,
+
+      // aiclaw 群配置
+      aiclawGroupConfigs,
+      loadAiclawGroupConfigs,
+      updateAiclawGroupConfig,
+      saveAiclawGroupConfig,
+      getAiclawGroupConfigList
     }
   },
   {

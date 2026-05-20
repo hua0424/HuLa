@@ -948,7 +948,11 @@ export enum ImUrlEnum {
   /** 移除 aiclaw 好友 */
   AICLAW_REMOVE_FRIEND = 'aiclawRemoveFriend',
   /** 设置 aiclaw 好友关系说明 */
-  AICLAW_SET_RELATION = 'aiclawSetRelation'
+  AICLAW_SET_RELATION = 'aiclawSetRelation',
+  /** 获取 aiclaw 群聊配置列表 */
+  AICLAW_GROUP_CONFIG_LIST = 'aiclawGroupConfigList',
+  /** 更新 aiclaw 群聊配置 */
+  AICLAW_GROUP_CONFIG_UPDATE = 'aiclawGroupConfigUpdate'
 }
 
 // 滚动意图管理枚举

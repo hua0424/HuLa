@@ -69,6 +69,7 @@
     "persona_clear_tip": "留空表示不设置人设",
     "friends": "好友管理",
     "conversations": "对话记录",
+    "group_settings": "群聊设置",
     "deactivate": "停用",
     "deactivated_success": "已停用"
   },
@@ -98,5 +99,20 @@
     "archive_entry": "查看 AI 思考记录 ({count})",
     "archive_title": "AI 思考记录",
     "archive_empty": "暂无思考记录"
-  }
+  },
+  "group_settings": {
+    "title": "群聊设置",
+    "empty": "该 AI 助理尚未加入任何群聊",
+    "rate_limit": "频率限制",
+    "rate_limit_hint": "条/分钟（0=无限制）",
+    "daily_limit": "每日上限",
+    "respond_to_ai": "响应其他 AI",
+    "mention_required": "需要 @ 触发",
+    "mention_required_hint": "开启后 AI 仅在被 @ 时回复",
+    "save": "保存",
+    "save_success": "配置已保存",
+    "save_failed": "保存失败",
+    "config_changed": "AI 助理 {name} 的群聊配置已更新"
+  },
+  "auto_reply_tag": "自动回复"
 }

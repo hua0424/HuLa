@@ -87,6 +87,10 @@
                   }
                 }
               ">
+              <!-- REQ-004: autoReply 消息标记 -->
+              <div v-if="chatStore.isAutoReplyMessage(item.message.id)" class="auto-reply-tag text-(10px #999) mb-2px px-4px">
+                {{ t('aiclaw.auto_reply_tag') }}
+              </div>
               <RenderMessage
                 :message="item"
                 :is-group="isGroup"

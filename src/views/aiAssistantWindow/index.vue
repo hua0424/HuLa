@@ -135,6 +135,14 @@
             <span class="text-14px text-[--text-color]">{{ t('aiclaw.detail.conversations') }}</span>
             <svg class="size-16px text-#ccc"><use href="#right"></use></svg>
           </div>
+          <div class="h-1px bg-[--line-color] mx-24px" />
+          <!-- Group chat settings -->
+          <div
+            class="flex items-center justify-between px-24px py-16px cursor-pointer hover:bg-[--list-hover-color] transition-colors"
+            @click="handleOpenGroupSettings">
+            <span class="text-14px text-[--text-color]">{{ t('aiclaw.detail.group_settings') }}</span>
+            <svg class="size-16px text-#ccc"><use href="#right"></use></svg>
+          </div>
         </div>
 
         <!-- Action buttons -->
@@ -279,6 +287,59 @@
         </div>
       </div>
 
+      <!-- REQ-004: Group settings view -->
+      <div v-else-if="selectedItem && rightView === 'groupSettings'" class="flex-1 flex flex-col overflow-hidden">
+        <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
+          <svg class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors" @click="handleBackToDetail">
+            <use href="#left"></use>
+          </svg>
+          <span class="text-15px font-500 text-[--text-color]">{{ t('aiclaw.group_settings.title') }}</span>
+        </div>
+        <div class="flex-1 overflow-auto">
+          <template v-if="groupConfigList.length > 0">
+            <div
+              v-for="config in groupConfigList"
+              :key="config.roomId"
+              class="border-b border-[--line-color] px-24px py-16px">
+              <div class="flex items-center justify-between mb-12px">
+                <span class="text-14px font-500 text-[--text-color]">{{ config.roomName || `Group ${config.roomId}` }}</span>
+              </div>
+              <!-- Config form -->
+              <n-form label-placement="left" label-width="auto" size="small" :show-feedback="false">
+                <n-form-item :label="t('aiclaw.group_settings.rate_limit')" class="mb-12px">
+                  <n-input-number v-model:value="config.rateLimitPerMinute" :min="0" :max="100" size="small" style="width: 100px" />
+                  <span class="text-11px text-#999 ml-8px">{{ t('aiclaw.group_settings.rate_limit_hint') }}</span>
+                </n-form-item>
+                <n-form-item :label="t('aiclaw.group_settings.daily_limit')" class="mb-12px">
+                  <n-input-number v-model:value="config.dailyLimit" :min="0" :max="10000" size="small" style="width: 100px" />
+                </n-form-item>
+                <n-form-item :label="t('aiclaw.group_settings.respond_to_ai')" class="mb-12px">
+                  <n-switch v-model:value="config.respondToAi" />
+                </n-form-item>
+                <n-form-item :label="t('aiclaw.group_settings.mention_required')" class="mb-12px">
+                  <n-switch v-model:value="config.mentionRequired" />
+                  <span class="text-11px text-#999 ml-8px">{{ t('aiclaw.group_settings.mention_required_hint') }}</span>
+                </n-form-item>
+              </n-form>
+              <n-button
+                size="small"
+                type="primary"
+                :loading="savingGroupConfig === config.roomId"
+                @click="handleSaveGroupConfig(config)">
+                {{ t('aiclaw.group_settings.save') }}
+              </n-button>
+            </div>
+          </template>
+          <div v-else-if="!groupConfigLoading" class="flex flex-col items-center justify-center h-full text-13px text-#999">
+            <svg class="size-48px mb-12px opacity-20"><use href="#robot"></use></svg>
+            <span>{{ t('aiclaw.group_settings.empty') }}</span>
+          </div>
+          <div v-if="groupConfigLoading" class="flex justify-center py-20px">
+            <n-spin size="medium" />
+          </div>
+        </div>
+      </div>
+
       <!-- Empty state when nothing selected -->
       <div v-else class="flex-1 flex flex-col items-center justify-center text-#999">
         <svg class="size-80px mb-16px opacity-15"><use href="#robot"></use></svg>
@@ -334,6 +395,7 @@ import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDi
 import { ImUrlEnum } from '@/enums'
 import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
 import { isWeb } from '@/utils/PlatformConstants'
+import { useChatStore } from '@/stores/chat'
 
 const { t } = useI18n()
 
@@ -387,7 +449,7 @@ type AiclawFriendItem = {
   relationDesc: string | null
 }
 
-type RightView = 'detail' | 'conversations' | 'conversationMessages' | 'friends'
+type RightView = 'detail' | 'conversations' | 'conversationMessages' | 'friends' | 'groupSettings'
 
 const showCreateForm = ref(false)
 const showTokenDialog = ref(false)
@@ -426,6 +488,13 @@ const showRelationDialog = ref(false)
 const relationInput = ref('')
 const savingRelation = ref(false)
 const editingFriendUid = ref('')
+
+// REQ-004 群聊配置状态
+const groupConfigLoading = ref(false)
+const savingGroupConfig = ref<string | null>(null) // roomId being saved
+const groupConfigList = ref<(import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string })[]>([])
+
+const chatStore = useChatStore()
 
 // ISS-010 A1: 两个数据源分离
 // - activeStatus: 运行时在线状态 (Redis ZSET, 实时), 对应 i18n key `aiclaw.status.online/offline`
@@ -669,6 +738,40 @@ const handleOpenConversationDetail = (item: ConversationItem) => {
 
 const handleBackToDetail = () => {
   rightView.value = 'detail'
+}
+
+// REQ-004: 群聊配置
+const handleOpenGroupSettings = async () => {
+  if (!selectedUid.value) return
+  rightView.value = 'groupSettings'
+  groupConfigLoading.value = true
+  try {
+    await chatStore.loadAiclawGroupConfigs(Number(selectedUid.value))
+    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(selectedUid.value))
+  } catch (error) {
+    console.error('[AiAssistant] Failed to load group configs:', error)
+  } finally {
+    groupConfigLoading.value = false
+  }
+}
+
+const handleSaveGroupConfig = async (config: (import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string })) => {
+  if (!selectedUid.value) return
+  savingGroupConfig.value = config.roomId
+  try {
+    await chatStore.saveAiclawGroupConfig(Number(selectedUid.value), config.roomId, {
+      rateLimitPerMinute: config.rateLimitPerMinute,
+      dailyLimit: config.dailyLimit,
+      respondToAi: config.respondToAi,
+      mentionRequired: config.mentionRequired
+    })
+    window.$message?.success?.(t('aiclaw.group_settings.save_success'))
+  } catch (error) {
+    console.error('[AiAssistant] Failed to save group config:', error)
+    window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
+  } finally {
+    savingGroupConfig.value = null
+  }
 }
 
 const handleBackToConversations = () => {

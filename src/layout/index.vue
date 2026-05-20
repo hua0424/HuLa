@@ -370,6 +370,12 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
     activeRoomId: globalStore.currentSessionRoomId || ''
   })
 
+  // REQ-004: autoReply 消息标记（仅 WS payload 携带，不入库）
+  const isAutoReply = (data as MessageType & { extra?: Record<string, unknown> }).extra?.autoReply === true
+  if (isAutoReply) {
+    chatStore.markMessageAsAutoReply(String(data.message.id))
+  }
+
   await invokeSilently(TauriCommand.SAVE_MSG, {
     data
   })
