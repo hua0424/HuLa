@@ -8,7 +8,6 @@ import { useRoute } from 'vue-router'
 import { ErrorType } from '@/common/exception'
 import { MittEnum, MessageStatusEnum, MsgEnum, RoomTypeEnum, StoresEnum, TauriCommand } from '@/enums'
 import type { MarkItemType, MessageType, RevokedMsgType, SessionItem } from '@/services/types'
-import type { ThinkingStartPayload } from '@/services/wsType'
 import { useGlobalStore } from '@/stores/global.ts'
 import { useFeedStore } from '@/stores/feed.ts'
 import { useGroupStore } from '@/stores/group.ts'
@@ -448,7 +447,9 @@ export const useChatStore = defineStore(
 
       // 直接使用 Rust 后端计算的 timeBlock，不做前端计算
       // FIX: 按 sendTime 排序，避免不同服务（IM Server / AI Bridge）snowflake ID 区段不同导致分组错乱
-      return Object.values(currentMessageMap.value).sort((a, b) => (a.message.sendTime ?? 0) - (b.message.sendTime ?? 0))
+      return Object.values(currentMessageMap.value).sort(
+        (a, b) => (a.message.sendTime ?? 0) - (b.message.sendTime ?? 0)
+      )
     })
 
     const chatMessageListByRoomId = computed(() => (roomId: string) => {
@@ -477,7 +478,7 @@ export const useChatStore = defineStore(
      * - 使用 Promise.allSettled 确保部分失败不影响其他会话
      */
     const setAllSessionMsgList = async (size = pageSize) => {
-      !isWeb() && await info('初始设置所有会话消息列表')
+      !isWeb() && (await info('初始设置所有会话消息列表'))
 
       if (sessionList.value.length === 0) return
 
@@ -497,7 +498,7 @@ export const useChatStore = defineStore(
       const successCount = results.filter((r) => r.status === 'fulfilled').length
       const failCount = results.filter((r) => r.status === 'rejected').length
 
-      !isWeb() && await info(`会话消息加载完成: 成功 ${successCount}/${sortedSessions.length}, 失败 ${failCount}`)
+      !isWeb() && (await info(`会话消息加载完成: 成功 ${successCount}/${sortedSessions.length}, 失败 ${failCount}`))
 
       // 记录失败的会话（可选）
       if (failCount > 0) {
@@ -511,7 +512,7 @@ export const useChatStore = defineStore(
 
     // 获取消息列表
     const getMsgList = async (size = pageSize, async?: boolean) => {
-      !isWeb() && await info('获取消息列表')
+      !isWeb() && (await info('获取消息列表'))
       // 获取当前房间ID，用于后续比较
       const requestRoomId = globalStore.currentSessionRoomId
 
@@ -605,18 +606,20 @@ export const useChatStore = defineStore(
         if (isWeb()) {
           const { imRequest } = await import('@/utils/ImRequestUtils')
           const { ImUrlEnum } = await import('@/enums')
-          const data: any = await imRequest({ url: ImUrlEnum.GET_CONTACT_LIST, params: { pageSize: 100 } }).catch(() => {
-            sessionOptions.isLoading = false
-            sessionOptions.isError = true
-            return null
-          })
+          const data: any = await imRequest({ url: ImUrlEnum.GET_CONTACT_LIST, params: { pageSize: 100 } }).catch(
+            () => {
+              sessionOptions.isLoading = false
+              sessionOptions.isError = true
+              return null
+            }
+          )
           if (!data) {
             globalStore.unreadReady = true
             unreadCountManager.refreshBadge(globalStore.unReadMark, feedStore.unreadCount)
             return
           }
           // 将会话数据写入 sessionList 并更新 sessionMap
-          const list = Array.isArray(data) ? data : (data.list || [])
+          const list = Array.isArray(data) ? data : data.list || []
           sessionList.value = [...list]
           for (const session of sessionList.value) {
             sessionMap.value[session.roomId] = session
@@ -1377,7 +1380,9 @@ export const useChatStore = defineStore(
       if (!currentMessages) return
 
       // 将消息转换为数组并按 sendTime 倒序排序，前面的元素代表最新的消息
-      const sortedMessages = Object.values(currentMessages).sort((a, b) => (b.message.sendTime ?? 0) - (a.message.sendTime ?? 0))
+      const sortedMessages = Object.values(currentMessages).sort(
+        (a, b) => (b.message.sendTime ?? 0) - (a.message.sendTime ?? 0)
+      )
 
       if (sortedMessages.length <= limit) {
         return
@@ -1575,9 +1580,10 @@ export const useChatStore = defineStore(
       if (!pendingIds || pendingIds.length === 0) return false
 
       // 过滤出仍存在于 messageMap 中的占位消息
-      const candidates = pendingIds
-        .map((id) => ({ id, msg: messageMap[roomId]?.[id] }))
-        .filter((c) => !!c.msg) as { id: string; msg: MessageType }[]
+      const candidates = pendingIds.map((id) => ({ id, msg: messageMap[roomId]?.[id] })).filter((c) => !!c.msg) as {
+        id: string
+        msg: MessageType
+      }[]
 
       if (candidates.length === 0) {
         // 所有占位都已被清理，清空该 room 的 pending 记录
@@ -1766,7 +1772,10 @@ export const useChatStore = defineStore(
     }
 
     /** 结束思考（THINKING_END 时调用） */
-    const finalizeThinking = (thinkingId: string, payload: { durationMs?: number; status: 'complete' | 'error'; errorMsg?: string }) => {
+    const finalizeThinking = (
+      thinkingId: string,
+      payload: { durationMs?: number; status: 'complete' | 'error'; errorMsg?: string }
+    ) => {
       for (const [key, state] of thinkingStreams) {
         if (state.thinkingId === thinkingId) {
           state.status = payload.status

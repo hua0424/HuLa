@@ -270,17 +270,6 @@ const isAiclawSession = computed(() => {
   const session = globalStore.currentSession
   return session && !isGroup.value && checkAiclaw(session.detailId)
 })
-/** 当前房间是否有正在流式中的消息 */
-const isCurrentRoomStreaming = computed(() => {
-  const roomId = globalStore.currentSessionRoomId
-  if (!roomId) return false
-  const roomMsgs = chatStore.messageMap[roomId]
-  if (!roomMsgs) return false
-  for (const msgId of chatStore.streamingMessages) {
-    if (roomMsgs[msgId]) return true
-  }
-  return false
-})
 /** REQ-004 是否显示 ThinkingPanel（群聊含 aiclaw + 私聊 AI 助理，D1 决策统一） */
 const showThinkingPanel = computed(() => {
   // 私聊 AI 助理
