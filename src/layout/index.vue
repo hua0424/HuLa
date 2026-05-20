@@ -58,7 +58,8 @@ import {
   type AiclawAuthPayload,
   type ThinkingStartPayload,
   type ThinkingDeltaPayload,
-  type ThinkingEndPayload
+  type ThinkingEndPayload,
+  type AiclawGroupConfigUpdatePayload
 } from '@/services/wsType.ts'
 import { useChatStore } from '@/stores/chat'
 import { useFileStore } from '@/stores/file'
@@ -536,6 +537,11 @@ useMitt.on(WsResponseMessageType.THINKING_END, (data: ThinkingEndPayload) => {
     thinkingDeltaBuffers.delete(data.thinkingId)
   }
   chatStore.finalizeThinking(data.thinkingId, data)
+})
+
+// REQ-004: 群配置变更通知（X5: 推送范围为群内所有在线成员）
+useMitt.on(WsResponseMessageType.AICLAW_GROUP_CONFIG_UPDATE, (data: AiclawGroupConfigUpdatePayload) => {
+  chatStore.updateAiclawGroupConfig(data.aiclawUid, data.roomId, data.config)
 })
 
 // AIclaw 设备授权请求
