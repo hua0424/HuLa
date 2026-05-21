@@ -1769,7 +1769,16 @@ export const useChatStore = defineStore(
     const updateAiclawGroupConfig = (aiclawUid: number, roomId: number, config: AiclawGroupConfig) => {
       const key = `${aiclawUid}:${roomId}`
       const existing = aiclawGroupConfigs.get(key)
-      aiclawGroupConfigs.set(key, { ...config, roomId: String(roomId), roomName: existing?.roomName })
+      // WS 广播的 respondToAi/mentionRequired 可能是 1/0 integer，需统一转为 boolean
+      // 用 as unknown as number 绕过 TS 类型窄化（运行时 server 返回 integer）
+      const raw = config as Record<string, unknown>
+      const normalized: AiclawGroupConfig = {
+        rateLimitPerMinute: Number(config.rateLimitPerMinute ?? 0),
+        dailyLimit: Number(config.dailyLimit ?? 0),
+        respondToAi: raw.respondToAi === true || raw.respondToAi === 1,
+        mentionRequired: raw.mentionRequired === true || raw.mentionRequired === 1
+      }
+      aiclawGroupConfigs.set(key, { ...normalized, roomId: String(roomId), roomName: existing?.roomName })
     }
 
     /** 保存 aiclaw 群配置到 server */

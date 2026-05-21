@@ -205,6 +205,20 @@ class WebSocketWebClient {
       case 'aiclawAuthRequest':
         mitt.emit(WsResponseMessageType.AICLAW_AUTH_REQUEST, data)
         break
+      // REQ-004: AIclaw 思考流式消息
+      case 'thinkingStart':
+        mitt.emit(WsResponseMessageType.THINKING_START, data)
+        break
+      case 'thinkingDelta':
+        mitt.emit(WsResponseMessageType.THINKING_DELTA, data)
+        break
+      case 'thinkingEnd':
+        mitt.emit(WsResponseMessageType.THINKING_END, data)
+        break
+      // REQ-004: 群配置变更广播
+      case 'groupConfigChange':
+        mitt.emit(WsResponseMessageType.AICLAW_GROUP_CONFIG_UPDATE, data)
+        break
       default:
         console.debug('[WebWS] 未处理的消息类型:', type)
     }
