@@ -372,10 +372,11 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
   })
 
   // REQ-004: autoReply 消息标记（仅 WS payload 携带，不入库）
-  // extra 可能在 WS payload 顶层或 message 子对象中
+  // 权威位置：data.message.extra（server: chatMessageResp.getMessage().setExtra()）
+  // data.extra 为兼容降级，后续 cleanup 可移除
   const isAutoReply =
-    (data as MessageType & { extra?: Record<string, unknown> }).extra?.autoReply === true ||
-    data.message.extra?.autoReply === true
+    data.message.extra?.autoReply === true ||
+    (data as MessageType & { extra?: Record<string, unknown> }).extra?.autoReply === true
   if (isAutoReply) {
     chatStore.markMessageAsAutoReply(String(data.message.id))
   }
