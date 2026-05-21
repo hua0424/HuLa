@@ -64,11 +64,12 @@ export const useContactStore = defineStore(StoresEnum.CONTACTS, () => {
       })
       contactsOptions.value.cursor = data.cursor
       contactsOptions.value.isLast = data.isLast
-      // 将联系人的在线状态同步到 groupStore 缓存，确保 ChatHeader 能读取到正确状态
+      // 将联系人的在线状态和 userType 同步到 groupStore 缓存，确保 ChatHeader/isAiclawUser 能读取到正确状态
       for (const item of data.list) {
         groupStore.cacheFriendInfo(item.uid, {
           activeStatus: item.activeStatus,
-          lastOptTime: item.lastOptTime
+          lastOptTime: item.lastOptTime,
+          userType: item.userType
         })
       }
     } catch (error) {
