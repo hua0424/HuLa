@@ -1724,24 +1724,40 @@ export const useChatStore = defineStore(
     /** aiclaw 群配置缓存，key: `${aiclawUid}:${roomId}` */
     const aiclawGroupConfigs = reactive(new Map<string, AiclawGroupConfig & { roomId: string; roomName?: string }>())
 
-    /** 加载 aiclaw 群配置列表 */
+    /** 加载 aiclaw 群配置（遍历 aiclaw 所在群逐一获取） */
     const loadAiclawGroupConfigs = async (aiclawUid: number) => {
       const { imRequest } = await import('@/utils/ImRequestUtils')
       const { ImUrlEnum } = await import('@/enums')
+      const groupStore = useGroupStore()
       try {
-        const result = await imRequest<(AiclawGroupConfig & { roomId: string; roomName?: string })[]>({
-          url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
-          params: { uid: aiclawUid }
-        })
-        // 清除旧缓存再填充
+        // 清除旧缓存
         const keysToDelete: string[] = []
         for (const key of aiclawGroupConfigs.keys()) {
           if (key.startsWith(`${aiclawUid}:`)) keysToDelete.push(key)
         }
         keysToDelete.forEach((k) => aiclawGroupConfigs.delete(k))
-        if (result) {
-          for (const config of result) {
-            aiclawGroupConfigs.set(`${aiclawUid}:${config.roomId}`, config)
+        // 获取 aiclaw 所在的所有群 roomId
+        const roomIds = groupStore.getRoomIdsByUid(String(aiclawUid))
+        for (const roomId of roomIds) {
+          try {
+            // server 返回字段为原始格式（boolean 字段可能是 1/0 integer）
+            const raw = await imRequest<Record<string, unknown>>({
+              url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
+              params: { aiclawUid, roomId: Number(roomId) }
+            })
+            if (raw) {
+              const normalized: AiclawGroupConfig & { roomId: string; roomName?: string } = {
+                rateLimitPerMinute: Number(raw.rateLimitPerMinute ?? 0),
+                dailyLimit: Number(raw.dailyLimit ?? 0),
+                respondToAi: raw.respondToAi === true || raw.respondToAi === 1,
+                mentionRequired: raw.mentionRequired === true || raw.mentionRequired === 1,
+                roomId: String(raw.roomId ?? roomId),
+                roomName: raw.roomName as string | undefined
+              }
+              aiclawGroupConfigs.set(`${aiclawUid}:${roomId}`, normalized)
+            }
+          } catch {
+            // 单个群配置获取失败不影响其他群
           }
         }
       } catch (error) {
@@ -1762,8 +1778,7 @@ export const useChatStore = defineStore(
       const { ImUrlEnum } = await import('@/enums')
       await imRequest({
         url: ImUrlEnum.AICLAW_GROUP_CONFIG_UPDATE,
-        params: { uid: aiclawUid },
-        body: { roomId, ...config }
+        body: { aiclawUid, roomId: Number(roomId), ...config }
       })
     }
 

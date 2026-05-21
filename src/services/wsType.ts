@@ -348,9 +348,9 @@ export type AiclawGroupConfig = {
   rateLimitPerMinute: number
   /** 每日上限 */
   dailyLimit: number
-  /** 是否响应其他 aiclaw */
+  /** 是否响应其他 aiclaw（server 返回 1/0，前端转 boolean） */
   respondToAi: boolean
-  /** 是否需要 @ 触发（默认 false） */
+  /** 是否需要 @ 触发（server 返回 1/0，前端转 boolean） */
   mentionRequired?: boolean
 }
 

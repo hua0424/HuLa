@@ -896,10 +896,10 @@ impl ImUrl {
                 (http::Method::PUT, "im/aiclaw/{uid}/friends/{friendUid}/relation")
             }
             ImUrl::AiclawGroupConfigList => {
-                (http::Method::GET, "im/aiclaw/{uid}/group-config/list")
+                (http::Method::GET, "im/aiclaw/group/config")
             }
             ImUrl::AiclawGroupConfigUpdate => {
-                (http::Method::PUT, "im/aiclaw/{uid}/group-config/update")
+                (http::Method::PUT, "im/aiclaw/group/config")
             }
         }
     }
