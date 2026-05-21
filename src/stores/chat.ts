@@ -8,6 +8,7 @@ import { useRoute } from 'vue-router'
 import { ErrorType } from '@/common/exception'
 import { MittEnum, MessageStatusEnum, MsgEnum, RoomTypeEnum, StoresEnum, TauriCommand } from '@/enums'
 import type { MarkItemType, MessageType, RevokedMsgType, SessionItem } from '@/services/types'
+import type { ThinkingState } from '@/types/thinking'
 import { useGlobalStore } from '@/stores/global.ts'
 import { useFeedStore } from '@/stores/feed.ts'
 import { useGroupStore } from '@/stores/group.ts'
@@ -387,6 +388,9 @@ export const useChatStore = defineStore(
           delete currentReplyMap.value[key]
         }
       }
+
+      // 4. 清理当前房间的思考状态（CR-S10：切换房间时清除旧思考）
+      clearThinking()
 
       try {
         // 从服务器加载消息
@@ -1632,42 +1636,7 @@ export const useChatStore = defineStore(
     // ==================== REQ-004 AIclaw Thinking 状态 ====================
     // 与 chatMessageList / streamingMessages / pendingStreamReplace 完全隔离
 
-    /** 思考状态 */
-    type ThinkingStatus = 'thinking' | 'complete' | 'error'
-
-    /** 单个 aiclaw 的思考状态 */
-    type ThinkingState = {
-      /** 思考会话 ID（server 生成） */
-      thinkingId: string
-      /** aiclaw 用户 ID */
-      aiclawId: number
-      /** aiclaw 显示名 */
-      aiclawName: string
-      /** aiclaw 头像 */
-      aiclawAvatar: string
-      /** 房间 ID */
-      roomId: string
-      /** 当前思考内容（流式追加） */
-      content: string
-      /** 思考状态 */
-      status: ThinkingStatus
-      /** 开始时间戳 */
-      startTime: number
-      /** 结束时间戳（THINKING_END 时设置） */
-      endTime?: number
-      /** 处理耗时（毫秒，THINKING_END 时设置） */
-      durationMs?: number
-      /** 错误信息（status=error 时） */
-      errorMsg?: string
-      /** 触发消息 ID */
-      triggerMsgId?: string
-      /** delta 序号（用于去重） */
-      lastSeq: number
-      /** 是否已折叠 */
-      collapsed: boolean
-      /** 30s 延迟归档的 timeout ID（用于 startThinking 覆盖时清理） */
-      archiveTimeoutId?: ReturnType<typeof setTimeout>
-    }
+    // ThinkingState / ThinkingStatus 已提取到 @/types/thinking.ts（CR-S12）
 
     /**
      * 思考流状态 Map
@@ -1708,9 +1677,18 @@ export const useChatStore = defineStore(
 
     /** autoReply 消息标记集（内存，不持久化） */
     const autoReplyMessages = reactive(new Set<string>())
+    /** autoReply Set 上限，防止内存无限增长（CR-S9） */
+    const MAX_AUTO_REPLY_MESSAGES = 200
 
     /** 标记消息为 autoReply */
     const markMessageAsAutoReply = (msgId: string) => {
+      // FIFO 淘汰：超过上限时移除最旧的条目
+      if (autoReplyMessages.size >= MAX_AUTO_REPLY_MESSAGES) {
+        const first = autoReplyMessages.values().next().value
+        if (first !== undefined) {
+          autoReplyMessages.delete(first)
+        }
+      }
       autoReplyMessages.add(msgId)
     }
 

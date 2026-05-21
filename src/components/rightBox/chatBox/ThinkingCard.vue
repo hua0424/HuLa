@@ -55,24 +55,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-
-type ThinkingState = {
-  thinkingId: string
-  aiclawId: number
-  aiclawName: string
-  aiclawAvatar: string
-  roomId: string
-  content: string
-  status: 'thinking' | 'complete' | 'error'
-  startTime: number
-  endTime?: number
-  durationMs?: number
-  errorMsg?: string
-  triggerMsgId?: string
-  lastSeq: number
-  collapsed: boolean
-  archiveTimeoutId?: ReturnType<typeof setTimeout>
-}
+import type { ThinkingState } from '@/types/thinking'
 
 const props = defineProps<{
   thinking: ThinkingState

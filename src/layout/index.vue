@@ -708,6 +708,11 @@ onUnmounted(() => {
     msgId: 'checkUpdate'
   })
   timerWorker.terminate()
+  // CR-S11: 取消未执行的 thinking delta RAF，防止 unmount 后回调仍触发
+  if (thinkingRafId !== null) {
+    cancelAnimationFrame(thinkingRafId)
+    thinkingRafId = null
+  }
 })
 </script>
 

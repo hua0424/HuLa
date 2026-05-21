@@ -43,24 +43,8 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useGlobalStore } from '@/stores/global'
+import type { ThinkingState } from '@/types/thinking'
 import ThinkingCard from './ThinkingCard.vue'
-
-type ThinkingState = {
-  thinkingId: string
-  aiclawId: number
-  aiclawName: string
-  aiclawAvatar: string
-  roomId: string
-  content: string
-  status: 'thinking' | 'complete' | 'error'
-  startTime: number
-  endTime?: number
-  durationMs?: number
-  errorMsg?: string
-  triggerMsgId?: string
-  lastSeq: number
-  collapsed: boolean
-}
 
 const { t } = useI18n()
 const chatStore = useChatStore()
