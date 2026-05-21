@@ -862,6 +862,25 @@ impl WebSocketClient {
                 let _ = app_handle.emit_to("home", "ws-aiclaw-auth-request", data);
             }
 
+            // REQ-004: AIclaw 思考流式消息
+            "thinkingStart" => {
+                info!("AIclaw thinking start");
+                let _ = app_handle.emit_to("home", "ws-thinking-start", data);
+            }
+            "thinkingDelta" => {
+                let _ = app_handle.emit_to("home", "ws-thinking-delta", data);
+            }
+            "thinkingEnd" => {
+                info!("AIclaw thinking end");
+                let _ = app_handle.emit_to("home", "ws-thinking-end", data);
+            }
+
+            // REQ-004: 群配置变更广播
+            "groupConfigChange" => {
+                info!("AIclaw group config change broadcast");
+                let _ = app_handle.emit_to("home", "ws-group-config-change", data);
+            }
+
             // 未知消息类型
             _ => {
                 warn!("Received unhandled message type: {}", message_type);

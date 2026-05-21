@@ -37,13 +37,8 @@
       </div>
     </Transition>
 
-    <!-- AI 助理对话提示条 -->
-    <div v-if="isAiclawSession" class="flex-shrink-0 px-12px pt-6px">
-      <div class="flex items-center gap-6px px-12px py-6px rounded-6px bg-#7c5cfc10 text-(12px #7c5cfc)">
-        <svg class="size-14px flex-shrink-0"><use href="#robot"></use></svg>
-        {{ isCurrentRoomStreaming ? t('aiclaw.chat.streaming') : t('aiclaw.chat.notice') }}
-      </div>
-    </div>
+    <!-- REQ-004 AI 助理 Thinking 面板（群聊含 aiclaw + 私聊 AI 助理） -->
+    <ThinkingPanel v-if="showThinkingPanel" />
 
     <!-- 聊天内容 -->
     <div class="flex flex-col flex-1 min-h-0">
@@ -92,6 +87,10 @@
                   }
                 }
               ">
+              <!-- REQ-004: autoReply 消息标记 -->
+              <div v-if="chatStore.isAutoReplyMessage(item.message.id)" class="auto-reply-tag text-(10px #999) mb-2px px-4px">
+                {{ t('aiclaw.auto_reply_tag') }}
+              </div>
               <RenderMessage
                 :message="item"
                 :is-group="isGroup"
@@ -220,7 +219,9 @@ import { useCachedStore } from '@/stores/cached'
 import { isMessageMultiSelectEnabled } from '@/utils/MessageSelect'
 import { isMac, isMobile, isWeb, isWindows } from '@/utils/PlatformConstants'
 import { isAiclawUser as checkAiclaw } from '@/utils/AiclawUtils'
+import { useGroupStore } from '@/stores/group'
 import FileUploadProgress from '@/components/rightBox/FileUploadProgress.vue'
+import ThinkingPanel from '@/components/rightBox/chatBox/ThinkingPanel.vue'
 
 const selfEmit = defineEmits(['scroll'])
 const { t } = useI18n()
@@ -241,6 +242,7 @@ const appWindow = isWeb() ? null : WebviewWindow.getCurrent()
 const globalStore = useGlobalStore()
 const chatStore = useChatStore()
 const userStore = useUserStore()
+const groupStore = useGroupStore()
 const networkStatus = useNetworkStatus()
 // const { footerHeight } = useChatLayoutGlobal() // 已移除，不再需要
 const { createWebviewWindow } = useWindow()
@@ -274,14 +276,21 @@ const isAiclawSession = computed(() => {
   const session = globalStore.currentSession
   return session && !isGroup.value && checkAiclaw(session.detailId)
 })
-/** 当前房间是否有正在流式中的消息 */
-const isCurrentRoomStreaming = computed(() => {
-  const roomId = globalStore.currentSessionRoomId
-  if (!roomId) return false
-  const roomMsgs = chatStore.messageMap[roomId]
-  if (!roomMsgs) return false
-  for (const msgId of chatStore.streamingMessages) {
-    if (roomMsgs[msgId]) return true
+/** REQ-004 是否显示 ThinkingPanel（群聊含 aiclaw + 私聊 AI 助理，D1 决策统一） */
+const showThinkingPanel = computed(() => {
+  // 私聊 AI 助理
+  if (isAiclawSession.value) return true
+  // 群聊中有 aiclaw 成员时始终显示（防止布局跳动）
+  if (isGroup.value) {
+    const roomId = globalStore.currentSessionRoomId
+    if (roomId) {
+      // P2-1: 群中有 aiclaw 成员就始终显示面板
+      const members = groupStore.getUserListByRoomId(roomId)
+      if (members.some((m) => m.userType === 4)) return true
+      // 有活跃思考或归档也显示
+      if (chatStore.isCurrentRoomThinking) return true
+      if (chatStore.thinkingArchive.get(roomId)?.length) return true
+    }
   }
   return false
 })

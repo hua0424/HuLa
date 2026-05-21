@@ -510,6 +510,8 @@ export type MsgType = {
   messageMarks: MessageMarkType
   /** 消息发送状态 */
   status: MessageStatusEnum
+  /** 消息元数据扩展字段（REQ-004: autoReply 等标记，仅 WS payload 携带，不入库） */
+  extra?: Record<string, unknown>
 }
 
 export type ReplyType = {

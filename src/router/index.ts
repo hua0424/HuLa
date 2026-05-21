@@ -284,6 +284,11 @@ const getMobileRoutes = (): Array<RouteRecordRaw> => [
         component: () => import('@/mobile/views/my/AiclawFriends.vue')
       },
       {
+        path: 'aiAssistant/:uid/groupSettings',
+        name: 'mobileAiclawGroupSettings',
+        component: () => import('@/mobile/views/my/AiclawGroupSettings.vue')
+      },
+      {
         path: 'myAlbum',
         name: 'mobileMyAlbum',
         component: MyAlbum

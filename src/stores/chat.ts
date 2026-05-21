@@ -8,6 +8,7 @@ import { useRoute } from 'vue-router'
 import { ErrorType } from '@/common/exception'
 import { MittEnum, MessageStatusEnum, MsgEnum, RoomTypeEnum, StoresEnum, TauriCommand } from '@/enums'
 import type { MarkItemType, MessageType, RevokedMsgType, SessionItem } from '@/services/types'
+import type { ThinkingState } from '@/types/thinking'
 import { useGlobalStore } from '@/stores/global.ts'
 import { useFeedStore } from '@/stores/feed.ts'
 import { useGroupStore } from '@/stores/group.ts'
@@ -16,6 +17,7 @@ import { getSessionDetail, markMsgRead } from '@/utils/ImRequestUtils'
 import { renderReplyContent } from '@/utils/RenderReplyContent.ts'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useSessionUnreadStore } from '@/stores/sessionUnread'
+import type { AiclawGroupConfig } from '@/services/wsType'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 import { isWeb } from '@/utils/PlatformConstants'
 import { useMitt } from '@/hooks/useMitt'
@@ -387,6 +389,9 @@ export const useChatStore = defineStore(
         }
       }
 
+      // 4. 清理当前房间的思考状态（CR-S10：切换房间时清除旧思考）
+      clearThinking()
+
       try {
         // 从服务器加载消息
         await getPageMsg(pageSize, roomId, '')
@@ -447,7 +452,9 @@ export const useChatStore = defineStore(
 
       // 直接使用 Rust 后端计算的 timeBlock，不做前端计算
       // FIX: 按 sendTime 排序，避免不同服务（IM Server / AI Bridge）snowflake ID 区段不同导致分组错乱
-      return Object.values(currentMessageMap.value).sort((a, b) => (a.message.sendTime ?? 0) - (b.message.sendTime ?? 0))
+      return Object.values(currentMessageMap.value).sort(
+        (a, b) => (a.message.sendTime ?? 0) - (b.message.sendTime ?? 0)
+      )
     })
 
     const chatMessageListByRoomId = computed(() => (roomId: string) => {
@@ -476,7 +483,7 @@ export const useChatStore = defineStore(
      * - 使用 Promise.allSettled 确保部分失败不影响其他会话
      */
     const setAllSessionMsgList = async (size = pageSize) => {
-      !isWeb() && await info('初始设置所有会话消息列表')
+      !isWeb() && (await info('初始设置所有会话消息列表'))
 
       if (sessionList.value.length === 0) return
 
@@ -496,7 +503,7 @@ export const useChatStore = defineStore(
       const successCount = results.filter((r) => r.status === 'fulfilled').length
       const failCount = results.filter((r) => r.status === 'rejected').length
 
-      !isWeb() && await info(`会话消息加载完成: 成功 ${successCount}/${sortedSessions.length}, 失败 ${failCount}`)
+      !isWeb() && (await info(`会话消息加载完成: 成功 ${successCount}/${sortedSessions.length}, 失败 ${failCount}`))
 
       // 记录失败的会话（可选）
       if (failCount > 0) {
@@ -510,7 +517,7 @@ export const useChatStore = defineStore(
 
     // 获取消息列表
     const getMsgList = async (size = pageSize, async?: boolean) => {
-      !isWeb() && await info('获取消息列表')
+      !isWeb() && (await info('获取消息列表'))
       // 获取当前房间ID，用于后续比较
       const requestRoomId = globalStore.currentSessionRoomId
 
@@ -604,18 +611,20 @@ export const useChatStore = defineStore(
         if (isWeb()) {
           const { imRequest } = await import('@/utils/ImRequestUtils')
           const { ImUrlEnum } = await import('@/enums')
-          const data: any = await imRequest({ url: ImUrlEnum.GET_CONTACT_LIST, params: { pageSize: 100 } }).catch(() => {
-            sessionOptions.isLoading = false
-            sessionOptions.isError = true
-            return null
-          })
+          const data: any = await imRequest({ url: ImUrlEnum.GET_CONTACT_LIST, params: { pageSize: 100 } }).catch(
+            () => {
+              sessionOptions.isLoading = false
+              sessionOptions.isError = true
+              return null
+            }
+          )
           if (!data) {
             globalStore.unreadReady = true
             unreadCountManager.refreshBadge(globalStore.unReadMark, feedStore.unreadCount)
             return
           }
           // 将会话数据写入 sessionList 并更新 sessionMap
-          const list = Array.isArray(data) ? data : (data.list || [])
+          const list = Array.isArray(data) ? data : data.list || []
           sessionList.value = [...list]
           for (const session of sessionList.value) {
             sessionMap.value[session.roomId] = session
@@ -1376,7 +1385,9 @@ export const useChatStore = defineStore(
       if (!currentMessages) return
 
       // 将消息转换为数组并按 sendTime 倒序排序，前面的元素代表最新的消息
-      const sortedMessages = Object.values(currentMessages).sort((a, b) => (b.message.sendTime ?? 0) - (a.message.sendTime ?? 0))
+      const sortedMessages = Object.values(currentMessages).sort(
+        (a, b) => (b.message.sendTime ?? 0) - (a.message.sendTime ?? 0)
+      )
 
       if (sortedMessages.length <= limit) {
         return
@@ -1574,9 +1585,10 @@ export const useChatStore = defineStore(
       if (!pendingIds || pendingIds.length === 0) return false
 
       // 过滤出仍存在于 messageMap 中的占位消息
-      const candidates = pendingIds
-        .map((id) => ({ id, msg: messageMap[roomId]?.[id] }))
-        .filter((c) => !!c.msg) as { id: string; msg: MessageType }[]
+      const candidates = pendingIds.map((id) => ({ id, msg: messageMap[roomId]?.[id] })).filter((c) => !!c.msg) as {
+        id: string
+        msg: MessageType
+      }[]
 
       if (candidates.length === 0) {
         // 所有占位都已被清理，清空该 room 的 pending 记录
@@ -1619,6 +1631,287 @@ export const useChatStore = defineStore(
     /** 判断消息是否正在流式中（用于 UI 渲染） */
     const isMessageStreaming = (msgId: string): boolean => {
       return streamingMessages.has(String(msgId))
+    }
+
+    // ==================== REQ-004 AIclaw Thinking 状态 ====================
+    // 与 chatMessageList / streamingMessages / pendingStreamReplace 完全隔离
+
+    // ThinkingState / ThinkingStatus 已提取到 @/types/thinking.ts（CR-S12）
+
+    /**
+     * 思考流状态 Map
+     * key: `${roomId}:${aiclawId}`（同房间不同 aiclaw 独立）
+     */
+    const thinkingStreams = reactive(new Map<string, ThinkingState>())
+
+    /**
+     * 已完成思考的归档列表（按 roomId 分组）
+     * 保留最近 10 条已完成思考，供回顾
+     */
+    const thinkingArchive = reactive(new Map<string, ThinkingState[]>())
+
+    /** 当前房间是否有活跃思考 */
+    const isCurrentRoomThinking = computed(() => {
+      const roomId = globalStore.currentSessionRoomId
+      if (!roomId) return false
+      for (const [, state] of thinkingStreams) {
+        if (state.roomId === roomId && state.status === 'thinking') {
+          return true
+        }
+      }
+      return false
+    })
+
+    /** 当前房间的思考列表（活跃 + 已完成未归档，供 ThinkingPanel 使用） */
+    const currentRoomThinkings = computed(() => {
+      const roomId = globalStore.currentSessionRoomId
+      if (!roomId) return []
+      const result: ThinkingState[] = []
+      for (const [, state] of thinkingStreams) {
+        if (state.roomId === roomId) {
+          result.push(state)
+        }
+      }
+      return result
+    })
+
+    /** autoReply 消息标记集（内存，不持久化） */
+    const autoReplyMessages = reactive(new Set<string>())
+    /** autoReply Set 上限，防止内存无限增长（CR-S9） */
+    const MAX_AUTO_REPLY_MESSAGES = 200
+
+    /** 标记消息为 autoReply */
+    const markMessageAsAutoReply = (msgId: string) => {
+      // FIFO 淘汰：超过上限时移除最旧的条目
+      if (autoReplyMessages.size >= MAX_AUTO_REPLY_MESSAGES) {
+        const first = autoReplyMessages.values().next().value
+        if (first !== undefined) {
+          autoReplyMessages.delete(first)
+        }
+      }
+      autoReplyMessages.add(msgId)
+    }
+
+    /** 检查消息是否为 autoReply */
+    const isAutoReplyMessage = (msgId: string): boolean => {
+      return autoReplyMessages.has(msgId)
+    }
+
+    // ==================== AIclaw 群聊配置 ====================
+
+    /** aiclaw 群配置缓存，key: `${aiclawUid}:${roomId}` */
+    const aiclawGroupConfigs = reactive(new Map<string, AiclawGroupConfig & { roomId: string; roomName?: string }>())
+
+    /** 加载 aiclaw 群配置（遍历 aiclaw 所在群逐一获取） */
+    const loadAiclawGroupConfigs = async (aiclawUid: number) => {
+      const { imRequest } = await import('@/utils/ImRequestUtils')
+      const { ImUrlEnum } = await import('@/enums')
+      const groupStore = useGroupStore()
+      try {
+        // 清除旧缓存
+        const keysToDelete: string[] = []
+        for (const key of aiclawGroupConfigs.keys()) {
+          if (key.startsWith(`${aiclawUid}:`)) keysToDelete.push(key)
+        }
+        keysToDelete.forEach((k) => aiclawGroupConfigs.delete(k))
+        // 获取 aiclaw 所在的所有群 roomId
+        const roomIds = groupStore.getRoomIdsByUid(String(aiclawUid))
+        for (const roomId of roomIds) {
+          try {
+            // server 返回字段为原始格式（boolean 字段可能是 1/0 integer）
+            const raw = await imRequest<Record<string, unknown>>({
+              url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
+              params: { aiclawUid, roomId: Number(roomId) }
+            })
+            if (raw) {
+              const normalized: AiclawGroupConfig & { roomId: string; roomName?: string } = {
+                rateLimitPerMinute: Number(raw.rateLimitPerMinute ?? 0),
+                dailyLimit: Number(raw.dailyLimit ?? 0),
+                respondToAi: raw.respondToAi === true || raw.respondToAi === 1,
+                mentionRequired: raw.mentionRequired === true || raw.mentionRequired === 1,
+                roomId: String(raw.roomId ?? roomId),
+                roomName: raw.roomName as string | undefined
+              }
+              aiclawGroupConfigs.set(`${aiclawUid}:${roomId}`, normalized)
+            }
+          } catch {
+            // 单个群配置获取失败不影响其他群
+          }
+        }
+      } catch (error) {
+        console.error('[ChatStore] Failed to load aiclaw group configs:', error)
+      }
+    }
+
+    /** 更新 aiclaw 群配置（本地缓存，WS 通知时调用） */
+    const updateAiclawGroupConfig = (aiclawUid: number, roomId: number, config: AiclawGroupConfig) => {
+      const key = `${aiclawUid}:${roomId}`
+      const existing = aiclawGroupConfigs.get(key)
+      // WS 广播的 respondToAi/mentionRequired 可能是 1/0 integer，需统一转为 boolean
+      // 用 as unknown as number 绕过 TS 类型窄化（运行时 server 返回 integer）
+      const raw = config as Record<string, unknown>
+      const normalized: AiclawGroupConfig = {
+        rateLimitPerMinute: Number(config.rateLimitPerMinute ?? 0),
+        dailyLimit: Number(config.dailyLimit ?? 0),
+        respondToAi: raw.respondToAi === true || raw.respondToAi === 1,
+        mentionRequired: raw.mentionRequired === true || raw.mentionRequired === 1
+      }
+      aiclawGroupConfigs.set(key, { ...normalized, roomId: String(roomId), roomName: existing?.roomName })
+    }
+
+    /** 保存 aiclaw 群配置到 server */
+    const saveAiclawGroupConfig = async (aiclawUid: number, roomId: string, config: AiclawGroupConfig) => {
+      const { imRequest } = await import('@/utils/ImRequestUtils')
+      const { ImUrlEnum } = await import('@/enums')
+      await imRequest({
+        url: ImUrlEnum.AICLAW_GROUP_CONFIG_UPDATE,
+        body: { aiclawUid, roomId: Number(roomId), ...config }
+      })
+    }
+
+    /** 获取某 aiclaw 的所有群配置列表 */
+    const getAiclawGroupConfigList = (aiclawUid: number): (AiclawGroupConfig & { roomId: string; roomName?: string })[] => {
+      const prefix = `${aiclawUid}:`
+      const result: (AiclawGroupConfig & { roomId: string; roomName?: string })[] = []
+      for (const [key, config] of aiclawGroupConfigs) {
+        if (key.startsWith(prefix)) result.push(config)
+      }
+      return result
+    }
+
+    /** 开始思考（THINKING_START 时调用） */
+    const startThinking = (payload: {
+      thinkingId: string
+      fromUid: number
+      roomId: number
+      triggerMsgId?: string
+      aiclawName?: string
+      aiclawAvatar?: string
+    }) => {
+      const roomId = String(payload.roomId)
+      const aiclawId = payload.fromUid
+      const key = `${roomId}:${aiclawId}`
+
+      // 如果该 aiclaw 在该房间已有未完成的思考，先归档旧的
+      const existing = thinkingStreams.get(key)
+      if (existing) {
+        // P0: 清理旧的延迟归档 timeout，防止闭包删除新状态
+        if (existing.archiveTimeoutId) {
+          clearTimeout(existing.archiveTimeoutId)
+          existing.archiveTimeoutId = undefined
+        }
+        if (existing.status === 'thinking') {
+          existing.status = 'error'
+          existing.errorMsg = 'Superseded by new thinking'
+          existing.endTime = Date.now()
+          archiveThinking(existing)
+        }
+        thinkingStreams.delete(key)
+      }
+
+      // 从 groupStore 获取名称和头像（降级：使用 payload 中的值或默认值）
+      const groupStore = useGroupStore()
+      const userInfo = groupStore.getUserInfo(String(aiclawId))
+
+      thinkingStreams.set(key, {
+        thinkingId: payload.thinkingId,
+        aiclawId,
+        aiclawName: payload.aiclawName || userInfo?.name || 'AI',
+        aiclawAvatar: payload.aiclawAvatar || userInfo?.avatar || '',
+        roomId,
+        content: '',
+        status: 'thinking',
+        startTime: Date.now(),
+        triggerMsgId: payload.triggerMsgId,
+        lastSeq: 0,
+        collapsed: false
+      })
+    }
+
+    /** 追加思考内容（THINKING_DELTA 时调用，已由 rAF 节流） */
+    const appendThinking = (thinkingId: string, delta: string, seq: number) => {
+      for (const [, state] of thinkingStreams) {
+        if (state.thinkingId === thinkingId) {
+          // 序号去重：只接受 > lastSeq 的 delta
+          if (seq > state.lastSeq) {
+            state.content += delta
+            state.lastSeq = seq
+          }
+          return
+        }
+      }
+    }
+
+    /** 结束思考（THINKING_END 时调用） */
+    const finalizeThinking = (
+      thinkingId: string,
+      payload: { durationMs?: number; status: 'complete' | 'error'; errorMsg?: string }
+    ) => {
+      for (const [key, state] of thinkingStreams) {
+        if (state.thinkingId === thinkingId) {
+          state.status = payload.status
+          state.endTime = Date.now()
+          state.durationMs = payload.durationMs
+          state.errorMsg = payload.errorMsg
+          state.collapsed = true
+          // P0: 延迟归档 30 秒后移入 archive，闭包内验证 state 身份防止竞态
+          state.archiveTimeoutId = setTimeout(() => {
+            const current = thinkingStreams.get(key)
+            if (current === state) {
+              archiveThinking(state)
+              thinkingStreams.delete(key)
+            }
+          }, 30_000)
+          return
+        }
+      }
+    }
+
+    /** 归档已完成的思考（内部方法） */
+    const archiveThinking = (state: ThinkingState) => {
+      const roomId = state.roomId
+      if (!thinkingArchive.has(roomId)) {
+        thinkingArchive.set(roomId, [])
+      }
+      const archive = thinkingArchive.get(roomId)!
+      archive.unshift(state)
+      // 限制归档数量
+      if (archive.length > 10) {
+        archive.length = 10
+      }
+    }
+
+    /** 清理思考状态（切换房间或手动关闭时） */
+    const clearThinking = (roomId?: string, aiclawId?: number) => {
+      const clearWithTimeout = (state: ThinkingState) => {
+        if (state.archiveTimeoutId) clearTimeout(state.archiveTimeoutId)
+      }
+      if (roomId && aiclawId) {
+        const state = thinkingStreams.get(`${roomId}:${aiclawId}`)
+        if (state) clearWithTimeout(state)
+        thinkingStreams.delete(`${roomId}:${aiclawId}`)
+      } else if (roomId) {
+        for (const [key, state] of thinkingStreams) {
+          if (state.roomId === roomId) {
+            clearWithTimeout(state)
+            thinkingStreams.delete(key)
+          }
+        }
+      } else {
+        for (const [, state] of thinkingStreams) {
+          clearWithTimeout(state)
+        }
+        thinkingStreams.clear()
+      }
+    }
+
+    /** 切换思考卡片折叠状态 */
+    const toggleThinkingCollapse = (roomId: string, aiclawId: number) => {
+      const key = `${roomId}:${aiclawId}`
+      const state = thinkingStreams.get(key)
+      if (state) {
+        state.collapsed = !state.collapsed
+      }
     }
 
     return {
@@ -1681,7 +1974,27 @@ export const useChatStore = defineStore(
       appendStreamContent,
       finalizeStream,
       isMessageStreaming,
-      tryReplaceStreamPlaceholder
+      tryReplaceStreamPlaceholder,
+      // REQ-004 thinking
+      thinkingStreams,
+      thinkingArchive,
+      isCurrentRoomThinking,
+      currentRoomThinkings,
+      autoReplyMessages,
+      startThinking,
+      appendThinking,
+      finalizeThinking,
+      clearThinking,
+      toggleThinkingCollapse,
+      markMessageAsAutoReply,
+      isAutoReplyMessage,
+
+      // aiclaw 群配置
+      aiclawGroupConfigs,
+      loadAiclawGroupConfigs,
+      updateAiclawGroupConfig,
+      saveAiclawGroupConfig,
+      getAiclawGroupConfigList
     }
   },
   {

@@ -557,6 +557,8 @@ pub enum ImUrl {
     AiclawFriends,
     AiclawRemoveFriend,
     AiclawSetRelation,
+    AiclawGroupConfigList,
+    AiclawGroupConfigUpdate,
 }
 
 impl ImUrl {
@@ -893,6 +895,12 @@ impl ImUrl {
             ImUrl::AiclawSetRelation => {
                 (http::Method::PUT, "im/aiclaw/{uid}/friends/{friendUid}/relation")
             }
+            ImUrl::AiclawGroupConfigList => {
+                (http::Method::GET, "im/aiclaw/group/config")
+            }
+            ImUrl::AiclawGroupConfigUpdate => {
+                (http::Method::PUT, "im/aiclaw/group/config")
+            }
         }
     }
 
@@ -1190,6 +1198,8 @@ impl ImUrl {
             "aiclawFriends" => Ok(ImUrl::AiclawFriends),
             "aiclawRemoveFriend" => Ok(ImUrl::AiclawRemoveFriend),
             "aiclawSetRelation" => Ok(ImUrl::AiclawSetRelation),
+            "aiclawGroupConfigList" => Ok(ImUrl::AiclawGroupConfigList),
+            "aiclawGroupConfigUpdate" => Ok(ImUrl::AiclawGroupConfigUpdate),
 
             // 未匹配的字符串
             _ => Err(anyhow::anyhow!("未知的URL类型: {}", s)),

@@ -69,6 +69,7 @@
     "persona_clear_tip": "Leave empty to clear persona",
     "friends": "Friend Management",
     "conversations": "Conversation History",
+    "group_settings": "Group Settings",
     "deactivate": "Deactivate",
     "deactivated_success": "Deactivated"
   },
@@ -87,5 +88,31 @@
     "title": "Conversation History",
     "empty": "No conversations yet",
     "no_more": "No more messages"
-  }
+  },
+  "thinking": {
+    "status": {
+      "thinking": "Thinking...",
+      "complete": "Thought for {duration}",
+      "error": "Thinking error"
+    },
+    "waiting": "Waiting for AI response...",
+    "archive_entry": "View AI thinking history ({count})",
+    "archive_title": "AI Thinking History",
+    "archive_empty": "No thinking history"
+  },
+  "group_settings": {
+    "title": "Group Chat Settings",
+    "empty": "This AI assistant hasn't joined any groups yet",
+    "rate_limit": "Rate Limit",
+    "rate_limit_hint": "msgs/min (0=unlimited)",
+    "daily_limit": "Daily Limit",
+    "respond_to_ai": "Respond to other AI",
+    "mention_required": "Require @ mention",
+    "mention_required_hint": "AI only replies when @mentioned",
+    "save": "Save",
+    "save_success": "Settings saved",
+    "save_failed": "Save failed",
+    "config_changed": "AI assistant {name}'s group settings have been updated"
+  },
+  "auto_reply_tag": "Auto-reply"
 }

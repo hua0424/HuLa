@@ -55,7 +55,11 @@ import {
   type StreamStartPayload,
   type StreamDeltaPayload,
   type StreamEndPayload,
-  type AiclawAuthPayload
+  type AiclawAuthPayload,
+  type ThinkingStartPayload,
+  type ThinkingDeltaPayload,
+  type ThinkingEndPayload,
+  type AiclawGroupConfigUpdatePayload
 } from '@/services/wsType.ts'
 import { useChatStore } from '@/stores/chat'
 import { useFileStore } from '@/stores/file'
@@ -367,6 +371,16 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
     activeRoomId: globalStore.currentSessionRoomId || ''
   })
 
+  // REQ-004: autoReply 消息标记（仅 WS payload 携带，不入库）
+  // 权威位置：data.message.extra（server: chatMessageResp.getMessage().setExtra()）
+  // data.extra 为兼容降级，后续 cleanup 可移除
+  const isAutoReply =
+    data.message.extra?.autoReply === true ||
+    (data as MessageType & { extra?: Record<string, unknown> }).extra?.autoReply === true
+  if (isAutoReply) {
+    chatStore.markMessageAsAutoReply(String(data.message.id))
+  }
+
   await invokeSilently(TauriCommand.SAVE_MSG, {
     data
   })
@@ -478,6 +492,60 @@ useMitt.on(WsResponseMessageType.STREAM_END, (data: StreamEndPayload) => {
     streamDeltaBuffers.delete(data.msgId)
   }
   chatStore.finalizeStream(data)
+})
+
+// ==================== REQ-004 AIclaw Thinking 事件处理 ====================
+
+const thinkingDeltaBuffers = new Map<string, {
+  thinkingId: string
+  content: string
+  lastSeq: number
+}>()
+let thinkingRafId: number | null = null
+
+useMitt.on(WsResponseMessageType.THINKING_START, (data: ThinkingStartPayload) => {
+  chatStore.startThinking(data)
+})
+
+useMitt.on(WsResponseMessageType.THINKING_DELTA, (data: ThinkingDeltaPayload) => {
+  // rAF 节流：与 STREAM_DELTA 相同模式
+  const key = data.thinkingId
+  const existing = thinkingDeltaBuffers.get(key)
+  if (existing) {
+    existing.content += data.chunk
+    existing.lastSeq = data.seq
+  } else {
+    thinkingDeltaBuffers.set(key, {
+      thinkingId: data.thinkingId,
+      content: data.chunk,
+      lastSeq: data.seq
+    })
+  }
+
+  if (!thinkingRafId) {
+    thinkingRafId = requestAnimationFrame(() => {
+      for (const [, buf] of thinkingDeltaBuffers) {
+        chatStore.appendThinking(buf.thinkingId, buf.content, buf.lastSeq)
+      }
+      thinkingDeltaBuffers.clear()
+      thinkingRafId = null
+    })
+  }
+})
+
+useMitt.on(WsResponseMessageType.THINKING_END, (data: ThinkingEndPayload) => {
+  // 刷新剩余 buffer
+  const buf = thinkingDeltaBuffers.get(data.thinkingId)
+  if (buf) {
+    chatStore.appendThinking(buf.thinkingId, buf.content, buf.lastSeq)
+    thinkingDeltaBuffers.delete(data.thinkingId)
+  }
+  chatStore.finalizeThinking(data.thinkingId, data)
+})
+
+// REQ-004: 群配置变更通知（X5: 推送范围为群内所有在线成员）
+useMitt.on(WsResponseMessageType.AICLAW_GROUP_CONFIG_UPDATE, (data: AiclawGroupConfigUpdatePayload) => {
+  chatStore.updateAiclawGroupConfig(data.aiclawUid, data.roomId, data.config)
 })
 
 // AIclaw 设备授权请求
@@ -640,6 +708,11 @@ onUnmounted(() => {
     msgId: 'checkUpdate'
   })
   timerWorker.terminate()
+  // CR-S11: 取消未执行的 thinking delta RAF，防止 unmount 后回调仍触发
+  if (thinkingRafId !== null) {
+    cancelAnimationFrame(thinkingRafId)
+    thinkingRafId = null
+  }
 })
 </script>
 

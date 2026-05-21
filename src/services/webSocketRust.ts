@@ -500,6 +500,35 @@ class RustWebSocketClient {
         useMitt.emit(WsResponseMessageType.AICLAW_AUTH_REQUEST, event.payload)
       })
     )
+
+    // REQ-004: AIclaw 思考流式消息事件
+    this.listenerController.add(
+      await listen('ws-thinking-start', (event: any) => {
+        info(`AIclaw 思考开始: ${JSON.stringify(event.payload)}`)
+        useMitt.emit(WsResponseMessageType.THINKING_START, event.payload)
+      })
+    )
+
+    this.listenerController.add(
+      await listen('ws-thinking-delta', (event: any) => {
+        useMitt.emit(WsResponseMessageType.THINKING_DELTA, event.payload)
+      })
+    )
+
+    this.listenerController.add(
+      await listen('ws-thinking-end', (event: any) => {
+        info(`AIclaw 思考结束: ${JSON.stringify(event.payload)}`)
+        useMitt.emit(WsResponseMessageType.THINKING_END, event.payload)
+      })
+    )
+
+    // REQ-004: 群配置变更广播事件
+    this.listenerController.add(
+      await listen('ws-group-config-change', (event: any) => {
+        info(`群配置变更广播: ${JSON.stringify(event.payload)}`)
+        useMitt.emit(WsResponseMessageType.AICLAW_GROUP_CONFIG_UPDATE, event.payload)
+      })
+    )
   }
 }
 const isInTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
