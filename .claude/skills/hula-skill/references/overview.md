@@ -7,7 +7,7 @@
 - Pinia + pinia-plugin-persistedstate + pinia-shared-state
 - UnoCSS + Sass
 - Naive UI (desktop), Vant (mobile)
-- SeaORM + SQLite (SQLCipher)
+- SeaORM + SQLite (local DB is not encrypted — `libsqlite3-sys` bundled, no SQLCipher/`PRAGMA key`)
 - vue-i18n
 
 ## Repo Layout

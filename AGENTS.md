@@ -21,7 +21,7 @@ The project supports:
 
 ### Backend (Rust / Tauri)
 - **Core:** Tauri v2
-- **Database:** SQLite (managed via SeaORM with SQLCipher support)
+- **Database:** SQLite (managed via SeaORM; `libsqlite3-sys` bundled — not encrypted)
 - **Async Runtime:** Tokio
 - **HTTP Client:** Reqwest
 - **WebSocket:** tokio-tungstenite
@@ -74,7 +74,7 @@ The project supports:
 
 ## Architecture Notes
 - **Communication:** Real-time messaging uses WebSockets (`tokio-tungstenite` on Rust side).
-- **Security:** SQLCipher is used for encrypted local storage.
+- **Security:** Local SQLite storage is currently unencrypted (no SQLCipher / `PRAGMA key` in the build).
 - **Plugins:** Extensive use of Tauri plugins (both official and custom) for native capabilities.
 
 ## Security & Configuration
