@@ -26,6 +26,8 @@
           <n-scrollbar @click="focusInput">
             <div
               id="message-input"
+              data-testid="message-input"
+              aria-label="消息输入框"
               ref="messageInputDom"
               :style="{
                 minHeight: isMobile() ? '2rem' : '36px',
@@ -60,6 +62,8 @@
           class="flex-shrink-0 max-h-52px p-4px pr-12px border-t border-gray-200/50 flex justify-end mb-4px">
           <n-button-group size="small">
             <n-button
+              data-testid="send-button"
+              aria-label="发送"
               color="#13987f"
               :disabled="props.isAIMode && props.isAIStreaming ? false : disabledSend"
               class="w-65px"

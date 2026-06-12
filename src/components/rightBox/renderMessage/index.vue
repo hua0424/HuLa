@@ -160,6 +160,8 @@
             @mouseleave="() => (hoverMsgId = '')"
             class="relative flex flex-col chat-message-max-width"
             :data-key="isMe ? `U${message.message.id}` : `Q${message.message.id}`"
+            :data-testid="isMe ? 'user-message' : 'assistant-message'"
+            :aria-label="isMe ? '用户消息' : 'AI 回复'"
             :class="[isMe ? 'items-end' : 'items-start', isMobile() ? 'w-full max-w-full' : '']"
             :style="{ '--bubble-max-width': bubbleMaxWidth }"
             @select="$event.click(message, 'Main')"

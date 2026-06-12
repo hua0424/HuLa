@@ -55,7 +55,7 @@
           :show-arrow="false"
           trigger="click">
           <template #trigger>
-            <n-button size="small" secondary style="padding: 0 5px">
+            <n-button data-testid="new-chat-button" aria-label="新建会话" size="small" secondary style="padding: 0 5px">
               <template #icon>
                 <svg class="w-24px h-24px"><use href="#plus"></use></svg>
               </template>

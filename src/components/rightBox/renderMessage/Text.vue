@@ -1,5 +1,5 @@
 <template>
-  <div :class="isMobile() ? 'text-16px' : 'text-14px'">
+  <div data-testid="markdown-content" aria-label="格式化内容" :class="isMobile() ? 'text-16px' : 'text-14px'">
     <!-- 流式模式：跳过 URL/mention 解析，直接渲染纯文本 + 光标 -->
     <template v-if="props.isStreaming">
       <template v-if="!body.content">

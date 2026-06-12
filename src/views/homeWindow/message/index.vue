@@ -16,7 +16,7 @@
       <span class="leading-tight">{{ networkBanner.text }}</span>
     </div>
     <!--  会话列表  -->
-    <div v-if="sessionList.length > 0" class="p-[4px_10px_0px_8px]">
+    <div v-if="sessionList.length > 0" data-testid="session-list" aria-label="会话列表" class="p-[4px_10px_0px_8px]">
       <ContextMenu
         v-for="item in sessionList"
         :key="item.roomId"

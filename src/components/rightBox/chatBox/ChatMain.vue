@@ -44,6 +44,8 @@
     <div class="flex flex-col flex-1 min-h-0">
       <div
         id="image-chat-main"
+        data-testid="chat-history"
+        aria-label="聊天记录"
         ref="scrollContainer"
         class="scrollbar-container"
         :class="{ 'hide-scrollbar': !showScrollbar }"
