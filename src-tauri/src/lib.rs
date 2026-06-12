@@ -181,6 +181,20 @@ async fn initialize_app_data(
         }
     }
 
+    // 初始化 network.log 的写入目录（与 tauri-plugin-log 的 LogDir 同目录），
+    // 供 im_request_client 记录后端 HTTP 调用，便于测试断言。失败时不阻断启动。
+    match app_handle.path().app_log_dir() {
+        Ok(log_dir) => {
+            if let Err(create_err) = std::fs::create_dir_all(&log_dir) {
+                tracing::warn!("Failed to create app_log_dir for network.log: {}", create_err);
+            }
+            im_request_client::init_network_log_dir(log_dir);
+        }
+        Err(e) => {
+            tracing::warn!("Failed to resolve app_log_dir for network.log: {}", e);
+        }
+    }
+
     let rc: im_request_client::ImRequestClient = im_request_client::ImRequestClient::new(
         configuration.lock().await.backend.base_url.clone(),
     )
