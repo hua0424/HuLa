@@ -12,7 +12,11 @@
         {{ thinking.aiclawName }}
       </span>
       <!-- 状态徽章 -->
-      <span v-if="thinking.status === 'thinking'" class="flex items-center gap-4px text-(11px #7c5cfc)">
+      <span
+        v-if="thinking.status === 'thinking'"
+        data-testid="typing-status"
+        aria-label="回复状态"
+        class="flex items-center gap-4px text-(11px #7c5cfc)">
         <span class="thinking-dot size-6px rounded-50% bg-#7c5cfc animate-pulse" />
         {{ t('aiclaw.thinking.status.thinking') }}
       </span>

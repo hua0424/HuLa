@@ -18,6 +18,8 @@
       <!-- 登录菜单 -->
       <n-flex class="ma text-center h-full w-260px" vertical :size="16">
         <n-input
+          data-testid="login-username"
+          aria-label="用户名"
           :class="{ 'pl-16px': loginHistories.length > 0 }"
           size="large"
           v-model:value="info.account"
@@ -66,6 +68,8 @@
         </div>
 
         <n-input
+          data-testid="login-password"
+          aria-label="密码"
           class="pl-16px"
           maxlength="16"
           minlength="6"
@@ -98,6 +102,8 @@
         </n-flex>
 
         <n-button
+          data-testid="login-button"
+          aria-label="登录"
           :loading="loading"
           :disabled="loginDisabled"
           tertiary

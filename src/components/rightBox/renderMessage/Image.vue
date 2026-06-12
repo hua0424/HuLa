@@ -2,6 +2,8 @@
   <div>
     <n-image
       v-if="body?.url"
+      data-testid="image-content"
+      aria-label="图片"
       class="select-none cursor-pointer"
       :img-props="{
         style: {
