@@ -53,6 +53,20 @@ First `pnpm tauri:dev` does a full Rust compile (~2–4 min); later runs are inc
 - **Do not** prefix unused variables with `_` — delete them. **Do not** use emojis in commits, logs, or docs.
 - Reply in the language the user asked in (e.g. Simplified Chinese question → Simplified Chinese answer).
 
+### Automated UI test hooks (`data-testid` / `aria-label`)
+
+The Windows tester drives the desktop client via playwright-cli over CDP and **locates elements by `data-testid`** — never by visible text, CSS class, or DOM path (those churn with the UI). When you add or refactor a user-facing control that tests target, give it a stable kebab-case `data-testid` plus an `aria-label` (the `aria-label` also serves the UIA accessibility fallback). Both are plain HTML attributes — additive, no visual/behavior impact; on Naive UI components they fall through to the root DOM node, so put them on the `<n-xxx>` tag. Keep a testid stable across refactors; if you must rename one, say so in the PR so the tester updates its scripts. Canonical registry (do not silently drop one):
+
+| testid | control | file |
+|---|---|---|
+| `login-username` / `login-password` / `login-button` | login fields + submit | `views/loginWindow/Login.vue` |
+| `message-input` / `send-button` | composer + desktop send | `components/rightBox/MsgInput.vue` |
+| `chat-history` | scrollable message container | `components/rightBox/chatBox/ChatMain.vue` |
+| `user-message` / `assistant-message` | one bubble, conditional on `isMe` | `components/rightBox/renderMessage/index.vue` |
+| `markdown-content` / `image-content` | content inside a bubble | `renderMessage/Text.vue` / `Image.vue` |
+| `typing-status` | streaming-reply status badge | `components/rightBox/chatBox/ThinkingCard.vue` |
+| `session-list` / `new-chat-button` | conversation list + "+" entry | `views/homeWindow/message/index.vue` / `layout/center/index.vue` |
+
 ## Architecture: platform abstraction is the central design
 
 The same Vue codebase runs in three runtimes, switched by `@/utils/PlatformConstants` (`isWeb()`, `isMobile()`, desktop). Two seams matter most:

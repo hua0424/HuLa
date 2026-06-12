@@ -71,6 +71,7 @@ The project supports:
 - **Styling:** Use UnoCSS utility classes where possible.
 - **State:** Use Pinia for global state; prefer Composition API `<script setup>`.
 - **Database:** Use SeaORM entities for database interactions.
+- **Test hooks:** User-facing controls the automated tester targets carry a stable kebab-case `data-testid` (+ `aria-label`); the tester locates by `data-testid`, never by text/class/DOM path. Add them when introducing such a control and keep them stable across refactors. Canonical registry + rationale: see `CLAUDE.md` → "Automated UI test hooks".
 
 ## Architecture Notes
 - **Communication:** Real-time messaging uses WebSockets (`tokio-tungstenite` on Rust side).
