@@ -1,4 +1,7 @@
+use std::io::Write;
+use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::OnceLock;
 
 use base64::{Engine, prelude::BASE64_STANDARD};
 use reqwest::header;
@@ -9,6 +12,47 @@ use crate::{
     pojo::common::ApiResult,
     vo::vo::{LoginReq, LoginResp},
 };
+
+/// network.log 所在目录（与 tauri-plugin-log 的 LogDir 同目录）。
+/// 在应用启动时由 `init_network_log_dir` 解析 AppHandle 后写入一次。
+static NETWORK_LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// 在应用启动阶段（持有 AppHandle 时）初始化 network.log 的写入目录。
+/// 仅设置一次；重复调用无副作用。
+pub fn init_network_log_dir(dir: PathBuf) {
+    let _ = NETWORK_LOG_DIR.set(dir);
+}
+
+/// 向 network.log 追加一行 JSON 记录，供测试断言后端调用。
+///
+/// 仅记录 method/path/status/elapsed/error；绝不记录请求体或任何 token/鉴权头。
+/// 写日志失败时静默吞掉，绝不影响请求本身。
+fn log_network(method: &str, path: &str, status: Option<u16>, elapsed_ms: u64, error: Option<&str>) {
+    let Some(dir) = NETWORK_LOG_DIR.get() else {
+        // 未初始化（如尚未启动完成）时直接跳过，不阻断请求。
+        return;
+    };
+
+    let ts = chrono::Utc::now().to_rfc3339();
+    let record = json!({
+        "ts": ts,
+        "method": method,
+        "url": path,
+        "status": status,
+        "elapsed_ms": elapsed_ms,
+        "error": error,
+    });
+
+    let line = record.to_string();
+    let log_path = dir.join("network.log");
+
+    // 所有 IO 失败均忽略，保证日志副作用永不破坏请求。
+    let _ = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&log_path)
+        .and_then(|mut file| writeln!(file, "{}", line));
+}
 
 #[derive(Debug)]
 pub struct ImRequestClient {
@@ -115,10 +159,30 @@ impl ImRequestClient {
             let request_builder = self.build_request(method.clone(), path, &body, &params, None);
 
             // 发送请求，区分网络错误和业务错误
-            let response = request_builder
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("network_error: {}", e))?;
+            let started = std::time::Instant::now();
+            let response = match request_builder.send().await {
+                Ok(resp) => {
+                    log_network(
+                        method.as_str(),
+                        path,
+                        Some(resp.status().as_u16()),
+                        started.elapsed().as_millis() as u64,
+                        None,
+                    );
+                    resp
+                }
+                Err(e) => {
+                    let err = anyhow::anyhow!("network_error: {}", e);
+                    log_network(
+                        method.as_str(),
+                        path,
+                        None,
+                        started.elapsed().as_millis() as u64,
+                        Some(&err.to_string()),
+                    );
+                    return Err(err);
+                }
+            };
             let result: ApiResult<T> = response
                 .json()
                 .await
@@ -199,8 +263,30 @@ impl ImRequestClient {
         let request_builder =
             self.build_request(method.clone(), path, &body, &params, extra_headers);
 
-        // 发送请求
-        let response = request_builder.send().await?;
+        // 发送请求（流式仅记录首个响应：连接建立时的状态 + 耗时，不逐 chunk 记录）
+        let started = std::time::Instant::now();
+        let response = match request_builder.send().await {
+            Ok(resp) => {
+                log_network(
+                    method.as_str(),
+                    path,
+                    Some(resp.status().as_u16()),
+                    started.elapsed().as_millis() as u64,
+                    None,
+                );
+                resp
+            }
+            Err(e) => {
+                log_network(
+                    method.as_str(),
+                    path,
+                    None,
+                    started.elapsed().as_millis() as u64,
+                    Some(&e.to_string()),
+                );
+                return Err(e.into());
+            }
+        };
 
         // 检查响应状态（但不解析 JSON）
         let status = response.status();
@@ -240,12 +326,32 @@ impl ImRequestClient {
           "refreshToken": refresh_token
         });
 
+        let refresh_path = ImUrl::RefreshToken.get_url().1;
         let request_builder = self.client.request(http::Method::POST, &url);
-        let response = request_builder
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("network_error: {}", e))?;
+        let started = std::time::Instant::now();
+        let response = match request_builder.json(&body).send().await {
+            Ok(resp) => {
+                log_network(
+                    http::Method::POST.as_str(),
+                    refresh_path,
+                    Some(resp.status().as_u16()),
+                    started.elapsed().as_millis() as u64,
+                    None,
+                );
+                resp
+            }
+            Err(e) => {
+                let err = anyhow::anyhow!("network_error: {}", e);
+                log_network(
+                    http::Method::POST.as_str(),
+                    refresh_path,
+                    None,
+                    started.elapsed().as_millis() as u64,
+                    Some(&err.to_string()),
+                );
+                return Err(err);
+            }
+        };
         let result: ApiResult<serde_json::Value> = response
             .json()
             .await
