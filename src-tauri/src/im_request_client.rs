@@ -665,6 +665,7 @@ pub enum ImUrl {
     AiclawSetRelation,
     AiclawGroupConfigList,
     AiclawGroupConfigUpdate,
+    AiclawThinkingDetail,
 }
 
 impl ImUrl {
@@ -1007,6 +1008,9 @@ impl ImUrl {
             ImUrl::AiclawGroupConfigUpdate => {
                 (http::Method::PUT, "im/aiclaw/group/config")
             }
+            ImUrl::AiclawThinkingDetail => {
+                (http::Method::GET, "im/aiclaw/thinking/{thinkingId}")
+            }
         }
     }
 
@@ -1306,6 +1310,7 @@ impl ImUrl {
             "aiclawSetRelation" => Ok(ImUrl::AiclawSetRelation),
             "aiclawGroupConfigList" => Ok(ImUrl::AiclawGroupConfigList),
             "aiclawGroupConfigUpdate" => Ok(ImUrl::AiclawGroupConfigUpdate),
+            "aiclawThinkingDetail" => Ok(ImUrl::AiclawThinkingDetail),
 
             // 未匹配的字符串
             _ => Err(anyhow::anyhow!("未知的URL类型: {}", s)),

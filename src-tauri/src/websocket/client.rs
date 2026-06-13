@@ -867,9 +867,7 @@ impl WebSocketClient {
                 info!("AIclaw thinking start");
                 let _ = app_handle.emit_to("home", "ws-thinking-start", data);
             }
-            "thinkingDelta" => {
-                let _ = app_handle.emit_to("home", "ws-thinking-delta", data);
-            }
+            // S4 起服务端不再下发 thinkingDelta，客户端也不再转发（思考全文改为按需 REST 拉取）
             "thinkingEnd" => {
                 info!("AIclaw thinking end");
                 let _ = app_handle.emit_to("home", "ws-thinking-end", data);

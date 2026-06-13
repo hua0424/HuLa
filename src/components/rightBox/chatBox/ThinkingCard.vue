@@ -38,18 +38,53 @@
     <!-- 内容区（可折叠） -->
     <Transition name="thinking-collapse">
       <div v-if="!thinking.collapsed || readonly" class="px-12px pb-8px">
-        <div
-          ref="contentRef"
-          class="thinking-content text-(12px #666 dark:#aaa) whitespace-pre-wrap break-words overflow-y-auto"
-          :style="{ maxHeight: readonly ? '200px' : '120px' }">
-          <template v-if="thinking.content">
-            {{ thinking.content }}
+        <!-- 已完成：提供「查看/回顾」入口，按需拉取完整思考内容 -->
+        <template v-if="thinking.status === 'complete'">
+          <!-- 加载中 -->
+          <div v-if="reviewLoading" class="text-(12px #999)">
+            {{ t('aiclaw.thinking.review_loading') }}
+          </div>
+          <!-- 加载失败 -->
+          <div
+            v-else-if="reviewError"
+            data-testid="thinking-review-error"
+            class="text-(12px [--danger-text]) cursor-pointer hover:underline"
+            @click="loadReview">
+            {{ t('aiclaw.thinking.review_error') }}
+          </div>
+          <!-- 已加载：展示完整思考内容（+ 截断提示） -->
+          <template v-else-if="reviewLoaded">
+            <div
+              class="thinking-content text-(12px #666 dark:#aaa) whitespace-pre-wrap break-words overflow-y-auto"
+              :style="{ maxHeight: readonly ? '200px' : '120px' }">
+              {{ reviewContent }}
+            </div>
+            <div
+              v-if="reviewTruncated"
+              data-testid="thinking-truncated-hint"
+              class="mt-4px text-(11px #e6a23c)">
+              {{ t('aiclaw.thinking.truncated') }}
+            </div>
           </template>
-          <template v-else-if="thinking.status === 'thinking'">
+          <!-- 初始：回顾入口 -->
+          <button
+            v-else
+            type="button"
+            data-testid="thinking-review-button"
+            aria-label="查看思考内容"
+            class="flex items-center gap-4px text-(11px #7c5cfc) bg-transparent border-none cursor-pointer p-0 hover:underline"
+            @click="loadReview">
+            <svg class="size-12px"><use href="#robot" /></svg>
+            {{ t('aiclaw.thinking.review') }}
+          </button>
+        </template>
+        <!-- 思考中 / 错误：仅显示状态占位，不再展示流式内容 -->
+        <div
+          v-else
+          class="thinking-content text-(12px #666 dark:#aaa) whitespace-pre-wrap break-words">
+          <template v-if="thinking.status === 'thinking'">
             {{ t('aiclaw.thinking.waiting') }}
           </template>
-          <!-- 流式光标 -->
-          <span v-if="thinking.status === 'thinking'" class="streaming-cursor" />
         </div>
       </div>
     </Transition>
@@ -57,8 +92,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ImUrlEnum } from '@/enums'
+import { imRequest } from '@/utils/ImRequestUtils'
 import type { ThinkingState } from '@/types/thinking'
 
 const props = defineProps<{
@@ -71,7 +108,13 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const contentRef = ref<HTMLElement>()
+
+// 回顾态：按需拉取的完整思考内容
+const reviewLoading = ref(false)
+const reviewLoaded = ref(false)
+const reviewError = ref(false)
+const reviewContent = ref('')
+const reviewTruncated = ref(false)
 
 // 格式化耗时
 const formattedDuration = computed(() => {
@@ -88,19 +131,28 @@ const cardBgClass = computed(() => {
   return 'bg-#7c5cfc08'
 })
 
-// 流式内容自动滚动到底部
-watch(
-  () => props.thinking.content,
-  () => {
-    if (contentRef.value && !props.thinking.collapsed) {
-      nextTick(() => {
-        if (contentRef.value) {
-          contentRef.value.scrollTop = contentRef.value.scrollHeight
-        }
-      })
-    }
+// 按需拉取完整思考内容（S7：思考全文不再走 WS，改为 REST 拉取）
+const loadReview = async () => {
+  if (reviewLoading.value || reviewLoaded.value) return
+  if (!props.thinking.thinkingId) return
+  reviewLoading.value = true
+  reviewError.value = false
+  try {
+    const data = await imRequest<{ content?: string; status?: number; durationMs?: number }>({
+      url: ImUrlEnum.AICLAW_THINKING_DETAIL,
+      params: { thinkingId: props.thinking.thinkingId }
+    })
+    reviewContent.value = data?.content ?? ''
+    // status === 4 表示内容过长被截断
+    reviewTruncated.value = data?.status === 4
+    reviewLoaded.value = true
+  } catch (error) {
+    console.error('[ThinkingCard] 拉取思考内容失败:', error)
+    reviewError.value = true
+  } finally {
+    reviewLoading.value = false
   }
-)
+}
 </script>
 
 <style scoped>
@@ -117,26 +169,6 @@ watch(
   50% {
     opacity: 1;
     transform: scale(1.2);
-  }
-}
-
-.streaming-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 14px;
-  background: #7c5cfc;
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  animation: cursor-blink 1s step-end infinite;
-}
-
-@keyframes cursor-blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0;
   }
 }
 

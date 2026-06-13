@@ -18,8 +18,6 @@ export interface ThinkingState {
   aiclawAvatar: string
   /** 房间 ID */
   roomId: string
-  /** 当前思考内容（流式追加） */
-  content: string
   /** 思考状态 */
   status: ThinkingStatus
   /** 开始时间戳 */
@@ -32,8 +30,6 @@ export interface ThinkingState {
   errorMsg?: string
   /** 触发消息 ID */
   triggerMsgId?: string
-  /** delta 序号（用于去重） */
-  lastSeq: number
   /** 是否已折叠 */
   collapsed: boolean
   /** 30s 延迟归档的 timeout ID（仅 store 层使用） */

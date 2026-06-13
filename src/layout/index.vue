@@ -57,7 +57,6 @@ import {
   type StreamEndPayload,
   type AiclawAuthPayload,
   type ThinkingStartPayload,
-  type ThinkingDeltaPayload,
   type ThinkingEndPayload,
   type AiclawGroupConfigUpdatePayload
 } from '@/services/wsType.ts'
@@ -495,51 +494,14 @@ useMitt.on(WsResponseMessageType.STREAM_END, (data: StreamEndPayload) => {
 })
 
 // ==================== REQ-004 AIclaw Thinking 事件处理 ====================
-
-const thinkingDeltaBuffers = new Map<string, {
-  thinkingId: string
-  content: string
-  lastSeq: number
-}>()
-let thinkingRafId: number | null = null
+// S4 起思考条改为状态版：客户端不再接收 thinkingDelta，全文按需经 REST 拉取。
+// 因此这里只处理 START（开始）/ END（结束并携带状态），不再做 delta 缓冲/节流。
 
 useMitt.on(WsResponseMessageType.THINKING_START, (data: ThinkingStartPayload) => {
   chatStore.startThinking(data)
 })
 
-useMitt.on(WsResponseMessageType.THINKING_DELTA, (data: ThinkingDeltaPayload) => {
-  // rAF 节流：与 STREAM_DELTA 相同模式
-  const key = data.thinkingId
-  const existing = thinkingDeltaBuffers.get(key)
-  if (existing) {
-    existing.content += data.chunk
-    existing.lastSeq = data.seq
-  } else {
-    thinkingDeltaBuffers.set(key, {
-      thinkingId: data.thinkingId,
-      content: data.chunk,
-      lastSeq: data.seq
-    })
-  }
-
-  if (!thinkingRafId) {
-    thinkingRafId = requestAnimationFrame(() => {
-      for (const [, buf] of thinkingDeltaBuffers) {
-        chatStore.appendThinking(buf.thinkingId, buf.content, buf.lastSeq)
-      }
-      thinkingDeltaBuffers.clear()
-      thinkingRafId = null
-    })
-  }
-})
-
 useMitt.on(WsResponseMessageType.THINKING_END, (data: ThinkingEndPayload) => {
-  // 刷新剩余 buffer
-  const buf = thinkingDeltaBuffers.get(data.thinkingId)
-  if (buf) {
-    chatStore.appendThinking(buf.thinkingId, buf.content, buf.lastSeq)
-    thinkingDeltaBuffers.delete(data.thinkingId)
-  }
   chatStore.finalizeThinking(data.thinkingId, data)
 })
 
@@ -712,11 +674,6 @@ onUnmounted(() => {
     msgId: 'checkUpdate'
   })
   timerWorker.terminate()
-  // CR-S11: 取消未执行的 thinking delta RAF，防止 unmount 后回调仍触发
-  if (thinkingRafId !== null) {
-    cancelAnimationFrame(thinkingRafId)
-    thinkingRafId = null
-  }
 })
 </script>
 

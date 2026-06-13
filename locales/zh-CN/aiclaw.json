@@ -96,6 +96,10 @@
       "error": "思考出错"
     },
     "waiting": "等待 AI 响应...",
+    "review": "查看思考内容",
+    "review_loading": "加载中...",
+    "review_error": "加载思考内容失败",
+    "truncated": "内容过长已截断",
     "archive_entry": "查看 AI 思考记录 ({count})",
     "archive_title": "AI 思考记录",
     "archive_empty": "暂无思考记录"

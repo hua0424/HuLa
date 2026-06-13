@@ -213,7 +213,8 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   aiclawRemoveFriend: { method: 'DELETE', path: 'im/aiclaw/{uid}/friends/{friendUid}' },
   aiclawSetRelation: { method: 'PUT', path: 'im/aiclaw/{uid}/friends/{friendUid}/relation' },
   aiclawGroupConfigList: { method: 'GET', path: 'im/aiclaw/group/config' },
-  aiclawGroupConfigUpdate: { method: 'PUT', path: 'im/aiclaw/group/config' }
+  aiclawGroupConfigUpdate: { method: 'PUT', path: 'im/aiclaw/group/config' },
+  aiclawThinkingDetail: { method: 'GET', path: 'im/aiclaw/thinking/{thinkingId}' }
 }
 
 // 与联调契约一致：Authorization 头直接使用 base64 值（无 "Basic " 前缀）
