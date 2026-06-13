@@ -89,7 +89,10 @@ export enum WsResponseMessageType {
   AICLAW_AUTH_REQUEST = 'aiclawAuthRequest',
   /** AI 助理思考开始 */
   THINKING_START = 'thinkingStart',
-  /** AI 助理思考内容增量 */
+  /**
+   * @deprecated S4 起客户端不再接收思考增量：thinkingEnd 仅携带状态，
+   * 思考全文改为按需经 REST（AICLAW_THINKING_DETAIL）拉取。保留枚举值仅为兼容历史协议。
+   */
   THINKING_DELTA = 'thinkingDelta',
   /** AI 助理思考结束 */
   THINKING_END = 'thinkingEnd',
@@ -316,7 +319,11 @@ export type ThinkingStartPayload = {
   aiclawAvatar?: string
 }
 
-/** 思考内容增量 payload（server → client） */
+/**
+ * 思考内容增量 payload（server → client）
+ * @deprecated S4 起不再下发该消息；思考全文改为按需经 REST（AICLAW_THINKING_DETAIL）拉取。
+ *             类型保留仅为兼容历史协议，客户端无监听处理。
+ */
 export type ThinkingDeltaPayload = {
   /** 关联的思考会话 ID */
   thinkingId: string

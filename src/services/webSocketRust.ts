@@ -509,11 +509,7 @@ class RustWebSocketClient {
       })
     )
 
-    this.listenerController.add(
-      await listen('ws-thinking-delta', (event: any) => {
-        useMitt.emit(WsResponseMessageType.THINKING_DELTA, event.payload)
-      })
-    )
+    // S4 起客户端不再监听 ws-thinking-delta（思考全文改为按需 REST 拉取）
 
     this.listenerController.add(
       await listen('ws-thinking-end', (event: any) => {

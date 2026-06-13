@@ -209,9 +209,7 @@ class WebSocketWebClient {
       case 'thinkingStart':
         mitt.emit(WsResponseMessageType.THINKING_START, data)
         break
-      case 'thinkingDelta':
-        mitt.emit(WsResponseMessageType.THINKING_DELTA, data)
-        break
+      // S4 起客户端不再处理 thinkingDelta（思考全文改为按需 REST 拉取）
       case 'thinkingEnd':
         mitt.emit(WsResponseMessageType.THINKING_END, data)
         break

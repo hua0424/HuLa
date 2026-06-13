@@ -1819,27 +1819,11 @@ export const useChatStore = defineStore(
         aiclawName: payload.aiclawName || userInfo?.name || 'AI',
         aiclawAvatar: payload.aiclawAvatar || userInfo?.avatar || '',
         roomId,
-        content: '',
         status: 'thinking',
         startTime: Date.now(),
         triggerMsgId: payload.triggerMsgId,
-        lastSeq: 0,
         collapsed: false
       })
-    }
-
-    /** 追加思考内容（THINKING_DELTA 时调用，已由 rAF 节流） */
-    const appendThinking = (thinkingId: string, delta: string, seq: number) => {
-      for (const [, state] of thinkingStreams) {
-        if (state.thinkingId === thinkingId) {
-          // 序号去重：只接受 > lastSeq 的 delta
-          if (seq > state.lastSeq) {
-            state.content += delta
-            state.lastSeq = seq
-          }
-          return
-        }
-      }
     }
 
     /** 结束思考（THINKING_END 时调用） */
@@ -1982,7 +1966,6 @@ export const useChatStore = defineStore(
       currentRoomThinkings,
       autoReplyMessages,
       startThinking,
-      appendThinking,
       finalizeThinking,
       clearThinking,
       toggleThinkingCollapse,
