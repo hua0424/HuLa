@@ -3,12 +3,13 @@ use crate::pojo::common::{CursorPageParam, CursorPageResp};
 use chrono::Utc;
 use entity::im_message;
 use lazy_static::lazy_static;
+use migration::ExprTrait; // #36: SeaORM 1.1.x 把 SimpleExpr 的 .lt()/.eq() 等比较方法放在 ExprTrait（keyset 过滤的 if_null(0).lt()/.eq()、cast_as().lt() 都需要它在 scope）
 use sea_orm::prelude::Expr;
 use sea_orm::sea_query::{Alias, Value};
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
     IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, Statement,
-    TryIntoModel,
+    TransactionTrait, TryIntoModel,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -440,6 +441,25 @@ where
     Ok(())
 }
 
+/// 解析 keyset 复合游标 "<send_time>:<id>" 为 (send_time: i64, id: i64)。
+///
+/// 解析失败（空串 / 缺少 ':' / send_time 非数字 / id 经 CAST 后无法表示为整数）
+/// 一律返回 None，由调用方当作首页处理——cursor 是前端内存态、不持久、无兼容包袱，
+/// 这里做兜底防御而非报错。
+///
+/// id 解析为 i64 是为了与 keyset 过滤里的 `CAST(id AS INTEGER)` 数值比较对齐：
+/// 临时失败消息 id（"T..."）在 SQLite 中 CAST 为 0，这里同样把非数字 id 视为 0。
+fn parse_cursor(cursor: &str) -> Option<(i64, i64)> {
+    if cursor.is_empty() {
+        return None;
+    }
+    let (st_str, id_str) = cursor.split_once(':')?;
+    let send_time: i64 = st_str.parse().ok()?;
+    // 与 SQLite CAST(id AS INTEGER) 语义对齐：纯数字串取其值，否则（如 "T..."）为 0。
+    let id_int: i64 = id_str.parse().unwrap_or(0);
+    Some((send_time, id_int))
+}
+
 /// 根据房间ID进行游标分页查询消息（包含消息标记）
 pub async fn cursor_page_messages(
     db: &DatabaseConnection,
@@ -455,17 +475,54 @@ pub async fn cursor_page_messages(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to query message count: {}", e))?;
 
-    // 先查询消息主表，按 id 数值降序排序
+    // keyset 复合游标分页：以 send_time 为主序、id（数值）为 tiebreaker 的全序降序。
+    //
+    // 既有边界 bug 修复：原实现 ORDER BY 用 `CAST(id AS INTEGER)`（数值序），
+    // 但 cursor 过滤用 `Id.lt(&cursor)`（字符串比较），两套语义不自洽，
+    // 在临时失败消息（id 为 "T"+时间戳，CAST 后为 0）参与排序时会丢页。
+    // 现统一为：排序与过滤都先比 COALESCE(send_time,0)、再比 CAST(id AS INTEGER)，
+    // 过滤用数值比较（而非字符串 lt），同时修掉上述不自洽。
+    //
+    // (c) 同毫秒边界知情接受：临时 id "T..." 经 CAST 为 0，若与某真实消息
+    // send_time 同毫秒，会被排在该毫秒的最后一条；但刚发送的失败消息 send_time
+    // 最新、稳定排在首页顶部，不落在页边界，故实际不会掉页。仅"很久以前的失败
+    // 消息恰好与某真实消息同毫秒且正好落在页边界"这一极罕见情形可能受影响。
     let mut message_query = im_message::Entity::find()
         .filter(im_message::Column::RoomId.eq(&room_id))
         .filter(im_message::Column::LoginUid.eq(login_uid))
+        // 主序：COALESCE(send_time, 0) DESC
+        .order_by_desc(Expr::col(im_message::Column::SendTime).if_null(0))
+        // tiebreaker：CAST(id AS INTEGER) DESC
         .order_by_desc(Expr::col(im_message::Column::Id).cast_as(Alias::new("INTEGER")))
         .limit(cursor_page_param.page_size as u64);
 
-    // 如果提供了游标，添加过滤条件
-    if !cursor_page_param.cursor.is_empty() {
-        // 使用游标值过滤，获取小于该ID的记录（因为是降序排列）
-        message_query = message_query.filter(im_message::Column::Id.lt(&cursor_page_param.cursor));
+    // 如果提供了游标，添加 keyset 过滤条件。
+    // cursor 复合编码格式："<send_time>:<id>"。
+    // 解析失败（格式不对/旧版纯 id 等）→ 当作空 cursor（首页），不报错：
+    // cursor 是前端内存态、会话重置即丢、不跨版本持久，无兼容包袱，加此兜底防御。
+    if let Some((cursor_send_time, cursor_id)) =
+        parse_cursor(&cursor_page_param.cursor)
+    {
+        // DESC 严格全序 keyset 过滤：
+        //   COALESCE(send_time,0) < st
+        //   OR (COALESCE(send_time,0) = st AND CAST(id AS INTEGER) < id_int)
+        message_query = message_query.filter(
+            Condition::any()
+                .add(Expr::col(im_message::Column::SendTime).if_null(0).lt(cursor_send_time))
+                .add(
+                    Condition::all()
+                        .add(
+                            Expr::col(im_message::Column::SendTime)
+                                .if_null(0)
+                                .eq(cursor_send_time),
+                        )
+                        .add(
+                            Expr::col(im_message::Column::Id)
+                                .cast_as(Alias::new("INTEGER"))
+                                .lt(cursor_id),
+                        ),
+                ),
+        );
     }
 
     // 先查询消息列表
@@ -484,13 +541,13 @@ pub async fn cursor_page_messages(
         });
     }
 
-    // 生成下一页的游标
+    // 生成下一页的复合游标 "<send_time>:<id>"（与 keyset 排序键对齐）
     let next_cursor = if messages.len() < cursor_page_param.page_size as usize {
         String::new() // 已经是最后一页
     } else {
         messages
             .last()
-            .map(|msg| msg.id.clone())
+            .map(|msg| format!("{}:{}", msg.send_time.unwrap_or(0), msg.id))
             .unwrap_or_default()
     };
 
@@ -733,8 +790,64 @@ pub async fn update_message_status(
     id: Option<String>,
     login_uid: String,
 ) -> Result<MessageWithThumbnail, CommonError> {
+    let original_id = record.message.id.clone();
+
+    if status == "success" {
+        // 成功：把消息坍缩成「唯一一行 = 服务端 id」，与 SAVE_MSG 是否抢先、PK-update 语义无关。
+        let message_id = id.ok_or_else(|| {
+            CommonError::RequestError("Message ID is None for successful status".to_string())
+        })?;
+
+        // 重算 time_block（与原逻辑一致，仅当有 send_time 时）
+        if let Some(send_time) = record.message.send_time {
+            record.message.time_block = calculate_time_block(
+                db,
+                &record.message.room_id,
+                &original_id,
+                send_time,
+                &login_uid,
+            )
+            .await?;
+        }
+
+        // 用服务端 id + success 落地最终行，body/缩略图/其余字段沿用 record（send_msg 已把服务端 body 合并进来）
+        record.message.id = message_id.clone();
+        record.message.send_status = "success".to_string();
+
+        // 幂等坍缩：先删乐观 temp 行 + 任何已存在的 server-id 行，再插入最终 server 行。
+        // 不依赖精确 race：无论 temp 是否还在、server 行是否被 SAVE_MSG 抢先插过，结果恒为唯一一行。
+        // 三步包进单事务：避免「删后插前崩溃→本地行临时消失」这一自引入的非原子缺口
+        // （原 update_many 是单语句隐式原子；拆成三步后必须显式事务复原原子性）。
+        let txn = db.begin().await.map_err(CommonError::DatabaseError)?;
+        im_message::Entity::delete_by_id((original_id.clone(), login_uid.clone()))
+            .exec(&txn)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to delete optimistic temp message {}: {}",
+                    original_id,
+                    e
+                )
+            })?;
+        im_message::Entity::delete_by_id((message_id.clone(), login_uid.clone()))
+            .exec(&txn)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to delete existing server message {}: {}", message_id, e)
+            })?;
+        im_message::Entity::insert(record.message.clone().into_active_model())
+            .exec(&txn)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to insert collapsed message {}: {}", message_id, e))?;
+        txn.commit().await.map_err(CommonError::DatabaseError)?;
+
+        update_thumbnail_path(db, &record.key(), record.thumbnail_path.as_deref()).await?;
+        return Ok(record);
+    }
+
+    // 非成功（failed 等）：保持原地更新，不动 id（与原逻辑一致）
     let mut active_model: im_message::ActiveModel =
-        im_message::Entity::find_by_id((record.message.id.clone(), login_uid.clone()))
+        im_message::Entity::find_by_id((original_id.clone(), login_uid.clone()))
             .one(db)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to find message: {}", e))?
@@ -746,7 +859,7 @@ pub async fn update_message_status(
         let time_block = calculate_time_block(
             db,
             &record.message.room_id,
-            &record.message.id,
+            &original_id,
             send_time,
             &login_uid,
         )
@@ -757,19 +870,6 @@ pub async fn update_message_status(
 
     active_model.send_status = Set(status.to_string());
     active_model.body = Set(record.message.body.clone());
-
-    let original_id = record.message.id.clone();
-
-    if status == "success" {
-        if let Some(message_id) = id {
-            active_model.id = Set(message_id.clone());
-            record.message.id = message_id;
-        } else {
-            return Err(CommonError::RequestError(
-                "Message ID is None for successful status".to_string(),
-            ));
-        }
-    }
 
     im_message::Entity::update_many()
         .set(active_model.clone())

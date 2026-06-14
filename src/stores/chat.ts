@@ -895,6 +895,84 @@ export const useChatStore = defineStore(
       return current && msgId in current
     }
 
+    /**
+     * #38 重复幽灵气泡修复（F1）：服务器回推「自己发的消息」时，就地认领仍未确认的乐观气泡，
+     * 复用 updateMsg 把临时气泡（client temp id，如 'T1781432449441'）改名为服务器雪花 id，
+     * 避免再 pushMsg 出第二个气泡。正常发送由 onSuccess 改名；本方法兜底「重试时 HTTP 响应丢失、
+     * 临时气泡停留在 FAILED 未改名，但服务器实际已持久化并回推」的场景。
+     *
+     * 启发式局限：这是基于 (内容相同 + 同发送者 + 时间接近) 的匹配，
+     * 极快连发两条内容完全相同的消息时可能错配（故 >=2 个候选时直接放弃，宁可漏配不可错配）。
+     * 真正的根治是服务器在 WS 回推里带回客户端原始 msgId（F3，独立的 server 后续项）；
+     * F1 仅为加固后的启发式兜底。
+     *
+     * 本方法保持纯逻辑（不做 Tauri invoke）：命中时返回被认领的临时气泡 id（'T...'），
+     * 由调用方（layout RECEIVE_MESSAGE 处理器）据此删除本地 SQLite 里那条孤儿 temp 行，
+     * 防止下次从 SQLite 重载历史时 temp 行复活导致重复气泡回归；未命中 / 放弃时返回 null。
+     */
+    const reconcileSelfOptimisticMessage = (data: MessageType): string | null => {
+      const roomId = data?.message?.roomId
+      if (!roomId) return null
+
+      const roomMessages = messageMap[roomId]
+      if (!roomMessages) return null
+
+      const serverMsgId = data.message.id
+      const serverContent = data.message.body?.content
+      const serverUid = data.fromUser?.uid
+      if (serverContent === undefined || !serverUid) return null
+
+      const toNum = (raw: number | string | undefined): number => {
+        if (typeof raw === 'number') return raw
+        if (typeof raw === 'string') {
+          const num = Number(raw)
+          if (!Number.isNaN(num)) return num
+          const parsed = new Date(raw).getTime()
+          if (!Number.isNaN(parsed)) return parsed
+        }
+        return Number.NaN
+      }
+
+      const serverTime = toNum(data.message.sendTime ?? data.sendTime)
+
+      const candidateIds: string[] = []
+      for (const candidate of Object.values(roomMessages)) {
+        const status = candidate.message.status
+        if (
+          status !== MessageStatusEnum.PENDING &&
+          status !== MessageStatusEnum.SENDING &&
+          status !== MessageStatusEnum.FAILED
+        ) {
+          continue
+        }
+        const candidateId = candidate.message.id
+        if (candidateId === serverMsgId || !candidateId.startsWith('T')) continue
+        if (candidate.message.body?.content === undefined || candidate.message.body.content !== serverContent) continue
+        if (candidate.fromUser?.uid !== serverUid) continue
+
+        const candidateTime = toNum(candidate.message.sendTime ?? candidate.sendTime)
+        if (Number.isNaN(candidateTime) || Number.isNaN(serverTime)) continue
+        // 容忍时钟偏差窗口：client temp.sendTime 用本地时钟、server.sendTime 用服务端时钟，
+        // 设备时钟偏差可能 >60s，故放宽到 300000ms（5 分钟）避免合法 reconcile 漏配；
+        // >=2 候选直接放弃的保护仍在，放宽窗口是安全的。
+        if (Math.abs(candidateTime - serverTime) > 300000) continue
+
+        candidateIds.push(candidateId)
+      }
+
+      if (candidateIds.length !== 1) return null
+
+      updateMsg({
+        msgId: candidateIds[0],
+        newMsgId: serverMsgId,
+        status: MessageStatusEnum.SUCCESS,
+        body: data.message.body,
+        timeBlock: data.timeBlock,
+        roomId: data.message.roomId
+      })
+      return candidateIds[0]
+    }
+
     const clearMsgCheck = () => {
       chatMessageList.value.forEach((msg) => (msg.isCheck = false))
     }
@@ -1770,7 +1848,9 @@ export const useChatStore = defineStore(
     }
 
     /** 获取某 aiclaw 的所有群配置列表 */
-    const getAiclawGroupConfigList = (aiclawUid: number): (AiclawGroupConfig & { roomId: string; roomName?: string })[] => {
+    const getAiclawGroupConfigList = (
+      aiclawUid: number
+    ): (AiclawGroupConfig & { roomId: string; roomName?: string })[] => {
       const prefix = `${aiclawUid}:`
       const result: (AiclawGroupConfig & { roomId: string; roomName?: string })[] = []
       for (const [key, config] of aiclawGroupConfigs) {
@@ -1952,6 +2032,7 @@ export const useChatStore = defineStore(
       setCustomForwardTask,
       resetSessionSelection,
       checkMsgExist,
+      reconcileSelfOptimisticMessage,
       clearRedundantMessages,
       streamingMessages,
       startStream,

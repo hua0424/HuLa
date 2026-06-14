@@ -102,6 +102,10 @@ pub struct Message {
     pub body: Option<serde_json::Value>,
     pub message_marks: Option<HashMap<String, MessageMark>>,
     pub send_time: Option<i64>,
+    /// aichatoverview#34: 消息发送状态（"pending"|"sending"|"success"|"failed"），从本地 DB
+    /// im_message.send_status 映射。重载（page_msg/chat_history）必须携带它，否则前端重载会把
+    /// #33 内存里短暂置的 FAILED 覆盖成无状态 → retry-button 消失（值须与前端 MessageStatusEnum 一致）。
+    pub status: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -283,6 +287,8 @@ pub fn convert_message_to_resp(
             body,
             message_marks,
             send_time: msg.send_time,
+            // aichatoverview#34: 透传本地 DB 的发送状态，让重载后的消息持久保留 FAILED/SUCCESS 等。
+            status: Some(msg.send_status),
         },
         old_msg_id: old_msg_id,
         time_block: msg.time_block,
@@ -699,7 +705,7 @@ pub async fn send_msg(
                 }
                 "success"
             }
-            _ => "fail",
+            _ => "failed", // aichatoverview#34: 对齐前端 MessageStatusEnum.FAILED='failed'（原 'fail' 不匹配，重载/比较都会漏判）
         };
 
         // 更新消息状态
@@ -712,11 +718,21 @@ pub async fn send_msg(
         )
         .await;
 
+        // aichatoverview#33: channel 选择必须按「发送结果 status」而非 DB-update 结果。
+        // 发送失败时 status="failed" 也会被成功写进本地 DB（model 为 Ok），旧代码一律走
+        // success_channel，导致前端把失败消息标成 SUCCESS、FAILED 状态永不可达
+        // （#19 的 retry-button v-if=FAILED 因此端到端失效）。
         match model {
-            Ok(model) => {
+            // 发送成功且本地状态已更新 → 推成功结果给前端（onSuccess → SUCCESS）。
+            Ok(model) if status == "success" => {
                 let resp = convert_message_to_resp(model, Some(msg_id));
                 success_channel.send(resp).unwrap();
             }
+            // 发送失败（status="failed"，DB 已记 failed）→ 通知前端回写 FAILED，触发 retry-button。
+            Ok(_) => {
+                error_channel.send(msg_id.clone()).unwrap();
+            }
+            // 本地 DB 更新本身失败 → 同样按失败处理，让前端进入 FAILED。
             Err(e) => {
                 error!("{:?}", e);
                 error_channel.send(msg_id.clone()).unwrap();
@@ -791,7 +807,7 @@ pub async fn delete_message(
             .ok_or_else(|| "消息不存在或房间信息缺失".to_string())?
     };
 
-    im_message_repository::delete_message_by_id(&*db, &message_id, &login_uid)
+    let deleted_rows = im_message_repository::delete_message_by_id(&*db, &message_id, &login_uid)
         .await
         .map_err(|e| {
             error!("Failed to delete message {}: {}", message_id, e);
@@ -808,9 +824,10 @@ pub async fn delete_message(
             e.to_string()
         })?;
 
+    // #38: 记录 rows_affected 以坐实 reconcile 路径删 temp 行是否真生效（=1 真删 / =0 调用了但没匹配到行）
     info!(
-        "Deleted message {} for current user {} from local database",
-        message_id, login_uid
+        "Deleted message {} (room {}) for current user {} from local database, rows_affected={}",
+        message_id, resolved_room_id, login_uid, deleted_rows
     );
 
     Ok(())
