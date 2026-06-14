@@ -128,8 +128,9 @@ type MakeOpts = { status?: MessageStatusEnum }
 
 // 构造一条「我发送的」文本消息（hasBubble(TEXT)=true、非 historyMode、isMe=true -> 渲染重试按钮）
 const makeMessage = ({ status = MessageStatusEnum.FAILED }: MakeOpts = {}) => ({
-  fromUser: { uid: 'me-1', avatar: '' },
+  fromUser: { uid: 'me-1', username: 'me', avatar: '', locPlace: '' },
   isCheck: false,
+  sendTime: 1700000000000,
   message: {
     id: 'msg-100',
     roomId: 'room-9',
@@ -285,6 +286,8 @@ describe('#19 失败消息重试发送（handleRetry）', () => {
 
   it('防重守卫（逻辑层）：同一句柄在消息变 SENDING 后触发 -> 守卫拦截，不重发', async () => {
     // 以 FAILED 渲染出按钮，其 @click 句柄为 handleRetry(message)，闭包持有这条响应式 message。
+    // reactive：把 status 改成 SENDING 后，handleRetry 闭包里持有的同一对象同步可见，
+    // 从而真正触发 status!==FAILED 守卫（而非测到一个脱离 DOM 的旧值，避免假绿）。
     const msg = reactive(makeMessage({ status: MessageStatusEnum.FAILED }))
     const wrapper = mountRow(msg as unknown as ReturnType<typeof makeMessage>)
     const el = wrapper.find('[data-testid="retry-button"]').element as HTMLElement
