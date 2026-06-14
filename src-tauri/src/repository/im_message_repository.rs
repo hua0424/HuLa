@@ -3,6 +3,7 @@ use crate::pojo::common::{CursorPageParam, CursorPageResp};
 use chrono::Utc;
 use entity::im_message;
 use lazy_static::lazy_static;
+use migration::ExprTrait; // #36: SeaORM 1.1.x 把 SimpleExpr 的 .lt()/.eq() 等比较方法放在 ExprTrait（keyset 过滤的 if_null(0).lt()/.eq()、cast_as().lt() 都需要它在 scope）
 use sea_orm::prelude::Expr;
 use sea_orm::sea_query::{Alias, Value};
 use sea_orm::{
