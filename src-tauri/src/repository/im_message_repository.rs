@@ -790,8 +790,60 @@ pub async fn update_message_status(
     id: Option<String>,
     login_uid: String,
 ) -> Result<MessageWithThumbnail, CommonError> {
+    let original_id = record.message.id.clone();
+
+    if status == "success" {
+        // 成功：把消息坍缩成「唯一一行 = 服务端 id」，与 SAVE_MSG 是否抢先、PK-update 语义无关。
+        let message_id = id.ok_or_else(|| {
+            CommonError::RequestError("Message ID is None for successful status".to_string())
+        })?;
+
+        // 重算 time_block（与原逻辑一致，仅当有 send_time 时）
+        if let Some(send_time) = record.message.send_time {
+            record.message.time_block = calculate_time_block(
+                db,
+                &record.message.room_id,
+                &original_id,
+                send_time,
+                &login_uid,
+            )
+            .await?;
+        }
+
+        // 用服务端 id + success 落地最终行，body/缩略图/其余字段沿用 record（send_msg 已把服务端 body 合并进来）
+        record.message.id = message_id.clone();
+        record.message.send_status = "success".to_string();
+
+        // 幂等坍缩：先删乐观 temp 行 + 任何已存在的 server-id 行，再插入最终 server 行。
+        // 不依赖精确 race：无论 temp 是否还在、server 行是否被 SAVE_MSG 抢先插过，结果恒为唯一一行。
+        im_message::Entity::delete_by_id((original_id.clone(), login_uid.clone()))
+            .exec(db)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to delete optimistic temp message {}: {}",
+                    original_id,
+                    e
+                )
+            })?;
+        im_message::Entity::delete_by_id((message_id.clone(), login_uid.clone()))
+            .exec(db)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to delete existing server message {}: {}", message_id, e)
+            })?;
+        im_message::Entity::insert(record.message.clone().into_active_model())
+            .exec(db)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to insert collapsed message {}: {}", message_id, e))?;
+
+        update_thumbnail_path(db, &record.key(), record.thumbnail_path.as_deref()).await?;
+        return Ok(record);
+    }
+
+    // 非成功（failed 等）：保持原地更新，不动 id（与原逻辑一致）
     let mut active_model: im_message::ActiveModel =
-        im_message::Entity::find_by_id((record.message.id.clone(), login_uid.clone()))
+        im_message::Entity::find_by_id((original_id.clone(), login_uid.clone()))
             .one(db)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to find message: {}", e))?
@@ -803,7 +855,7 @@ pub async fn update_message_status(
         let time_block = calculate_time_block(
             db,
             &record.message.room_id,
-            &record.message.id,
+            &original_id,
             send_time,
             &login_uid,
         )
@@ -814,19 +866,6 @@ pub async fn update_message_status(
 
     active_model.send_status = Set(status.to_string());
     active_model.body = Set(record.message.body.clone());
-
-    let original_id = record.message.id.clone();
-
-    if status == "success" {
-        if let Some(message_id) = id {
-            active_model.id = Set(message_id.clone());
-            record.message.id = message_id;
-        } else {
-            return Err(CommonError::RequestError(
-                "Message ID is None for successful status".to_string(),
-            ));
-        }
-    }
 
     im_message::Entity::update_many()
         .set(active_model.clone())
