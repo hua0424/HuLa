@@ -102,6 +102,10 @@ pub struct Message {
     pub body: Option<serde_json::Value>,
     pub message_marks: Option<HashMap<String, MessageMark>>,
     pub send_time: Option<i64>,
+    /// aichatoverview#34: 消息发送状态（"pending"|"sending"|"success"|"failed"），从本地 DB
+    /// im_message.send_status 映射。重载（page_msg/chat_history）必须携带它，否则前端重载会把
+    /// #33 内存里短暂置的 FAILED 覆盖成无状态 → retry-button 消失（值须与前端 MessageStatusEnum 一致）。
+    pub status: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -283,6 +287,8 @@ pub fn convert_message_to_resp(
             body,
             message_marks,
             send_time: msg.send_time,
+            // aichatoverview#34: 透传本地 DB 的发送状态，让重载后的消息持久保留 FAILED/SUCCESS 等。
+            status: Some(msg.send_status),
         },
         old_msg_id: old_msg_id,
         time_block: msg.time_block,
@@ -699,7 +705,7 @@ pub async fn send_msg(
                 }
                 "success"
             }
-            _ => "fail",
+            _ => "failed", // aichatoverview#34: 对齐前端 MessageStatusEnum.FAILED='failed'（原 'fail' 不匹配，重载/比较都会漏判）
         };
 
         // 更新消息状态
