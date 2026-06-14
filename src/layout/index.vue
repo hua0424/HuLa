@@ -364,6 +364,22 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
     return
   }
 
+  // #38: 服务器回推「自己发的消息」时先尝试就地认领未确认的乐观气泡，命中则不再 pushMsg（避免重复气泡）
+  if (data.fromUser.uid === userUid.value) {
+    const reconciledTempId = chatStore.reconcileSelfOptimisticMessage(data)
+    if (reconciledTempId) {
+      // 删除本地 SQLite 里那条孤儿 temp 行，否则下次重载历史时 temp 行复活导致重复气泡回归
+      await invokeSilently(TauriCommand.DELETE_MESSAGE, {
+        messageId: reconciledTempId,
+        roomId: data.message.roomId
+      })
+      await invokeSilently(TauriCommand.SAVE_MSG, { data })
+      // 跳过了 pushMsg 的 updateSession，需手动刷新会话最近活跃时间，与正常成功路径语义对齐
+      chatStore.updateSessionLastActiveTime(data.message.roomId)
+      return
+    }
+  }
+
   chatStore.pushMsg(data, {
     // 只有当用户在消息页面且正在查看这个会话时才算 isActiveChatView
     isActiveChatView: route.path === '/message' && globalStore.currentSessionRoomId === data.message.roomId,
