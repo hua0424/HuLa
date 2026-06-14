@@ -9,7 +9,7 @@ use sea_orm::sea_query::{Alias, Value};
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
     IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, Statement,
-    TryIntoModel,
+    TransactionTrait, TryIntoModel,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -816,8 +816,11 @@ pub async fn update_message_status(
 
         // 幂等坍缩：先删乐观 temp 行 + 任何已存在的 server-id 行，再插入最终 server 行。
         // 不依赖精确 race：无论 temp 是否还在、server 行是否被 SAVE_MSG 抢先插过，结果恒为唯一一行。
+        // 三步包进单事务：避免「删后插前崩溃→本地行临时消失」这一自引入的非原子缺口
+        // （原 update_many 是单语句隐式原子；拆成三步后必须显式事务复原原子性）。
+        let txn = db.begin().await.map_err(CommonError::DatabaseError)?;
         im_message::Entity::delete_by_id((original_id.clone(), login_uid.clone()))
-            .exec(db)
+            .exec(&txn)
             .await
             .map_err(|e| {
                 anyhow::anyhow!(
@@ -827,15 +830,16 @@ pub async fn update_message_status(
                 )
             })?;
         im_message::Entity::delete_by_id((message_id.clone(), login_uid.clone()))
-            .exec(db)
+            .exec(&txn)
             .await
             .map_err(|e| {
                 anyhow::anyhow!("Failed to delete existing server message {}: {}", message_id, e)
             })?;
         im_message::Entity::insert(record.message.clone().into_active_model())
-            .exec(db)
+            .exec(&txn)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to insert collapsed message {}: {}", message_id, e))?;
+        txn.commit().await.map_err(CommonError::DatabaseError)?;
 
         update_thumbnail_path(db, &record.key(), record.thumbnail_path.as_deref()).await?;
         return Ok(record);
