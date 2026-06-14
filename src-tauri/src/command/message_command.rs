@@ -712,11 +712,21 @@ pub async fn send_msg(
         )
         .await;
 
+        // aichatoverview#33: channel 选择必须按「发送结果 status」而非 DB-update 结果。
+        // 发送失败时 status="fail" 也会被成功写进本地 DB（model 为 Ok），旧代码一律走
+        // success_channel，导致前端把失败消息标成 SUCCESS、FAILED 状态永不可达
+        // （#19 的 retry-button v-if=FAILED 因此端到端失效）。
         match model {
-            Ok(model) => {
+            // 发送成功且本地状态已更新 → 推成功结果给前端（onSuccess → SUCCESS）。
+            Ok(model) if status == "success" => {
                 let resp = convert_message_to_resp(model, Some(msg_id));
                 success_channel.send(resp).unwrap();
             }
+            // 发送失败（status="fail"，DB 已记 fail）→ 通知前端回写 FAILED，触发 retry-button。
+            Ok(_) => {
+                error_channel.send(msg_id.clone()).unwrap();
+            }
+            // 本地 DB 更新本身失败 → 同样按失败处理，让前端进入 FAILED。
             Err(e) => {
                 error!("{:?}", e);
                 error_channel.send(msg_id.clone()).unwrap();
