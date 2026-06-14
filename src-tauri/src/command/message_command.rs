@@ -807,7 +807,7 @@ pub async fn delete_message(
             .ok_or_else(|| "消息不存在或房间信息缺失".to_string())?
     };
 
-    im_message_repository::delete_message_by_id(&*db, &message_id, &login_uid)
+    let deleted_rows = im_message_repository::delete_message_by_id(&*db, &message_id, &login_uid)
         .await
         .map_err(|e| {
             error!("Failed to delete message {}: {}", message_id, e);
@@ -824,9 +824,10 @@ pub async fn delete_message(
             e.to_string()
         })?;
 
+    // #38: 记录 rows_affected 以坐实 reconcile 路径删 temp 行是否真生效（=1 真删 / =0 调用了但没匹配到行）
     info!(
-        "Deleted message {} for current user {} from local database",
-        message_id, login_uid
+        "Deleted message {} (room {}) for current user {} from local database, rows_affected={}",
+        message_id, resolved_room_id, login_uid, deleted_rows
     );
 
     Ok(())
