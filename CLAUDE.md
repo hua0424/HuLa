@@ -63,6 +63,7 @@ The Windows tester drives the desktop client via playwright-cli over CDP and **l
 | `message-input` / `send-button` | composer + desktop send | `components/rightBox/MsgInput.vue` |
 | `chat-history` | scrollable message container | `components/rightBox/chatBox/ChatMain.vue` |
 | `user-message` / `assistant-message` | one bubble, conditional on `isMe` | `components/rightBox/renderMessage/index.vue` |
+| `retry-button` | failed-message retry icon (resend) | `components/rightBox/renderMessage/index.vue` |
 | `markdown-content` / `image-content` | content inside a bubble | `renderMessage/Text.vue` / `Image.vue` |
 | `typing-status` | streaming-reply status badge | `components/rightBox/chatBox/ThinkingCard.vue` |
 | `session-list` / `new-chat-button` | conversation list + "+" entry | `views/homeWindow/message/index.vue` / `layout/center/index.vue` |

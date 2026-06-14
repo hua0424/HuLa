@@ -243,6 +243,8 @@
               <n-icon
                 v-if="message.message.status === MessageStatusEnum.FAILED"
                 class="text-#d5304f cursor-pointer"
+                data-testid="retry-button"
+                aria-label="重试发送"
                 @click.stop="handleRetry(message)">
                 <svg class="size-16px">
                   <use href="#cloudError"></use>
@@ -311,6 +313,7 @@ import { MessageStatusEnum, MittEnum, MsgEnum, ThemeEnum } from '@/enums'
 import { chatMainInjectionKey, useChatMain } from '@/hooks/useChatMain'
 import { useMitt } from '@/hooks/useMitt'
 import { usePopover } from '@/hooks/usePopover'
+import { useMessageSender } from '@/hooks/useMessageSender'
 import type { MessageType } from '@/services/types'
 import { useCachedStore } from '@/stores/cached'
 import { useGlobalStore } from '@/stores/global'
@@ -377,6 +380,7 @@ const chatMainApi = injectedChatMain ?? useChatMain()
 const { optionsList, report, activeBubble, handleItemType, emojiList, specialMenuList, handleMsgClick } = chatMainApi
 const groupStore = useGroupStore()
 const chatStore = useChatStore()
+const { sendWithTracking } = useMessageSender()
 const cachedStore = useCachedStore()
 const resolvingUserSet = new Set<string>()
 const isMultiSelectDisabled = computed(() => !isMessageMultiSelectEnabled(props.message.message.type))
@@ -554,9 +558,32 @@ const hasUserMarkedEmoji = (item: MessageType, emojiType: number) => {
   return item.message.messageMarks[String(emojiType)]?.userMarked
 }
 
-const handleRetry = (item: MessageType): void => {
-  // TODO: 实现重试发送逻辑
-  console.log('重试发送消息:', item)
+const handleRetry = async (item: MessageType): Promise<void> => {
+  const msg = item?.message
+  if (!msg) return
+
+  // 仅允许对失败的消息重试；若已在发送中则忽略本次点击，避免重复发送
+  if (msg.status !== MessageStatusEnum.FAILED) return
+
+  // 先把状态置回 SENDING，与原始发送状态机一致（SENDING -> SUCCESS / FAILED）
+  chatStore.updateMsg({
+    msgId: msg.id,
+    roomId: msg.roomId,
+    status: MessageStatusEnum.SENDING
+  })
+
+  // 复用与原发送一致的发送 + 状态跟踪链路：
+  // 成功 -> sendWithTracking 内部更新为 SUCCESS（并更新 msgId/body/timeBlock）
+  // 失败 -> sendWithTracking 内部回写 FAILED，失败图标可再次点击重试
+  await sendWithTracking({
+    tempMsgId: msg.id,
+    payload: {
+      id: msg.id,
+      roomId: msg.roomId,
+      msgType: msg.type,
+      body: msg.body
+    }
+  })
 }
 
 // 处理复制翻译文本
