@@ -120,6 +120,9 @@
                 </n-popover>
                 <!-- 用户名 -->
                 <span
+                  data-testid="message-sender-name"
+                  :data-from-user-uid="fromUser.uid"
+                  :data-user-type="message.fromUser?.userType"
                   :class="[
                     'text-12px select-none color-#909090 inline-block align-top',
                     !isMe ? 'cursor-pointer hover:color-#13987f transition-colors' : ''
