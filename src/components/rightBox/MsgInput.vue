@@ -82,7 +82,7 @@
               data-testid="send-button"
               aria-label="发送"
               color="#13987f"
-              :disabled="props.isAIMode && props.isAIStreaming ? false : disabledSend"
+              :disabled="props.isAIMode ? (props.isAIStreaming ? false : disabledSend) : false"
               class="w-65px"
               @click="handleDesktopSend">
               {{ props.isAIMode && props.isAIStreaming ? '停止思考' : t('editor.send') }}
@@ -682,6 +682,14 @@ const handleEnterKey = (e: KeyboardEvent) => {
     }
     handleAISend()
   } else {
+    // #45: 桌面非 AI 空消息回车也走内联错误（与发送按钮一致），不再静默早返回
+    if (!getInputContent().trim()) {
+      e.preventDefault()
+      e.stopPropagation()
+      composerError.value = '不能发送空消息'
+      return
+    }
+    composerError.value = ''
     inputKeyDown(e)
   }
 }

@@ -67,9 +67,13 @@ vi.mock('@/hooks/useCommon.ts', () => ({
 
 // --- useMsgInput：被测组件 setup 解构的核心 hook，提供安全默认 + 可观测的 send ---
 const sendMock = vi.fn().mockResolvedValue(undefined)
+// disabledSend 可控：模拟「真实 hook 在内容为空时 disabledSend=true」，以验证发送按钮在空消息下
+// 仍可点（非 AI），从而 composer-error 可达——这是 #45 修复前假绿的根源（旧 spec 恒 false 且直调 handleDesktopSend）。
+const disabledSendRef = ref(false)
+const inputKeyDownMock = vi.fn()
 vi.mock('@/hooks/useMsgInput.ts', () => ({
   useMsgInput: () => ({
-    inputKeyDown: vi.fn(),
+    inputKeyDown: inputKeyDownMock,
     handleAit: vi.fn(),
     handleAI: vi.fn(),
     handleInput: vi.fn(),
@@ -80,7 +84,7 @@ vi.mock('@/hooks/useMsgInput.ts', () => ({
     sendVoiceDirect: vi.fn(),
     sendEmojiDirect: vi.fn(),
     personList: ref([]),
-    disabledSend: ref(false),
+    disabledSend: disabledSendRef,
     ait: ref(false),
     aiDialogVisible: ref(false),
     selectedAIKey: ref(''),
@@ -133,6 +137,13 @@ const i18n = createI18n({
 
 // 透传 slot 的轻量 stub：保留默认插槽渲染，但不加载真实子组件逻辑。
 const slotStub = { template: '<div><slot /></div>' }
+// n-button stub：保留 :disabled prop 与 fallthrough 属性（data-testid / @click），
+// 渲染成真实 <button>，以便断言「空消息下 send-button 是否被禁用」并经真实点击触发 handleDesktopSend。
+const nButtonStub = {
+  props: ['disabled'],
+  inheritAttrs: false,
+  template: '<button :disabled="disabled" v-bind="$attrs"><slot /></button>'
+}
 
 const mountInput = () =>
   mount(MsgInput, {
@@ -145,7 +156,7 @@ const mountInput = () =>
         FileUploadModal: true,
         'n-scrollbar': slotStub,
         'n-button-group': slotStub,
-        'n-button': slotStub,
+        'n-button': nButtonStub,
         'n-popselect': slotStub,
         'n-flex': slotStub,
         'i18n-t': slotStub
@@ -156,6 +167,8 @@ const mountInput = () =>
 beforeEach(() => {
   processFilesMock.mockClear()
   sendMock.mockClear()
+  inputKeyDownMock.mockClear()
+  disabledSendRef.value = false
   // 组件用 window.$message.warning 弹全局 toast；用 spy 断言「不再被调用」
   ;(window as any).$message = { warning: vi.fn(), error: vi.fn(), success: vi.fn() }
 })
@@ -211,51 +224,71 @@ describe('#44 桌面端上传按钮', () => {
 })
 
 describe('#45 空消息内联错误', () => {
-  it('空内容点发送 -> composerError 置文案、不弹 toast、不发送', async () => {
+  // 关键：测「可达触发」——不直调 handleDesktopSend，而是经真实 send-button 点击 / 回车，
+  // 且让 disabledSend=true（模拟真实空内容），验证按钮在非 AI 下仍可点、composer-error 可达。
+  it('门：非 AI 空输入时 send-button 不被 disabledSend 禁用（修复前因被禁用→composer-error 不可达）', () => {
+    disabledSendRef.value = true // 真实空内容时 disabledSend=true
+    const wrapper = mountInput() // props.isAIMode=false
+    const btn = wrapper.get('[data-testid="send-button"]')
+    expect(btn.attributes('disabled')).toBeUndefined()
+  })
+
+  it('空输入点 send-button -> 显示 composer-error、不弹全局 toast、不发送（经真实按钮触发）', async () => {
+    disabledSendRef.value = true
     const wrapper = mountInput()
-    const vm = wrapper.vm as any
     getInputDom(wrapper).textContent = '   ' // 纯空白
-    await vm.handleDesktopSend()
+    await wrapper.get('[data-testid="send-button"]').trigger('click')
     await nextTick()
-    expect(vm.composerError).toBe('不能发送空消息')
-    expect((window as any).$message.warning).not.toHaveBeenCalled()
-    expect(sendMock).not.toHaveBeenCalled()
-    // 内联错误元素可见
     const err = wrapper.find('[data-testid="composer-error"]')
     expect(err.exists()).toBe(true)
     expect(err.text()).toContain('不能发送空消息')
+    expect((window as any).$message.warning).not.toHaveBeenCalled()
+    expect(sendMock).not.toHaveBeenCalled()
   })
 
-  it('非空内容点发送 -> 先清 composerError 且真正发送', async () => {
+  it('非空点 send-button -> 先清 composer-error 且真正发送', async () => {
     const wrapper = mountInput()
     const vm = wrapper.vm as any
     vm.composerError = '不能发送空消息'
     await nextTick()
     getInputDom(wrapper).textContent = 'hello'
-    await vm.handleDesktopSend()
+    await wrapper.get('[data-testid="send-button"]').trigger('click')
     await flushPromises()
     expect(vm.composerError).toBe('')
     expect(sendMock).toHaveBeenCalledTimes(1)
   })
 
-  it('用户输入恢复（有内容的 input 事件）时清空 composerError', async () => {
+  it('空输入回车 -> 显示 composer-error、不发送（与按钮一致、不再静默早返回）', async () => {
+    const wrapper = mountInput()
+    getInputDom(wrapper).textContent = ''
+    await wrapper.get('[data-testid="message-input"]').trigger('keydown.enter')
+    await nextTick()
+    const err = wrapper.find('[data-testid="composer-error"]')
+    expect(err.exists()).toBe(true)
+    expect(err.text()).toContain('不能发送空消息')
+    expect(inputKeyDownMock).not.toHaveBeenCalled()
+  })
+
+  it('非空回车 -> 清 composer-error 且走原 inputKeyDown 发送链路', async () => {
     const wrapper = mountInput()
     const vm = wrapper.vm as any
     vm.composerError = '不能发送空消息'
     await nextTick()
-    const dom = getInputDom(wrapper)
-    dom.textContent = 'typed'
+    getInputDom(wrapper).textContent = 'hello'
+    await wrapper.get('[data-testid="message-input"]').trigger('keydown.enter')
+    await nextTick()
+    expect(vm.composerError).toBe('')
+    expect(inputKeyDownMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('用户输入恢复（有内容的 input 事件）时清空 composer-error', async () => {
+    const wrapper = mountInput()
+    const vm = wrapper.vm as any
+    vm.composerError = '不能发送空消息'
+    await nextTick()
+    getInputDom(wrapper).textContent = 'typed'
     await wrapper.get('[data-testid="message-input"]').trigger('input')
     await nextTick()
     expect(vm.composerError).toBe('')
-  })
-
-  it('空消息时不再使用全局 toast（移除并存）', async () => {
-    const wrapper = mountInput()
-    const vm = wrapper.vm as any
-    getInputDom(wrapper).textContent = ''
-    await vm.handleDesktopSend()
-    await nextTick()
-    expect((window as any).$message.warning).not.toHaveBeenCalled()
   })
 })
