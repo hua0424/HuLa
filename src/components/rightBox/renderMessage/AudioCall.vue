@@ -1,6 +1,9 @@
 <template>
   <!-- 语音通话消息 -->
-  <div class="flex-y-center gap-6px" :class="isCurrentUser ? 'flex-row-reverse' : 'flex-row'">
+  <div
+    data-testid="audio-call-message"
+    class="flex-y-center gap-6px"
+    :class="isCurrentUser ? 'flex-row-reverse' : 'flex-row'">
     <!-- 语音通话图标 -->
     <svg class="iconpark-icon size-1.2em" :class="isCurrentUser ? 'scale-x-[-1]' : ''">
       <use href="#phone-telephone"></use>
