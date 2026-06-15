@@ -62,7 +62,6 @@ The Windows tester drives the desktop client via playwright-cli over CDP and **l
 |---|---|---|
 | `login-username` / `login-password` / `login-button` | login fields + submit | `views/loginWindow/Login.vue` |
 | `message-input` / `send-button` | composer + desktop send | `components/rightBox/MsgInput.vue` |
-| `upload-button` | desktop composer upload entry (opens FileUploadModal) | `components/rightBox/MsgInput.vue` |
 | `composer-error` | empty-message inline error under composer | `components/rightBox/MsgInput.vue` |
 | `chat-history` | scrollable message container | `components/rightBox/chatBox/ChatMain.vue` |
 | `user-message` / `assistant-message` | one bubble, conditional on `isMe` | `components/rightBox/renderMessage/index.vue` |
