@@ -56,16 +56,33 @@
           </n-scrollbar>
         </ContextMenu>
 
+        <!-- 空消息内联错误提示 -->
+        <div
+          v-if="composerError"
+          data-testid="composer-error"
+          aria-label="输入错误提示"
+          class="text-(12px #d5304f) px-12px pb-2px">
+          {{ composerError }}
+        </div>
+
         <!-- 发送按钮 -->
         <div
           v-if="!isMobile()"
-          class="flex-shrink-0 max-h-52px p-4px pr-12px border-t border-gray-200/50 flex justify-end mb-4px">
+          class="flex-shrink-0 max-h-52px p-4px pr-12px border-t border-gray-200/50 flex justify-between mb-4px">
+          <button
+            type="button"
+            data-testid="upload-button"
+            aria-label="上传文件"
+            class="flex items-center justify-center bg-transparent border-none cursor-pointer p-0 outline-none"
+            @click="triggerUploadFilePicker">
+            <svg class="w-22px h-22px outline-none color-[#13987f]"><use href="#file2"></use></svg>
+          </button>
           <n-button-group size="small">
             <n-button
               data-testid="send-button"
               aria-label="发送"
               color="#13987f"
-              :disabled="props.isAIMode && props.isAIStreaming ? false : disabledSend"
+              :disabled="props.isAIMode ? (props.isAIStreaming ? false : disabledSend) : false"
               class="w-65px"
               @click="handleDesktopSend">
               {{ props.isAIMode && props.isAIStreaming ? '停止思考' : t('editor.send') }}
@@ -220,6 +237,9 @@
       </div>
     </form>
 
+    <!-- 隐藏的文件选择 input（桌面上传按钮触发） -->
+    <input ref="uploadFileInput" type="file" multiple class="hidden" @change="handleUploadFileSelect" />
+
     <!-- 文件上传弹窗 -->
     <FileUploadModal
       v-model:show="showFileModal"
@@ -362,6 +382,7 @@ watch(personList, (newList) => {
 // })
 const handleInternalInput = (e: Event) => {
   handleInput(e)
+  if (getInputContent().trim()) composerError.value = ''
   selfEmitter('input', e)
 }
 
@@ -369,6 +390,22 @@ const handleInternalInput = (e: Event) => {
 const showFileModalCallback = (files: UploadFile[]) => {
   pendingFiles.value = files
   showFileModal.value = true
+}
+
+/** 空消息内联错误提示文案（桌面 composer） */
+const composerError = ref('')
+
+/** 隐藏的文件选择 input ref（桌面上传按钮触发） */
+const uploadFileInput = ref<HTMLInputElement>()
+const triggerUploadFilePicker = () => {
+  uploadFileInput.value?.click()
+}
+const handleUploadFileSelect = async (e: Event) => {
+  const target = e.target as HTMLInputElement
+  const files = target.files
+  if (!files || files.length === 0) return
+  await processFiles(Array.from(files), messageInputDom.value as HTMLElement, showFileModalCallback)
+  target.value = ''
 }
 
 const onPaste = async (e: ClipboardEvent) => {
@@ -624,9 +661,10 @@ const handleDesktopSend = async () => {
   }
   const content = getInputContent()
   if (!content.trim()) {
-    window.$message.warning('请输入消息内容')
+    composerError.value = '不能发送空消息'
     return
   }
+  composerError.value = ''
   if (isAi) {
     await handleAISend()
   } else {
@@ -644,6 +682,14 @@ const handleEnterKey = (e: KeyboardEvent) => {
     }
     handleAISend()
   } else {
+    // #45: 桌面非 AI 空消息回车也走内联错误（与发送按钮一致），不再静默早返回
+    if (!getInputContent().trim()) {
+      e.preventDefault()
+      e.stopPropagation()
+      composerError.value = '不能发送空消息'
+      return
+    }
+    composerError.value = ''
     inputKeyDown(e)
   }
 }
@@ -675,7 +721,9 @@ defineExpose({
   sendVoiceDirect,
   sendFilesDirect,
   sendEmojiDirect,
-  handleLocationSelected
+  handleLocationSelected,
+  composerError,
+  handleUploadFileSelect
 })
 
 /** 移动端专用适配事件（结束） */
