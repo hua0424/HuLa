@@ -68,15 +68,7 @@
         <!-- 发送按钮 -->
         <div
           v-if="!isMobile()"
-          class="flex-shrink-0 max-h-52px p-4px pr-12px border-t border-gray-200/50 flex justify-between mb-4px">
-          <button
-            type="button"
-            data-testid="upload-button"
-            aria-label="上传文件"
-            class="flex items-center justify-center bg-transparent border-none cursor-pointer p-0 outline-none"
-            @click="triggerUploadFilePicker">
-            <svg class="w-22px h-22px outline-none color-[#13987f]"><use href="#file2"></use></svg>
-          </button>
+          class="flex-shrink-0 max-h-52px p-4px pr-12px border-t border-gray-200/50 flex justify-end mb-4px">
           <n-button-group size="small">
             <n-button
               data-testid="send-button"
@@ -237,9 +229,6 @@
       </div>
     </form>
 
-    <!-- 隐藏的文件选择 input（桌面上传按钮触发） -->
-    <input ref="uploadFileInput" type="file" multiple class="hidden" @change="handleUploadFileSelect" />
-
     <!-- 文件上传弹窗 -->
     <FileUploadModal
       v-model:show="showFileModal"
@@ -394,19 +383,6 @@ const showFileModalCallback = (files: UploadFile[]) => {
 
 /** 空消息内联错误提示文案（桌面 composer） */
 const composerError = ref('')
-
-/** 隐藏的文件选择 input ref（桌面上传按钮触发） */
-const uploadFileInput = ref<HTMLInputElement>()
-const triggerUploadFilePicker = () => {
-  uploadFileInput.value?.click()
-}
-const handleUploadFileSelect = async (e: Event) => {
-  const target = e.target as HTMLInputElement
-  const files = target.files
-  if (!files || files.length === 0) return
-  await processFiles(Array.from(files), messageInputDom.value as HTMLElement, showFileModalCallback)
-  target.value = ''
-}
 
 const onPaste = async (e: ClipboardEvent) => {
   if (messageInputDom.value) await handlePaste(e, messageInputDom.value, showFileModalCallback)
@@ -722,8 +698,7 @@ defineExpose({
   sendFilesDirect,
   sendEmojiDirect,
   handleLocationSelected,
-  composerError,
-  handleUploadFileSelect
+  composerError
 })
 
 /** 移动端专用适配事件（结束） */

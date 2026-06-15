@@ -4,19 +4,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 
 /**
- * #44 桌面端上传按钮 + #45 空消息内联错误 的单元/组件测试。
+ * #45 空消息内联错误 的单元/组件测试。
+ *
+ * （#44 桌面上传按钮已回退：ChatFooter.vue 工具栏早有同功能文件按钮，#44 冗余——见 aichatoverview#44。）
  *
  * 被测实现位于 components/rightBox/MsgInput.vue（桌面发送行 + composer）：
- *   #44 在发送按钮行最左侧新增上传图标按钮（data-testid="upload-button"），点击触发隐藏
- *       的 <input type="file" ref="uploadFileInput"> 的 click()；选择文件后 handleUploadFileSelect
- *       复用 useCommon().processFiles 走与拖拽/粘贴相同的链路（最终 setPendingFiles + showFileModal）。
  *   #45 桌面 handleDesktopSend 在空消息时不再弹全局 toast，而是把 composerError 置为
  *       「不能发送空消息」并在输入框下方内联显示（data-testid="composer-error"）；非空发送前清空、
- *       用户输入恢复时清空。
+ *       用户输入恢复时清空。空消息时 send-button 不被 disabledSend 禁用（非 AI），使内联错误可达。
  *
  * MsgInput.vue 依赖极重（useMsgInput / useCommon / 多个 store / tauri / router 经自动导入传递引入），
  * 这里沿用 retry.spec.ts 的「断链」手法：mock 这些汇聚点，只保留被测的模板与组件内逻辑（
- * getInputContent / handleDesktopSend / handleUploadFileSelect / composerError 清除时机）为真。
+ * getInputContent / handleDesktopSend / composerError 清除时机）为真。
  * getInputContent 读取 messageInputDom.textContent（组件内实现，未 mock），因此用真实 DOM 的
  * textContent 控制「空 / 非空」，断言真实分支。
  */
@@ -30,7 +29,7 @@ vi.mock('@/stores/chat', () => ({
   })
 }))
 
-// --- 平台：固定桌面端（isMobile=false 才渲染桌面发送行与 upload-button） ---
+// --- 平台：固定桌面端（isMobile=false 才渲染桌面发送行 + send-button + composer-error） ---
 vi.mock('@/utils/PlatformConstants', () => ({
   isMobile: () => false,
   isMac: () => false,
@@ -56,12 +55,11 @@ vi.mock('@tauri-apps/api/webviewWindow', () => ({
 }))
 vi.mock('@tauri-apps/plugin-os', () => ({ type: () => 'windows', version: () => '10.0' }))
 
-// --- useCommon：观测 processFiles 是否被 upload 链路调用；handlePaste 保持安全空实现 ---
-const processFilesMock = vi.fn().mockResolvedValue(undefined)
+// --- useCommon：组件 setup 解构 handlePaste/processFiles（拖拽/粘贴共享路径用），安全空实现即可 ---
 vi.mock('@/hooks/useCommon.ts', () => ({
   useCommon: () => ({
     handlePaste: vi.fn().mockResolvedValue(undefined),
-    processFiles: processFilesMock
+    processFiles: vi.fn().mockResolvedValue(undefined)
   })
 }))
 
@@ -165,7 +163,6 @@ const mountInput = () =>
   })
 
 beforeEach(() => {
-  processFilesMock.mockClear()
   sendMock.mockClear()
   inputKeyDownMock.mockClear()
   disabledSendRef.value = false
@@ -180,48 +177,6 @@ afterEach(() => {
 // 取到组件内部输入框 DOM（getInputContent 读它的 textContent）
 const getInputDom = (wrapper: ReturnType<typeof mountInput>) =>
   wrapper.get('[data-testid="message-input"]').element as HTMLElement
-
-describe('#44 桌面端上传按钮', () => {
-  it('桌面端渲染 upload-button 入口', () => {
-    const wrapper = mountInput()
-    const btn = wrapper.find('[data-testid="upload-button"]')
-    expect(btn.exists()).toBe(true)
-    expect(btn.attributes('aria-label')).toBe('上传文件')
-  })
-
-  it('点击 upload-button 触发隐藏 file input 的 click()', async () => {
-    const wrapper = mountInput()
-    const fileInput = wrapper.get('input[type="file"]').element as HTMLInputElement
-    const clickSpy = vi.spyOn(fileInput, 'click').mockImplementation(() => {})
-    await wrapper.get('[data-testid="upload-button"]').trigger('click')
-    expect(clickSpy).toHaveBeenCalledTimes(1)
-  })
-
-  it('handleUploadFileSelect 选中文件后复用 processFiles 链路', async () => {
-    const wrapper = mountInput()
-    const vm = wrapper.vm as any
-    const file = new File(['x'], 'a.png', { type: 'image/png' })
-    // 模拟 input change：file input 的 files 不可直接赋值，用事件 target 桩
-    const target = { files: [file] as unknown as FileList, value: 'a.png' }
-    await vm.handleUploadFileSelect({ target } as unknown as Event)
-    await flushPromises()
-    expect(processFilesMock).toHaveBeenCalledTimes(1)
-    // 第一个参数应为文件数组（Array.from(files)）
-    const firstArg = processFilesMock.mock.calls[0][0]
-    expect(Array.isArray(firstArg)).toBe(true)
-    expect(firstArg[0]).toBe(file)
-    // 选完后清空 input.value，使同一文件可再次选择
-    expect(target.value).toBe('')
-  })
-
-  it('无文件时不调用 processFiles', async () => {
-    const wrapper = mountInput()
-    const vm = wrapper.vm as any
-    await vm.handleUploadFileSelect({ target: { files: null, value: '' } } as unknown as Event)
-    await flushPromises()
-    expect(processFilesMock).not.toHaveBeenCalled()
-  })
-})
 
 describe('#45 空消息内联错误', () => {
   // 关键：测「可达触发」——不直调 handleDesktopSend，而是经真实 send-button 点击 / 回车，
