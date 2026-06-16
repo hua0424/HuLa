@@ -65,8 +65,8 @@ afterEach(() => {
 
 function i18nCompileErrors(): string[] {
   return errorSpy.mock.calls
-    .map((args) => args.map(String).join(' '))
-    .filter((line) => /compilation error|Invalid linked format/i.test(line))
+    .map((args: unknown[]) => args.map(String).join(' '))
+    .filter((line: string) => /compilation error|Invalid linked format/i.test(line))
 }
 
 describe('AiclawGroupSettings 群配置表单（S7 回归锁 + #51 i18n @ 转义守卫）', () => {

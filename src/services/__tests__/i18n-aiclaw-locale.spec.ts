@@ -46,8 +46,8 @@ function makeI18n() {
 // 收集编译诊断：vue-i18n 把 "Message compilation error: ..." 打到 console.error。
 function compileErrors(): string[] {
   return errorSpy.mock.calls
-    .map((args) => args.map(String).join(' '))
-    .filter((line) => /compilation error|Invalid linked format/i.test(line))
+    .map((args: unknown[]) => args.map(String).join(' '))
+    .filter((line: string) => /compilation error|Invalid linked format/i.test(line))
 }
 
 // 递归遍历 locale 对象里的每个字符串叶子，产出其点路径 key。
