@@ -302,7 +302,9 @@
               :key="config.roomId"
               class="border-b border-[--line-color] px-24px py-16px">
               <div class="flex items-center justify-between mb-12px">
-                <span class="text-14px font-500 text-[--text-color]">{{ config.roomName || `Group ${config.roomId}` }}</span>
+                <span class="text-14px font-500 text-[--text-color]">{{
+                  buildGroupCardLabel(config.roomName, config.account, config.roomId)
+                }}</span>
               </div>
               <!-- Config form -->
               <n-form label-placement="left" label-width="auto" size="small" :show-feedback="false">
@@ -395,6 +397,7 @@ import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDi
 import { ImUrlEnum } from '@/enums'
 import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
 import { isWeb } from '@/utils/PlatformConstants'
+import { buildGroupCardLabel } from '@/utils/aiclawGroupConfig'
 import { useChatStore } from '@/stores/chat'
 
 const { t } = useI18n()
@@ -492,7 +495,9 @@ const editingFriendUid = ref('')
 // REQ-004 群聊配置状态
 const groupConfigLoading = ref(false)
 const savingGroupConfig = ref<string | null>(null) // roomId being saved
-const groupConfigList = ref<(import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string })[]>([])
+const groupConfigList = ref<
+  (import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string; account?: string })[]
+>([])
 
 const chatStore = useChatStore()
 

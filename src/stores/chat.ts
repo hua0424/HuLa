@@ -1777,8 +1777,9 @@ export const useChatStore = defineStore(
 
     // ==================== AIclaw 群聊配置 ====================
 
-    /** aiclaw 群配置缓存，key: `${aiclawUid}:${roomId}` */
-    const aiclawGroupConfigs = reactive(new Map<string, AiclawGroupConfig & { roomId: string; roomName?: string }>())
+    /** aiclaw 群配置缓存，key: `${aiclawUid}:${roomId}`；#56 附 roomName(群名) + account(群号) 供卡片显示 */
+    type AiclawGroupConfigItem = AiclawGroupConfig & { roomId: string; roomName?: string; account?: string }
+    const aiclawGroupConfigs = reactive(new Map<string, AiclawGroupConfigItem>())
 
     /** 加载 aiclaw 群配置（遍历 aiclaw 所在群逐一获取） */
     const loadAiclawGroupConfigs = async (aiclawUid: number) => {
@@ -1802,13 +1803,29 @@ export const useChatStore = defineStore(
               params: { aiclawUid, roomId: Number(roomId) }
             })
             if (raw) {
-              const normalized: AiclawGroupConfig & { roomId: string; roomName?: string } = {
+              // #56：补群名 + 群号（account）供卡片显示「群名(群号)」。
+              // 共享缓存命中即 no-op（零网络）；未命中 addGroupDetail 调现有端点拉一次。
+              // 单群取数失败不抛——走 buildGroupCardLabel 兜底阶梯，不影响整列表。
+              let groupName = raw.roomName as string | undefined
+              let account: string | undefined
+              try {
+                await groupStore.addGroupDetail(String(roomId))
+                const detail = groupStore.getGroupDetail(String(roomId))
+                if (detail) {
+                  groupName = detail.groupName || groupName
+                  account = detail.account
+                }
+              } catch {
+                // 取数失败：保留 server raw.roomName（若有），account 留空，由显示层兜底
+              }
+              const normalized: AiclawGroupConfigItem = {
                 rateLimitPerMinute: Number(raw.rateLimitPerMinute ?? 0),
                 dailyLimit: Number(raw.dailyLimit ?? 0),
                 respondToAi: raw.respondToAi === true || raw.respondToAi === 1,
                 mentionRequired: raw.mentionRequired === true || raw.mentionRequired === 1,
                 roomId: String(raw.roomId ?? roomId),
-                roomName: raw.roomName as string | undefined
+                roomName: groupName,
+                account
               }
               aiclawGroupConfigs.set(`${aiclawUid}:${roomId}`, normalized)
             }
@@ -1850,11 +1867,9 @@ export const useChatStore = defineStore(
     }
 
     /** 获取某 aiclaw 的所有群配置列表 */
-    const getAiclawGroupConfigList = (
-      aiclawUid: number
-    ): (AiclawGroupConfig & { roomId: string; roomName?: string })[] => {
+    const getAiclawGroupConfigList = (aiclawUid: number): AiclawGroupConfigItem[] => {
       const prefix = `${aiclawUid}:`
-      const result: (AiclawGroupConfig & { roomId: string; roomName?: string })[] = []
+      const result: AiclawGroupConfigItem[] = []
       for (const [key, config] of aiclawGroupConfigs) {
         if (key.startsWith(prefix)) result.push(config)
       }
