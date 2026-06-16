@@ -1841,9 +1841,11 @@ export const useChatStore = defineStore(
     const saveAiclawGroupConfig = async (aiclawUid: number, roomId: string, config: AiclawGroupConfig) => {
       const { imRequest } = await import('@/utils/ImRequestUtils')
       const { ImUrlEnum } = await import('@/enums')
+      const { buildAiclawGroupConfigUpdateBody } = await import('@/utils/aiclawGroupConfig')
+      // #53：开关是 boolean，server VO 要 Integer(0/1)，由 helper 统一转换后再发
       await imRequest({
         url: ImUrlEnum.AICLAW_GROUP_CONFIG_UPDATE,
-        body: { aiclawUid, roomId: Number(roomId), ...config }
+        body: buildAiclawGroupConfigUpdateBody(aiclawUid, roomId, config)
       })
     }
 
