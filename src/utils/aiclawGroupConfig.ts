@@ -22,3 +22,29 @@ export const buildAiclawGroupConfigUpdateBody = (
   respondToAi: config.respondToAi ? 1 : 0,
   mentionRequired: config.mentionRequired ? 1 : 0
 })
+
+/**
+ * #56 群卡片标题：把内部数字 room_id 显示替换成「群名称(群号)」，
+ * 例 `Dawn的群组(hula_mq8zrGyH)`。群号 = im_room_group.account（唯一人类可读群标识，
+ * 用于进群核对）。取数在 chat.ts loadAiclawGroupConfigs 侧 enrich（groupStore 共享缓存
+ * 命中即零网络，未命中 fetchGroupDetailSafely 拉一次）；本函数只负责显示拼接 + 兜底。
+ *
+ * 兜底阶梯（「最终别退回纯数字」）：
+ *   名称 + 群号 → `名称(群号)`
+ *   仅名称     → `名称`
+ *   仅群号     → `群号`（account 本身可读，优于退纯数字）
+ *   都缺       → `Group <roomId>`（真·最后兜底）
+ * 空白串 trim 后按缺失处理，避免 `名称( )` 脏串。
+ */
+export const buildGroupCardLabel = (
+  groupName?: string | null,
+  account?: string | null,
+  roomId?: string | number | null
+): string => {
+  const name = groupName?.trim()
+  const acct = account?.trim()
+  if (name && acct) return `${name}(${acct})`
+  if (name) return name
+  if (acct) return acct
+  return `Group ${roomId ?? ''}`.trim()
+}
