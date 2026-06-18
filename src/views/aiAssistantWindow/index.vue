@@ -50,19 +50,14 @@
 
       <!-- Create button at bottom -->
       <div class="px-12px pb-12px">
-        <n-button type="primary" block @click="showCreateForm = true">
-          + {{ t('aiclaw.create.submit') }}
-        </n-button>
+        <n-button type="primary" block @click="showCreateForm = true">+ {{ t('aiclaw.create.submit') }}</n-button>
       </div>
     </div>
 
     <!-- Right Panel: Detail / Empty state -->
     <div class="flex flex-col flex-1 min-w-0 border-l border-[--line-color]">
       <!-- ActionBar for window controls -->
-      <ActionBar
-        :shrink="false"
-        :current-label="windowLabel"
-        :top-win-label="windowLabel" />
+      <ActionBar :shrink="false" :current-label="windowLabel" :top-win-label="windowLabel" />
 
       <!-- Detail content -->
       <div v-if="selectedItem && rightView === 'detail'" class="flex-1 overflow-auto">
@@ -78,9 +73,7 @@
               <!-- ISS-010 A1: 主状态徽章读 activeStatus (实时在线) -->
               <span
                 class="text-11px font-500 px-8px py-2px rounded-4px flex items-center gap-4px"
-                :class="
-                  selectedItem.activeStatus === 1 ? 'bg-#18a05815 text-#18a058' : 'bg-#90909015 text-#999'
-                ">
+                :class="selectedItem.activeStatus === 1 ? 'bg-#18a05815 text-#18a058' : 'bg-#90909015 text-#999'">
                 <n-badge :color="onlineDotColor(selectedItem.activeStatus)" dot />
                 {{ t(`aiclaw.status.${getOnlineKey(selectedItem.activeStatus)}`) }}
               </span>
@@ -172,7 +165,9 @@
       <!-- F17: Conversations list view -->
       <div v-else-if="selectedItem && rightView === 'conversations'" class="flex-1 flex flex-col overflow-hidden">
         <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
-          <svg class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors" @click="handleBackToDetail">
+          <svg
+            class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors"
+            @click="handleBackToDetail">
             <use href="#left"></use>
           </svg>
           <span class="text-15px font-500 text-[--text-color]">{{ t('aiclaw.detail.conversations') }}</span>
@@ -188,13 +183,17 @@
               <div class="flex flex-col flex-1 min-w-0">
                 <div class="flex items-center justify-between">
                   <span class="text-14px font-500 text-[--text-color] truncate">{{ item.friendName }}</span>
-                  <span class="text-11px text-#bbb flex-shrink-0">{{ formatConversationTime(item.lastMessage?.sendTime) }}</span>
+                  <span class="text-11px text-#bbb flex-shrink-0">
+                    {{ formatConversationTime(item.lastMessage?.sendTime) }}
+                  </span>
                 </div>
                 <span class="text-12px text-#999 mt-2px truncate">{{ item.lastMessage?.content || '' }}</span>
               </div>
             </div>
           </template>
-          <div v-else-if="!conversationLoading" class="flex flex-col items-center justify-center h-full text-13px text-#999">
+          <div
+            v-else-if="!conversationLoading"
+            class="flex flex-col items-center justify-center h-full text-13px text-#999">
             <svg class="size-48px mb-12px opacity-20"><use href="#robot"></use></svg>
             <span>{{ t('aiclaw.conversations.empty') }}</span>
           </div>
@@ -205,9 +204,13 @@
       </div>
 
       <!-- F17: Conversation messages view -->
-      <div v-else-if="selectedItem && rightView === 'conversationMessages'" class="flex-1 flex flex-col overflow-hidden">
+      <div
+        v-else-if="selectedItem && rightView === 'conversationMessages'"
+        class="flex-1 flex flex-col overflow-hidden">
         <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
-          <svg class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors" @click="handleBackToConversations">
+          <svg
+            class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors"
+            @click="handleBackToConversations">
             <use href="#left"></use>
           </svg>
           <span class="text-15px font-500 text-[--text-color]">{{ viewingFriendName }}</span>
@@ -225,14 +228,16 @@
                 <n-avatar
                   round
                   :size="28"
-                  :src="isAiclawMessage(msg) ? (selectedItem?.avatar || '/logo.png') : viewingFriendAvatar"
+                  :src="isAiclawMessage(msg) ? selectedItem?.avatar || '/logo.png' : viewingFriendAvatar"
                   fallback-src="/logo.png"
                   class="flex-shrink-0" />
                 <div
                   class="px-12px py-8px rounded-8px text-13px break-all"
-                  :class="isAiclawMessage(msg)
-                    ? 'bg-[--left-bg-color] text-[--text-color]'
-                    : 'bg-#13987f20 text-[--text-color]'">
+                  :class="
+                    isAiclawMessage(msg)
+                      ? 'bg-[--left-bg-color] text-[--text-color]'
+                      : 'bg-#13987f20 text-[--text-color]'
+                  ">
                   {{ msg.message.body?.content || '' }}
                 </div>
               </div>
@@ -241,7 +246,9 @@
           <div v-if="messagesLoading" class="flex justify-center py-20px">
             <n-spin size="medium" />
           </div>
-          <div v-if="!messagesLoading && conversationMessages.length === 0" class="flex flex-col items-center justify-center h-full text-13px text-#999">
+          <div
+            v-if="!messagesLoading && conversationMessages.length === 0"
+            class="flex flex-col items-center justify-center h-full text-13px text-#999">
             <span>{{ t('aiclaw.conversations.empty') }}</span>
           </div>
         </div>
@@ -250,7 +257,9 @@
       <!-- F18: Friends management view -->
       <div v-else-if="selectedItem && rightView === 'friends'" class="flex-1 flex flex-col overflow-hidden">
         <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
-          <svg class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors" @click="handleBackToDetail">
+          <svg
+            class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors"
+            @click="handleBackToDetail">
             <use href="#left"></use>
           </svg>
           <span class="text-15px font-500 text-[--text-color]">{{ t('aiclaw.detail.friends') }}</span>
@@ -264,7 +273,9 @@
               <n-avatar round :size="40" :src="item.avatar || '/logo.png'" fallback-src="/logo.png" />
               <div class="flex flex-col flex-1 min-w-0">
                 <span class="text-14px font-500 text-[--text-color] truncate">{{ item.name }}</span>
-                <span v-if="item.relationDesc" class="text-12px text-#999 mt-2px truncate">{{ item.relationDesc }}</span>
+                <span v-if="item.relationDesc" class="text-12px text-#999 mt-2px truncate">
+                  {{ item.relationDesc }}
+                </span>
                 <span v-else class="text-12px text-#ccc mt-2px italic">{{ t('aiclaw.friends.relation') }}</span>
               </div>
               <div class="flex items-center gap-6px flex-shrink-0">
@@ -290,7 +301,9 @@
       <!-- REQ-004: Group settings view -->
       <div v-else-if="selectedItem && rightView === 'groupSettings'" class="flex-1 flex flex-col overflow-hidden">
         <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
-          <svg class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors" @click="handleBackToDetail">
+          <svg
+            class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors"
+            @click="handleBackToDetail">
             <use href="#left"></use>
           </svg>
           <span class="text-15px font-500 text-[--text-color]">{{ t('aiclaw.group_settings.title') }}</span>
@@ -302,37 +315,19 @@
               :key="config.roomId"
               class="border-b border-[--line-color] px-24px py-16px">
               <div class="flex items-center justify-between mb-12px">
-                <span class="text-14px font-500 text-[--text-color]">{{
-                  buildGroupCardLabel(config.roomName, config.account, config.roomId)
-                }}</span>
+                <span class="text-14px font-500 text-[--text-color]">
+                  {{ buildGroupCardLabel(config.roomName, config.account, config.roomId) }}
+                </span>
               </div>
-              <!-- Config form -->
-              <n-form label-placement="left" label-width="auto" size="small" :show-feedback="false">
-                <n-form-item :label="t('aiclaw.group_settings.rate_limit')" class="mb-12px">
-                  <n-input-number v-model:value="config.rateLimitPerMinute" :min="0" :max="100" size="small" style="width: 100px" />
-                  <span class="text-11px text-#999 ml-8px">{{ t('aiclaw.group_settings.rate_limit_hint') }}</span>
-                </n-form-item>
-                <n-form-item :label="t('aiclaw.group_settings.daily_limit')" class="mb-12px">
-                  <n-input-number v-model:value="config.dailyLimit" :min="0" :max="10000" size="small" style="width: 100px" />
-                </n-form-item>
-                <n-form-item :label="t('aiclaw.group_settings.respond_to_ai')" class="mb-12px">
-                  <n-switch v-model:value="config.respondToAi" />
-                </n-form-item>
-                <n-form-item :label="t('aiclaw.group_settings.mention_required')" class="mb-12px">
-                  <n-switch v-model:value="config.mentionRequired" />
-                  <span class="text-11px text-#999 ml-8px">{{ t('aiclaw.group_settings.mention_required_hint') }}</span>
-                </n-form-item>
-              </n-form>
-              <n-button
-                size="small"
-                type="primary"
-                :loading="savingGroupConfig === config.roomId"
-                @click="handleSaveGroupConfig(config)">
-                {{ t('aiclaw.group_settings.save') }}
-              </n-button>
+              <AiclawGroupConfigForm
+                :config="config"
+                :saving="savingGroupConfig === config.roomId"
+                @save="handleSaveGroupConfig" />
             </div>
           </template>
-          <div v-else-if="!groupConfigLoading" class="flex flex-col items-center justify-center h-full text-13px text-#999">
+          <div
+            v-else-if="!groupConfigLoading"
+            class="flex flex-col items-center justify-center h-full text-13px text-#999">
             <svg class="size-48px mb-12px opacity-20"><use href="#robot"></use></svg>
             <span>{{ t('aiclaw.group_settings.empty') }}</span>
           </div>
@@ -360,12 +355,15 @@
       @refreshed="fetchList" />
 
     <!-- Delete confirm dialog -->
-    <AiclawDeleteConfirmDialog
-      v-model:visible="showDeleteDialog"
-      @confirm="handleDeleteConfirm" />
+    <AiclawDeleteConfirmDialog v-model:visible="showDeleteDialog" @confirm="handleDeleteConfirm" />
 
     <!-- F18: Relation edit dialog -->
-    <n-modal v-model:show="showRelationDialog" preset="dialog" :show-icon="false" :closable="true" :mask-closable="false">
+    <n-modal
+      v-model:show="showRelationDialog"
+      preset="dialog"
+      :show-icon="false"
+      :closable="true"
+      :mask-closable="false">
       <template #header>
         <span class="text-16px font-600">{{ t('aiclaw.friends.relation_edit') }}</span>
       </template>
@@ -394,6 +392,7 @@ import ActionBar from '@/components/windows/ActionBar.vue'
 import AiclawCreateForm from '@/components/aiclaw/AiclawCreateForm.vue'
 import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
 import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
+import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
 import { ImUrlEnum } from '@/enums'
 import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
 import { isWeb } from '@/utils/PlatformConstants'
@@ -510,8 +509,7 @@ const authStatusMap: Record<number, 'inactive' | 'activated' | 'deactivated'> = 
   2: 'deactivated'
 }
 
-const getOnlineKey = (activeStatus?: number): 'online' | 'offline' =>
-  activeStatus === 1 ? 'online' : 'offline'
+const getOnlineKey = (activeStatus?: number): 'online' | 'offline' => (activeStatus === 1 ? 'online' : 'offline')
 
 const getAuthKey = (authStatus?: number): 'inactive' | 'activated' | 'deactivated' =>
   authStatusMap[authStatus ?? 0] || 'inactive'
@@ -520,11 +518,9 @@ const selectedItem = computed(() => aiclawList.value.find((item) => item.uid ===
 
 const personaDirty = computed(() => personaText.value !== originalPersona.value)
 
-const onlineTextClass = (activeStatus?: number) =>
-  activeStatus === 1 ? 'text-#18a058' : 'text-#999'
+const onlineTextClass = (activeStatus?: number) => (activeStatus === 1 ? 'text-#18a058' : 'text-#999')
 
-const onlineDotColor = (activeStatus?: number) =>
-  activeStatus === 1 ? '#18a058' : '#909090'
+const onlineDotColor = (activeStatus?: number) => (activeStatus === 1 ? '#18a058' : '#909090')
 
 // authStatus 二级标签的色彩: 未激活 / 已停用 走灰/红, 已激活省略不显示 (主在线状态已足够表达)
 const authBadgeClass = (authStatus?: number) => {
@@ -760,7 +756,9 @@ const handleOpenGroupSettings = async () => {
   }
 }
 
-const handleSaveGroupConfig = async (config: (import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string })) => {
+const handleSaveGroupConfig = async (
+  config: import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string }
+) => {
   if (!selectedUid.value) return
   savingGroupConfig.value = config.roomId
   try {
