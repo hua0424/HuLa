@@ -198,6 +198,8 @@ export enum StoresEnum {
   FILE = 'file',
   /** 缩略图缓存 */
   THUMBNAIL_CACHE = 'thumbnailCache',
+  /** aiclaw 归属缓存 */
+  AICLAW = 'aiclaw',
   /** 初始化同步状态 */
   INITIAL_SYNC = 'initialSync'
 }

@@ -1,7 +1,7 @@
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { info } from '@tauri-apps/plugin-log'
 import { defineStore } from 'pinia'
-import { MittEnum, StoresEnum } from '@/enums'
+import { MittEnum, RoomTypeEnum, StoresEnum } from '@/enums'
 import { isWeb } from '@/utils/PlatformConstants'
 import type { FriendItem, RequestFriendItem, SessionItem } from '@/services/types'
 import { useChatStore } from '@/stores/chat'
@@ -153,6 +153,13 @@ export const useGlobalStore = defineStore(
         // 延攱1秒后开始查询已读数
         setTimeout(readCountQueue, 1000)
         chatStore.markSessionRead(val)
+      }
+
+      // REQ-005 #59：进入群会话时预取当前用户的 aiclaw 归属缓存，
+      // 让右键「群设置」门控能在同步 visible 谓词中读取。
+      if (session?.type === RoomTypeEnum.GROUP) {
+        const { useAiclawStore } = await import('@/stores/aiclaw')
+        useAiclawStore().ensureLoaded()
       }
 
       useMitt.emit(MittEnum.SESSION_CHANGED, {
