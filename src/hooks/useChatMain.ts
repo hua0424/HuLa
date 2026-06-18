@@ -31,6 +31,9 @@ import { useGlobalStore } from '@/stores/global.ts'
 import { useGroupStore } from '@/stores/group'
 import { useSettingStore } from '@/stores/setting.ts'
 import { useUserStore } from '@/stores/user'
+import { useAiclawStore } from '@/stores/aiclaw'
+import { useAiclawGroupConfigStore } from '@/stores/aiclawGroupConfig'
+import { isAiclawUser } from '@/utils/AiclawUtils'
 import { saveFileAttachmentAs, saveVideoAttachmentAs } from '@/utils/AttachmentSaver'
 import { isDiffNow } from '@/utils/ComputedTime.ts'
 import { extractFileName, removeTag } from '@/utils/Formatting'
@@ -67,6 +70,10 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
   const cachedStore = useCachedStore()
   const emojiStore = useEmojiStore()
   const userStore = useUserStore()
+  const aiclawStore = useAiclawStore()
+  const aiclawGroupConfigStore = useAiclawGroupConfigStore()
+  // REQ-005 #59：提前预取当前用户拥有的 aiclaw 归属，避免右键菜单 visible 同步判断时缓存未就绪
+  aiclawStore.ensureLoaded()
   const { downloadFile } = useDownload()
   const enableGroupNicknameModal = options.enableGroupNicknameModal ?? false
   const disableHistoryActions = options.disableHistoryActions ?? false
@@ -149,6 +156,11 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
       groupNicknameSubmitting.value = false
       groupNicknameModalVisible.value = true
     })
+  }
+
+  /** 从右键菜单项中提取目标用户 uid */
+  const getTargetUid = (item: any): string | undefined => {
+    return item?.uid || item?.fromUser?.uid
   }
 
   /** 通用右键菜单 */
@@ -851,6 +863,21 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
         } as GroupNicknameModalPayload)
       },
       visible: (item: any) => (item.uid ? item.uid === userUid.value : item.fromUser.uid === userUid.value)
+    },
+    {
+      label: () => t('aiclaw.group_settings.title'),
+      icon: 'setting',
+      testid: 'aiclaw-group-settings-menu',
+      click: (item: any) => {
+        const targetUid = getTargetUid(item)
+        if (!targetUid) return
+        aiclawGroupConfigStore.openModal(String(targetUid))
+      },
+      visible: (item: any) => {
+        const targetUid = getTargetUid(item)
+        if (!targetUid) return false
+        return isAiclawUser(String(targetUid)) && aiclawStore.isMyAiclaw(targetUid)
+      }
     },
     {
       label: () => t('menu.add_friend'),

@@ -101,7 +101,7 @@ describe('useAiclawStore', () => {
 
     expect(store.loaded).toBe(false)
     expect(store.isMyAiclaw('1001')).toBe(false)
-    expect(store.myAiclawUids.size).toBe(0)
+    expect(store.myAiclawUids instanceof Set ? store.myAiclawUids.size : store.myAiclawUids.length).toBe(0)
 
     // 下一次 ensureLoaded 应重新发起请求并采用最新结果
     mockImRequestSilent.mockResolvedValueOnce([{ uid: '2002' }])

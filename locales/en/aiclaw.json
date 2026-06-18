@@ -116,6 +116,7 @@
     "save": "Save",
     "save_success": "Settings saved",
     "save_failed": "Save failed",
+    "load_failed": "Failed to load group chat settings",
     "config_changed": "AI assistant {name}'s group settings have been updated"
   },
   "auto_reply_tag": "Auto-reply"

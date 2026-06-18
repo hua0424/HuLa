@@ -1781,11 +1781,12 @@ export const useChatStore = defineStore(
     type AiclawGroupConfigItem = AiclawGroupConfig & { roomId: string; roomName?: string; account?: string }
     const aiclawGroupConfigs = reactive(new Map<string, AiclawGroupConfigItem>())
 
-    /** 加载 aiclaw 群配置（遍历 aiclaw 所在群逐一获取） */
-    const loadAiclawGroupConfigs = async (aiclawUid: number) => {
+    /** 加载 aiclaw 群配置（遍历 aiclaw 所在群逐一获取），返回是否全部成功 */
+    const loadAiclawGroupConfigs = async (aiclawUid: number): Promise<boolean> => {
       const { imRequest } = await import('@/utils/ImRequestUtils')
       const { ImUrlEnum } = await import('@/enums')
       const groupStore = useGroupStore()
+      let allSuccess = true
       try {
         // 清除旧缓存
         const keysToDelete: string[] = []
@@ -1830,12 +1831,15 @@ export const useChatStore = defineStore(
               aiclawGroupConfigs.set(`${aiclawUid}:${roomId}`, normalized)
             }
           } catch {
-            // 单个群配置获取失败不影响其他群
+            // 单个群配置获取失败不影响其他群，但需让调用方知道本次加载不完整
+            allSuccess = false
           }
         }
       } catch (error) {
         console.error('[ChatStore] Failed to load aiclaw group configs:', error)
+        return false
       }
+      return allSuccess
     }
 
     /** 更新 aiclaw 群配置（本地缓存，WS 通知时调用） */
