@@ -319,40 +319,10 @@
                   {{ buildGroupCardLabel(config.roomName, config.account, config.roomId) }}
                 </span>
               </div>
-              <!-- Config form -->
-              <n-form label-placement="left" label-width="auto" size="small" :show-feedback="false">
-                <n-form-item :label="t('aiclaw.group_settings.rate_limit')" class="mb-12px">
-                  <n-input-number
-                    v-model:value="config.rateLimitPerMinute"
-                    :min="0"
-                    :max="100"
-                    size="small"
-                    style="width: 100px" />
-                  <span class="text-11px text-#999 ml-8px">{{ t('aiclaw.group_settings.rate_limit_hint') }}</span>
-                </n-form-item>
-                <n-form-item :label="t('aiclaw.group_settings.daily_limit')" class="mb-12px">
-                  <n-input-number
-                    v-model:value="config.dailyLimit"
-                    :min="0"
-                    :max="10000"
-                    size="small"
-                    style="width: 100px" />
-                </n-form-item>
-                <n-form-item :label="t('aiclaw.group_settings.respond_to_ai')" class="mb-12px">
-                  <n-switch v-model:value="config.respondToAi" />
-                </n-form-item>
-                <n-form-item :label="t('aiclaw.group_settings.mention_required')" class="mb-12px">
-                  <n-switch v-model:value="config.mentionRequired" />
-                  <span class="text-11px text-#999 ml-8px">{{ t('aiclaw.group_settings.mention_required_hint') }}</span>
-                </n-form-item>
-              </n-form>
-              <n-button
-                size="small"
-                type="primary"
-                :loading="savingGroupConfig === config.roomId"
-                @click="handleSaveGroupConfig(config)">
-                {{ t('aiclaw.group_settings.save') }}
-              </n-button>
+              <AiclawGroupConfigForm
+                :config="config"
+                :saving="savingGroupConfig === config.roomId"
+                @save="handleSaveGroupConfig" />
             </div>
           </template>
           <div
@@ -422,6 +392,7 @@ import ActionBar from '@/components/windows/ActionBar.vue'
 import AiclawCreateForm from '@/components/aiclaw/AiclawCreateForm.vue'
 import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
 import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
+import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
 import { ImUrlEnum } from '@/enums'
 import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
 import { isWeb } from '@/utils/PlatformConstants'
