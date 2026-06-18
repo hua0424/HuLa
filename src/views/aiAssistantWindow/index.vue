@@ -398,6 +398,7 @@ import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
 import { isWeb } from '@/utils/PlatformConstants'
 import { buildGroupCardLabel } from '@/utils/aiclawGroupConfig'
 import { useChatStore } from '@/stores/chat'
+import { useAiclawStore } from '@/stores/aiclaw'
 
 const { t } = useI18n()
 
@@ -785,6 +786,7 @@ const onCreated = (data: { uid: string; activationToken: string }) => {
   createdToken.value = data.activationToken
   viewingUid.value = ''
   showTokenDialog.value = true
+  useAiclawStore().invalidate()
   fetchList()
 }
 
@@ -808,6 +810,7 @@ const handleDeleteConfirm = async (password: string) => {
     })
     window.$message?.success?.(t('aiclaw.detail.deactivated_success'))
     showDeleteDialog.value = false
+    useAiclawStore().invalidate()
     // If the deleted item was selected, clear selection
     if (selectedUid.value === deletingUid.value) {
       selectedUid.value = null
