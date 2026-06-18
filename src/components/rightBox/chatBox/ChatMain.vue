@@ -200,40 +200,37 @@
   </n-modal>
 
   <n-modal
-    v-model:show="aiclawGroupConfigModalVisible"
+    v-model:show="modalVisible"
     class="w-360px border-rd-8px"
     data-testid="aiclaw-group-config-modal"
-    :mask-closable="!aiclawGroupConfigModalSaving">
+    :mask-closable="!modalSaving">
     <div class="bg-[--bg-popover] w-360px h-full p-6px box-border flex flex-col">
       <div
         v-if="isMac()"
-        @click="aiclawGroupConfigModalVisible = false"
+        @click="modalVisible = false"
         class="mac-close z-999 size-13px shadow-inner bg-#ed6a5eff rounded-50% select-none absolute left-6px">
         <svg class="hidden size-7px color-#000 select-none absolute top-3px left-3px">
           <use href="#close"></use>
         </svg>
       </div>
 
-      <svg
-        v-if="isWindows()"
-        @click="aiclawGroupConfigModalVisible = false"
-        class="w-12px h-12px ml-a cursor-pointer select-none">
+      <svg v-if="isWindows()" @click="modalVisible = false" class="w-12px h-12px ml-a cursor-pointer select-none">
         <use href="#close"></use>
       </svg>
       <div class="flex flex-col gap-20px p-[22px_10px_10px_22px] select-none">
         <span class="text-(16px [--text-color]) font-500">{{ t('aiclaw.group_settings.title') }}</span>
-        <n-spin :show="aiclawGroupConfigModalLoading">
-          <div v-if="aiclawGroupConfigModalError" class="text-(12px #d03553)">
-            {{ aiclawGroupConfigModalError }}
+        <n-spin :show="modalLoading">
+          <div v-if="modalError" class="text-(12px #d03553)">
+            {{ modalError }}
           </div>
           <AiclawGroupConfigForm
-            v-else-if="aiclawGroupConfigContext"
-            :config="aiclawGroupConfigContext.config"
-            :saving="aiclawGroupConfigModalSaving"
-            @save="handleAiclawGroupConfigSave" />
+            v-else-if="modalContext"
+            :config="modalContext.config"
+            :saving="modalSaving"
+            @save="saveModal" />
         </n-spin>
         <n-flex justify="end" :size="12">
-          <n-button :disabled="aiclawGroupConfigModalSaving" secondary @click="aiclawGroupConfigModalVisible = false">
+          <n-button :disabled="modalSaving" secondary @click="modalVisible = false">
             {{ t('home.chat_main.cancel') }}
           </n-button>
         </n-flex>
@@ -244,6 +241,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, useTemplateRef, watch, watchPostEffect } from 'vue'
+import { storeToRefs } from 'pinia'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { info } from '@tauri-apps/plugin-log'
 import { useDebounceFn, useEventListener, useResizeObserver, useTimeoutFn } from '@vueuse/core'
@@ -259,6 +257,7 @@ import type { MessageType } from '@/services/types.ts'
 import { useChatStore } from '@/stores/chat.ts'
 import { useGlobalStore } from '@/stores/global'
 import { useUserStore } from '@/stores/user.ts'
+import { useAiclawGroupConfigStore } from '@/stores/aiclawGroupConfig'
 import { audioManager } from '@/utils/AudioManager'
 import { timeToStr } from '@/utils/ComputedTime'
 import { useCachedStore } from '@/stores/cached'
@@ -295,6 +294,9 @@ const networkStatus = useNetworkStatus()
 const { createWebviewWindow } = useWindow()
 const chatMainContext = useChatMain(false, { enableGroupNicknameModal: true })
 provide(chatMainInjectionKey, chatMainContext)
+const aiclawGroupConfigStore = useAiclawGroupConfigStore()
+const { modalVisible, modalLoading, modalSaving, modalError, modalContext } = storeToRefs(aiclawGroupConfigStore)
+const { saveModal } = aiclawGroupConfigStore
 const {
   handleConfirm,
   tips,
@@ -305,13 +307,7 @@ const {
   groupNicknameValue,
   groupNicknameError,
   groupNicknameSubmitting,
-  handleGroupNicknameConfirm,
-  aiclawGroupConfigModalVisible,
-  aiclawGroupConfigModalLoading,
-  aiclawGroupConfigModalSaving,
-  aiclawGroupConfigModalError,
-  aiclawGroupConfigContext,
-  handleAiclawGroupConfigSave
+  handleGroupNicknameConfirm
 } = chatMainContext
 const { enableScroll } = usePopover(selectKey, 'image-chat-main')
 

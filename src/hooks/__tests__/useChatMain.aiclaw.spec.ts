@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { createI18n, useI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -73,14 +73,15 @@ vi.mock('@/hooks/useMitt', () => ({
 
 const mockFns = vi.hoisted(() => ({
   isMyAiclaw: vi.fn(() => false),
-  loadConfigs: vi.fn(),
-  getConfigList: vi.fn(() => []),
-  saveConfig: vi.fn(),
+  openModal: vi.fn(),
   isAiclawUser: vi.fn(() => false)
 }))
 
 vi.mock('@/stores/aiclaw', () => ({
   useAiclawStore: vi.fn(() => ({ isMyAiclaw: mockFns.isMyAiclaw, loaded: false }))
+}))
+vi.mock('@/stores/aiclawGroupConfig', () => ({
+  useAiclawGroupConfigStore: vi.fn(() => ({ openModal: mockFns.openModal }))
 }))
 vi.mock('@/stores/cached', () => ({ useCachedStore: vi.fn(() => ({})) }))
 vi.mock('@/stores/chat', () => ({
@@ -90,10 +91,7 @@ vi.mock('@/stores/chat', () => ({
     clearMsgCheck: vi.fn(),
     setMsgMultiChoose: vi.fn(),
     recordRecallMsg: vi.fn(),
-    updateRecallMsg: vi.fn(),
-    getAiclawGroupConfigList: mockFns.getConfigList,
-    loadAiclawGroupConfigs: mockFns.loadConfigs,
-    saveAiclawGroupConfig: mockFns.saveConfig
+    updateRecallMsg: vi.fn()
   }))
 }))
 vi.mock('@/stores/contacts', () => ({ useContactStore: vi.fn(() => ({})) }))
@@ -159,9 +157,7 @@ describe('useChatMain aiclaw 群设置入口', () => {
   beforeEach(() => {
     mockFns.isAiclawUser.mockReturnValue(false)
     mockFns.isMyAiclaw.mockReturnValue(false)
-    mockFns.loadConfigs.mockReset()
-    mockFns.getConfigList.mockReset().mockReturnValue([])
-    mockFns.saveConfig.mockReset()
+    mockFns.openModal.mockReset()
   })
 
   it('optionsList 中包含「群设置」菜单项且携带 testid', () => {
@@ -197,112 +193,25 @@ describe('useChatMain aiclaw 群设置入口', () => {
     expect(item!.visible!({ uid: '2001' })).toBe(false)
   })
 
-  it('openAiclawGroupConfigModal 加载到当前群配置后写入 context', async () => {
+  it('点击「群设置」菜单项时调用 aiclawGroupConfigStore.openModal', async () => {
     mockFns.isAiclawUser.mockReturnValue(true)
     mockFns.isMyAiclaw.mockReturnValue(true)
-    mockFns.loadConfigs.mockResolvedValue(true)
-    mockFns.getConfigList.mockReturnValue([
-      {
-        roomId: 'room-1',
-        rateLimitPerMinute: 20,
-        dailyLimit: 500,
-        respondToAi: false,
-        mentionRequired: false
-      }
-    ] as any)
 
     const wrapper = mountHook()
-    await wrapper.vm.ctx.openAiclawGroupConfigModal('2001')
-    await flushPromises()
+    const item = wrapper.vm.ctx.optionsList.value.find((it: any) => it?.testid === 'aiclaw-group-settings-menu')
+    item!.click!({ uid: '2001' })
 
-    expect(mockFns.loadConfigs).toHaveBeenCalledWith(2001)
-    expect(wrapper.vm.ctx.aiclawGroupConfigModalVisible.value).toBe(true)
-    expect(wrapper.vm.ctx.aiclawGroupConfigModalLoading.value).toBe(false)
-    expect(wrapper.vm.ctx.aiclawGroupConfigContext.value?.config).toMatchObject({
-      roomId: 'room-1',
-      rateLimitPerMinute: 20,
-      dailyLimit: 500,
-      respondToAi: false,
-      mentionRequired: false
-    })
+    expect(mockFns.openModal).toHaveBeenCalledWith('2001')
   })
 
-  it('openAiclawGroupConfigModal 加载成功但无当前群配置时使用默认值', async () => {
-    mockFns.loadConfigs.mockResolvedValue(true)
-    mockFns.getConfigList.mockReturnValue([
-      {
-        roomId: 'room-other',
-        rateLimitPerMinute: 20,
-        dailyLimit: 500,
-        respondToAi: false,
-        mentionRequired: false
-      }
-    ] as any)
+  it('菜单项无 uid 时不调用 aiclawGroupConfigStore.openModal', () => {
+    mockFns.isAiclawUser.mockReturnValue(true)
+    mockFns.isMyAiclaw.mockReturnValue(true)
 
     const wrapper = mountHook()
-    await wrapper.vm.ctx.openAiclawGroupConfigModal('2001')
-    await flushPromises()
+    const item = wrapper.vm.ctx.optionsList.value.find((it: any) => it?.testid === 'aiclaw-group-settings-menu')
+    item!.click!({})
 
-    expect(wrapper.vm.ctx.aiclawGroupConfigModalError.value).toBe('')
-    expect(wrapper.vm.ctx.aiclawGroupConfigContext.value?.config).toMatchObject({
-      roomId: 'room-1',
-      rateLimitPerMinute: 10,
-      dailyLimit: 1000,
-      respondToAi: true,
-      mentionRequired: true
-    })
-  })
-
-  it('openAiclawGroupConfigModal 加载失败时设置 error 且 context 为空', async () => {
-    mockFns.loadConfigs.mockResolvedValue(false)
-
-    const wrapper = mountHook()
-    await wrapper.vm.ctx.openAiclawGroupConfigModal('2001')
-    await flushPromises()
-
-    expect(wrapper.vm.ctx.aiclawGroupConfigModalLoading.value).toBe(false)
-    expect(wrapper.vm.ctx.aiclawGroupConfigModalError.value).toBe('加载群聊配置失败')
-    expect(wrapper.vm.ctx.aiclawGroupConfigContext.value).toBeNull()
-  })
-
-  it('openAiclawGroupConfigModal 抛出异常时设置 error 且 context 为空', async () => {
-    mockFns.loadConfigs.mockRejectedValue(new Error('network'))
-
-    const wrapper = mountHook()
-    await wrapper.vm.ctx.openAiclawGroupConfigModal('2001')
-    await flushPromises()
-
-    expect(wrapper.vm.ctx.aiclawGroupConfigModalLoading.value).toBe(false)
-    expect(wrapper.vm.ctx.aiclawGroupConfigModalError.value).toBe('加载群聊配置失败')
-    expect(wrapper.vm.ctx.aiclawGroupConfigContext.value).toBeNull()
-  })
-
-  it('handleAiclawGroupConfigSave 成功时关闭弹窗并清空 saving', async () => {
-    const wrapper = mountHook()
-    wrapper.vm.ctx.aiclawGroupConfigContext.value = {
-      aiclawUid: '2001',
-      roomId: 'room-1',
-      config: {
-        roomId: 'room-1',
-        rateLimitPerMinute: 10,
-        dailyLimit: 1000,
-        respondToAi: true,
-        mentionRequired: true
-      }
-    }
-    wrapper.vm.ctx.aiclawGroupConfigModalVisible.value = true
-
-    await wrapper.vm.ctx.handleAiclawGroupConfigSave({
-      roomId: 'room-1',
-      rateLimitPerMinute: 10,
-      dailyLimit: 1000,
-      respondToAi: true,
-      mentionRequired: true
-    })
-    await flushPromises()
-
-    expect(mockFns.saveConfig).toHaveBeenCalledWith(2001, 'room-1', expect.any(Object))
-    expect(wrapper.vm.ctx.aiclawGroupConfigModalSaving.value).toBe(false)
-    expect(wrapper.vm.ctx.aiclawGroupConfigModalVisible.value).toBe(false)
+    expect(mockFns.openModal).not.toHaveBeenCalled()
   })
 })

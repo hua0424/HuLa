@@ -200,6 +200,8 @@ export enum StoresEnum {
   THUMBNAIL_CACHE = 'thumbnailCache',
   /** aiclaw 归属缓存 */
   AICLAW = 'aiclaw',
+  /** aiclaw 群配置弹窗共享状态 */
+  AICLAW_GROUP_CONFIG = 'aiclawGroupConfig',
   /** 初始化同步状态 */
   INITIAL_SYNC = 'initialSync'
 }

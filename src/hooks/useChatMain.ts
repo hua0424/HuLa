@@ -32,8 +32,8 @@ import { useGroupStore } from '@/stores/group'
 import { useSettingStore } from '@/stores/setting.ts'
 import { useUserStore } from '@/stores/user'
 import { useAiclawStore } from '@/stores/aiclaw'
+import { useAiclawGroupConfigStore } from '@/stores/aiclawGroupConfig'
 import { isAiclawUser } from '@/utils/AiclawUtils'
-import type { AiclawGroupConfig } from '@/services/wsType'
 import { saveFileAttachmentAs, saveVideoAttachmentAs } from '@/utils/AttachmentSaver'
 import { isDiffNow } from '@/utils/ComputedTime.ts'
 import { extractFileName, removeTag } from '@/utils/Formatting'
@@ -56,8 +56,6 @@ type GroupNicknameModalPayload = {
   originalNickname: string
 }
 
-type AiclawGroupConfigItem = AiclawGroupConfig & { roomId: string; roomName?: string; account?: string }
-
 export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions = {}) => {
   const { t } = useI18n()
   const { openMsgSession, userUid } = useCommon()
@@ -73,6 +71,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
   const emojiStore = useEmojiStore()
   const userStore = useUserStore()
   const aiclawStore = useAiclawStore()
+  const aiclawGroupConfigStore = useAiclawGroupConfigStore()
   const { downloadFile } = useDownload()
   const enableGroupNicknameModal = options.enableGroupNicknameModal ?? false
   const disableHistoryActions = options.disableHistoryActions ?? false
@@ -102,17 +101,6 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
   const groupNicknameSubmitting = ref(false)
   /** 修改群昵称上下文信息 */
   const groupNicknameContext = ref<{ roomId: string; currentUid: string; originalNickname: string } | null>(null)
-
-  /** aiclaw 群配置弹窗相关状态 */
-  const aiclawGroupConfigModalVisible = ref(false)
-  const aiclawGroupConfigModalLoading = ref(false)
-  const aiclawGroupConfigModalSaving = ref(false)
-  const aiclawGroupConfigModalError = ref('')
-  const aiclawGroupConfigContext = ref<{
-    aiclawUid: string
-    roomId: string
-    config: AiclawGroupConfigItem
-  } | null>(null)
 
   const handleGroupNicknameConfirm = async () => {
     if (!groupNicknameContext.value) {
@@ -171,67 +159,6 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
   /** 从右键菜单项中提取目标用户 uid */
   const getTargetUid = (item: any): string | undefined => {
     return item?.uid || item?.fromUser?.uid
-  }
-
-  /** 打开指定 aiclaw 在当前群的配置弹窗 */
-  const openAiclawGroupConfigModal = async (targetUid: string) => {
-    const roomId = globalStore.currentSessionRoomId
-    const isGroup = globalStore.currentSession?.type === RoomTypeEnum.GROUP
-    if (!roomId || !isGroup) {
-      window.$message?.error?.(t('home.chat_main.group_nickname.error.invalid_room'))
-      return
-    }
-
-    const defaultConfig: AiclawGroupConfigItem = {
-      roomId,
-      rateLimitPerMinute: 10,
-      dailyLimit: 1000,
-      respondToAi: true,
-      mentionRequired: true
-    }
-
-    aiclawGroupConfigContext.value = null
-    aiclawGroupConfigModalVisible.value = true
-    aiclawGroupConfigModalLoading.value = true
-    aiclawGroupConfigModalError.value = ''
-
-    try {
-      const ok = await chatStore.loadAiclawGroupConfigs(Number(targetUid))
-      if (!ok) {
-        aiclawGroupConfigModalError.value = t('aiclaw.group_settings.load_failed')
-        return
-      }
-      const list = chatStore.getAiclawGroupConfigList(Number(targetUid))
-      const matched = list.find((cfg) => cfg.roomId === roomId)
-      aiclawGroupConfigContext.value = {
-        aiclawUid: targetUid,
-        roomId,
-        config: matched ?? defaultConfig
-      }
-    } catch (error) {
-      console.error('[useChatMain] 加载 aiclaw 群配置失败:', error)
-      aiclawGroupConfigModalError.value = t('aiclaw.group_settings.load_failed')
-    } finally {
-      aiclawGroupConfigModalLoading.value = false
-    }
-  }
-
-  /** 保存 aiclaw 群配置 */
-  const handleAiclawGroupConfigSave = async (config: AiclawGroupConfigItem) => {
-    if (!aiclawGroupConfigContext.value) return
-
-    const { aiclawUid, roomId } = aiclawGroupConfigContext.value
-    aiclawGroupConfigModalSaving.value = true
-    try {
-      await chatStore.saveAiclawGroupConfig(Number(aiclawUid), roomId, config as AiclawGroupConfig)
-      window.$message?.success?.(t('aiclaw.group_settings.save_success'))
-      aiclawGroupConfigModalVisible.value = false
-    } catch (error) {
-      console.error('[useChatMain] 保存 aiclaw 群配置失败:', error)
-      window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
-    } finally {
-      aiclawGroupConfigModalSaving.value = false
-    }
   }
 
   /** 通用右键菜单 */
@@ -942,7 +869,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
       click: (item: any) => {
         const targetUid = getTargetUid(item)
         if (!targetUid) return
-        openAiclawGroupConfigModal(String(targetUid))
+        aiclawGroupConfigStore.openModal(String(targetUid))
       },
       visible: (item: any) => {
         const targetUid = getTargetUid(item)
@@ -1448,13 +1375,6 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
     groupNicknameError,
     groupNicknameSubmitting,
     handleGroupNicknameConfirm,
-    aiclawGroupConfigModalVisible,
-    aiclawGroupConfigModalLoading,
-    aiclawGroupConfigModalSaving,
-    aiclawGroupConfigModalError,
-    aiclawGroupConfigContext,
-    openAiclawGroupConfigModal,
-    handleAiclawGroupConfigSave,
     activeBubble
   }
 }
