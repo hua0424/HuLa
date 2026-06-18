@@ -78,7 +78,7 @@ const mockFns = vi.hoisted(() => ({
 }))
 
 vi.mock('@/stores/aiclaw', () => ({
-  useAiclawStore: vi.fn(() => ({ isMyAiclaw: mockFns.isMyAiclaw, loaded: false }))
+  useAiclawStore: vi.fn(() => ({ isMyAiclaw: mockFns.isMyAiclaw, loaded: false, ensureLoaded: vi.fn() }))
 }))
 vi.mock('@/stores/aiclawGroupConfig', () => ({
   useAiclawGroupConfigStore: vi.fn(() => ({ openModal: mockFns.openModal }))

@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
+import { ref } from 'vue'
 import { StoresEnum, RoomTypeEnum } from '@/enums'
-import { useChatStore } from '@/stores/chat.ts'
-import { useGlobalStore } from '@/stores/global.ts'
+import { useChatStore } from '@/stores/chat'
+import { useGlobalStore } from '@/stores/global'
 import type { AiclawGroupConfig } from '@/services/wsType'
 import { useI18n } from 'vue-i18n'
 

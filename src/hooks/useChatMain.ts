@@ -72,6 +72,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
   const userStore = useUserStore()
   const aiclawStore = useAiclawStore()
   const aiclawGroupConfigStore = useAiclawGroupConfigStore()
+  // REQ-005 #59：提前预取当前用户拥有的 aiclaw 归属，避免右键菜单 visible 同步判断时缓存未就绪
+  aiclawStore.ensureLoaded()
   const { downloadFile } = useDownload()
   const enableGroupNicknameModal = options.enableGroupNicknameModal ?? false
   const disableHistoryActions = options.disableHistoryActions ?? false
