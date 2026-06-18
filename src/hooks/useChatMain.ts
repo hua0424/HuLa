@@ -182,27 +182,31 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
       return
     }
 
-    aiclawGroupConfigContext.value = {
-      aiclawUid: targetUid,
+    const defaultConfig: AiclawGroupConfigItem = {
       roomId,
-      config: {
-        roomId,
-        rateLimitPerMinute: 10,
-        dailyLimit: 1000,
-        respondToAi: true,
-        mentionRequired: true
-      }
+      rateLimitPerMinute: 10,
+      dailyLimit: 1000,
+      respondToAi: true,
+      mentionRequired: true
     }
+
+    aiclawGroupConfigContext.value = null
     aiclawGroupConfigModalVisible.value = true
     aiclawGroupConfigModalLoading.value = true
     aiclawGroupConfigModalError.value = ''
 
     try {
-      await chatStore.loadAiclawGroupConfigs(Number(targetUid))
+      const ok = await chatStore.loadAiclawGroupConfigs(Number(targetUid))
+      if (!ok) {
+        aiclawGroupConfigModalError.value = t('aiclaw.group_settings.load_failed')
+        return
+      }
       const list = chatStore.getAiclawGroupConfigList(Number(targetUid))
       const matched = list.find((cfg) => cfg.roomId === roomId)
-      if (matched) {
-        aiclawGroupConfigContext.value.config = matched
+      aiclawGroupConfigContext.value = {
+        aiclawUid: targetUid,
+        roomId,
+        config: matched ?? defaultConfig
       }
     } catch (error) {
       console.error('[useChatMain] 加载 aiclaw 群配置失败:', error)

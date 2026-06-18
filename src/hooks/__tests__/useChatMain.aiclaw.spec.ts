@@ -200,6 +200,7 @@ describe('useChatMain aiclaw 群设置入口', () => {
   it('openAiclawGroupConfigModal 加载到当前群配置后写入 context', async () => {
     mockFns.isAiclawUser.mockReturnValue(true)
     mockFns.isMyAiclaw.mockReturnValue(true)
+    mockFns.loadConfigs.mockResolvedValue(true)
     mockFns.getConfigList.mockReturnValue([
       {
         roomId: 'room-1',
@@ -226,7 +227,45 @@ describe('useChatMain aiclaw 群设置入口', () => {
     })
   })
 
-  it('openAiclawGroupConfigModal 加载失败时设置 error 状态', async () => {
+  it('openAiclawGroupConfigModal 加载成功但无当前群配置时使用默认值', async () => {
+    mockFns.loadConfigs.mockResolvedValue(true)
+    mockFns.getConfigList.mockReturnValue([
+      {
+        roomId: 'room-other',
+        rateLimitPerMinute: 20,
+        dailyLimit: 500,
+        respondToAi: false,
+        mentionRequired: false
+      }
+    ] as any)
+
+    const wrapper = mountHook()
+    await wrapper.vm.ctx.openAiclawGroupConfigModal('2001')
+    await flushPromises()
+
+    expect(wrapper.vm.ctx.aiclawGroupConfigModalError.value).toBe('')
+    expect(wrapper.vm.ctx.aiclawGroupConfigContext.value?.config).toMatchObject({
+      roomId: 'room-1',
+      rateLimitPerMinute: 10,
+      dailyLimit: 1000,
+      respondToAi: true,
+      mentionRequired: true
+    })
+  })
+
+  it('openAiclawGroupConfigModal 加载失败时设置 error 且 context 为空', async () => {
+    mockFns.loadConfigs.mockResolvedValue(false)
+
+    const wrapper = mountHook()
+    await wrapper.vm.ctx.openAiclawGroupConfigModal('2001')
+    await flushPromises()
+
+    expect(wrapper.vm.ctx.aiclawGroupConfigModalLoading.value).toBe(false)
+    expect(wrapper.vm.ctx.aiclawGroupConfigModalError.value).toBe('加载群聊配置失败')
+    expect(wrapper.vm.ctx.aiclawGroupConfigContext.value).toBeNull()
+  })
+
+  it('openAiclawGroupConfigModal 抛出异常时设置 error 且 context 为空', async () => {
     mockFns.loadConfigs.mockRejectedValue(new Error('network'))
 
     const wrapper = mountHook()
@@ -235,6 +274,7 @@ describe('useChatMain aiclaw 群设置入口', () => {
 
     expect(wrapper.vm.ctx.aiclawGroupConfigModalLoading.value).toBe(false)
     expect(wrapper.vm.ctx.aiclawGroupConfigModalError.value).toBe('加载群聊配置失败')
+    expect(wrapper.vm.ctx.aiclawGroupConfigContext.value).toBeNull()
   })
 
   it('handleAiclawGroupConfigSave 成功时关闭弹窗并清空 saving', async () => {

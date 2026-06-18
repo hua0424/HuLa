@@ -1,7 +1,14 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import ContextMenu from '@/components/common/ContextMenu.vue'
+
+vi.mock('@/utils/PlatformConstants', () => ({
+  isMobile: vi.fn(() => false),
+  isMac: vi.fn(() => false),
+  isWindows: vi.fn(() => true),
+  isWeb: vi.fn(() => false)
+}))
 
 const i18n = createI18n({
   legacy: false,
@@ -31,7 +38,10 @@ describe('ContextMenu testid 透传', () => {
         menu: [{ label: '测试', icon: 'setting', testid: 'test-normal-item' }]
       },
       global: {
-        plugins: [i18n]
+        plugins: [i18n],
+        directives: {
+          resize: {}
+        }
       },
       slots: {
         default: '<div class="trigger">右键我</div>'
@@ -51,7 +61,10 @@ describe('ContextMenu testid 透传', () => {
         specialMenu: [{ label: '退出', icon: 'logout', testid: 'test-special-item' }]
       },
       global: {
-        plugins: [i18n]
+        plugins: [i18n],
+        directives: {
+          resize: {}
+        }
       },
       slots: {
         default: '<div class="trigger">右键我</div>'
