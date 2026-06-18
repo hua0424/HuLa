@@ -51,7 +51,8 @@
                 v-else
                 @click="handleClick(item)"
                 @mouseenter="handleMouseEnter(item, index)"
-                @mouseleave="handleMouseLeave">
+                @mouseleave="handleMouseLeave"
+                :data-testid="item.testid">
                 <div class="menu-item-content">
                   <svg><use :href="`#${getMenuItemProp(item, 'icon')}`"></use></svg>
                   <p class="h-24px">{{ getMenuItemProp(item, 'label') }}</p>
@@ -70,7 +71,8 @@
                 class="menu-item"
                 :class="{ 'menu-item-danger': isDangerousItem(item) }"
                 v-for="item in visibleSpecialMenu"
-                :key="item.label">
+                :key="item.label"
+                :data-testid="item.testid">
                 <svg><use :href="`#${getMenuItemProp(item, 'icon')}`"></use></svg>
                 <p class="h-24px">{{ getMenuItemProp(item, 'label') }}</p>
               </div>

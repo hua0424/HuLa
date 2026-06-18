@@ -72,6 +72,8 @@ declare namespace OPT {
     click?: (...args: any[]) => void
     visible?: (...args: any[]) => void
     children?: RightMenu[] | ((...args: any[]) => void)
+    /** 自动化测试用稳定定位标识 */
+    testid?: string
   } | null
 
   /**

@@ -116,6 +116,7 @@
     "save": "保存",
     "save_success": "配置已保存",
     "save_failed": "保存失败",
+    "load_failed": "加载群聊配置失败",
     "config_changed": "AI 助理 {name} 的群聊配置已更新"
   },
   "auto_reply_tag": "自动回复"

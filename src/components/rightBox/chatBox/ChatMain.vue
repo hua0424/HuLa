@@ -90,7 +90,9 @@
                 }
               ">
               <!-- REQ-004: autoReply 消息标记 -->
-              <div v-if="chatStore.isAutoReplyMessage(item.message.id)" class="auto-reply-tag text-(10px #999) mb-2px px-4px">
+              <div
+                v-if="chatStore.isAutoReplyMessage(item.message.id)"
+                class="auto-reply-tag text-(10px #999) mb-2px px-4px">
                 {{ t('aiclaw.auto_reply_tag') }}
               </div>
               <RenderMessage
@@ -196,6 +198,48 @@
       </div>
     </div>
   </n-modal>
+
+  <n-modal
+    v-model:show="aiclawGroupConfigModalVisible"
+    class="w-360px border-rd-8px"
+    data-testid="aiclaw-group-config-modal"
+    :mask-closable="!aiclawGroupConfigModalSaving">
+    <div class="bg-[--bg-popover] w-360px h-full p-6px box-border flex flex-col">
+      <div
+        v-if="isMac()"
+        @click="aiclawGroupConfigModalVisible = false"
+        class="mac-close z-999 size-13px shadow-inner bg-#ed6a5eff rounded-50% select-none absolute left-6px">
+        <svg class="hidden size-7px color-#000 select-none absolute top-3px left-3px">
+          <use href="#close"></use>
+        </svg>
+      </div>
+
+      <svg
+        v-if="isWindows()"
+        @click="aiclawGroupConfigModalVisible = false"
+        class="w-12px h-12px ml-a cursor-pointer select-none">
+        <use href="#close"></use>
+      </svg>
+      <div class="flex flex-col gap-20px p-[22px_10px_10px_22px] select-none">
+        <span class="text-(16px [--text-color]) font-500">{{ t('aiclaw.group_settings.title') }}</span>
+        <n-spin :show="aiclawGroupConfigModalLoading">
+          <div v-if="aiclawGroupConfigModalError" class="text-(12px #d03553)">
+            {{ aiclawGroupConfigModalError }}
+          </div>
+          <AiclawGroupConfigForm
+            v-else-if="aiclawGroupConfigContext"
+            :config="aiclawGroupConfigContext.config"
+            :saving="aiclawGroupConfigModalSaving"
+            @save="handleAiclawGroupConfigSave" />
+        </n-spin>
+        <n-flex justify="end" :size="12">
+          <n-button :disabled="aiclawGroupConfigModalSaving" secondary @click="aiclawGroupConfigModalVisible = false">
+            {{ t('home.chat_main.cancel') }}
+          </n-button>
+        </n-flex>
+      </div>
+    </div>
+  </n-modal>
 </template>
 
 <script setup lang="ts">
@@ -224,6 +268,7 @@ import { isAiclawUser as checkAiclaw } from '@/utils/AiclawUtils'
 import { useGroupStore } from '@/stores/group'
 import FileUploadProgress from '@/components/rightBox/FileUploadProgress.vue'
 import ThinkingPanel from '@/components/rightBox/chatBox/ThinkingPanel.vue'
+import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
 
 const selfEmit = defineEmits(['scroll'])
 const { t } = useI18n()
@@ -260,7 +305,13 @@ const {
   groupNicknameValue,
   groupNicknameError,
   groupNicknameSubmitting,
-  handleGroupNicknameConfirm
+  handleGroupNicknameConfirm,
+  aiclawGroupConfigModalVisible,
+  aiclawGroupConfigModalLoading,
+  aiclawGroupConfigModalSaving,
+  aiclawGroupConfigModalError,
+  aiclawGroupConfigContext,
+  handleAiclawGroupConfigSave
 } = chatMainContext
 const { enableScroll } = usePopover(selectKey, 'image-chat-main')
 
