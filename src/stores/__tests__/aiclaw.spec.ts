@@ -79,7 +79,7 @@ describe('useAiclawStore', () => {
     expect(mockImRequestSilent).toHaveBeenCalledTimes(2)
   })
 
-  it('并发调用 ensureLoaded 只发一次请求', async () => {
+  it('invalidate 在 ensureLoaded 在途时调用，过期结果被丢弃、缓存保持失效', async () => {
     let resolveRequest!: (value: Array<{ uid: string }>) => void
     const requestPromise = new Promise<Array<{ uid: string }>>((resolve) => {
       resolveRequest = resolve
@@ -88,13 +88,27 @@ describe('useAiclawStore', () => {
 
     const store = useAiclawStore()
     const p1 = store.ensureLoaded()
-    const p2 = store.ensureLoaded()
-    const p3 = store.ensureLoaded()
 
+    // 请求尚未返回时缓存被 invalidate（例如删除/重新创建 aiclaw）
+    store.invalidate()
+    expect(store.loaded).toBe(false)
+    expect(store.loading).toBe(false)
+    expect(store.isMyAiclaw('1001')).toBe(false)
+
+    // 过期的在途请求返回，应被 generation 守卫丢弃
     resolveRequest([{ uid: '1001' }])
-    await Promise.all([p1, p2, p3])
+    await p1
 
-    expect(mockImRequestSilent).toHaveBeenCalledTimes(1)
-    expect(store.isMyAiclaw('1001')).toBe(true)
+    expect(store.loaded).toBe(false)
+    expect(store.isMyAiclaw('1001')).toBe(false)
+    expect(store.myAiclawUids.size).toBe(0)
+
+    // 下一次 ensureLoaded 应重新发起请求并采用最新结果
+    mockImRequestSilent.mockResolvedValueOnce([{ uid: '2002' }])
+    await store.ensureLoaded()
+
+    expect(store.isMyAiclaw('2002')).toBe(true)
+    expect(store.isMyAiclaw('1001')).toBe(false)
+    expect(mockImRequestSilent).toHaveBeenCalledTimes(2)
   })
 })

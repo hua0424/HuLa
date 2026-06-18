@@ -10,6 +10,8 @@ import { imRequestSilent } from '@/utils/ImRequestUtils'
  * 故在打开群会话时预取「我的 aiclaw」uid 集合，右键时同步判断。
  */
 export const useAiclawStore = defineStore(StoresEnum.AICLAW, () => {
+  /** 请求世代号；invalidate 会递增，用于丢弃过期的在途请求结果 */
+  let generation = 0
   /** 是否已完成至少一次成功加载 */
   const loaded = ref(false)
   /** 是否已被标记为失效（下次 ensureLoaded 需要重新拉取） */
@@ -23,6 +25,7 @@ export const useAiclawStore = defineStore(StoresEnum.AICLAW, () => {
    * 幂等地预取当前用户的 aiclaw 列表。
    * - 已加载且未失效时不重复请求。
    * - 请求失败时静默降级，不影响现有状态，下次调用会重试。
+   * - 使用 generation 守卫，确保被 invalidate 后的在途响应不会污染缓存。
    */
   const ensureLoaded = async () => {
     if (loaded.value && !invalidated.value) {
@@ -32,18 +35,29 @@ export const useAiclawStore = defineStore(StoresEnum.AICLAW, () => {
       return
     }
 
+    const callGen = ++generation
     loading.value = true
     try {
       const list = await imRequestSilent<Array<{ uid: string | number }>>({
         url: ImUrlEnum.AICLAW_LIST
       })
+      // 若此期间发生过 invalidate，则丢弃过期结果
+      if (callGen !== generation) {
+        return
+      }
       myAiclawUids.value = new Set((list || []).map((item) => String(item.uid)))
       loaded.value = true
       invalidated.value = false
     } catch {
       // 静默失败：保持未加载状态，下次右键前可再试
+      if (callGen !== generation) {
+        return
+      }
     } finally {
-      loading.value = false
+      // 只有当前世代的请求才能解除 loading，避免旧请求覆盖 invalidate 后的状态
+      if (callGen === generation) {
+        loading.value = false
+      }
     }
   }
 
@@ -62,9 +76,11 @@ export const useAiclawStore = defineStore(StoresEnum.AICLAW, () => {
 
   /** 使缓存失效，下次 ensureLoaded() 会重新拉取 */
   const invalidate = () => {
+    generation++
     loaded.value = false
     invalidated.value = true
     myAiclawUids.value.clear()
+    loading.value = false
   }
 
   return {
