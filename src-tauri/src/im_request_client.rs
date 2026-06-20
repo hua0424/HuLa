@@ -27,7 +27,13 @@ pub fn init_network_log_dir(dir: PathBuf) {
 ///
 /// 仅记录 method/path/status/elapsed/error；绝不记录请求体或任何 token/鉴权头。
 /// 写日志失败时静默吞掉，绝不影响请求本身。
-fn log_network(method: &str, path: &str, status: Option<u16>, elapsed_ms: u64, error: Option<&str>) {
+fn log_network(
+    method: &str,
+    path: &str,
+    status: Option<u16>,
+    elapsed_ms: u64,
+    error: Option<&str>,
+) {
     let Some(dir) = NETWORK_LOG_DIR.get() else {
         // 未初始化（如尚未启动完成）时直接跳过，不阻断请求。
         return;
@@ -519,7 +525,6 @@ pub enum ImUrl {
     ScanQRCode,
     ConfirmQRCode,
     MessageSend,
-    MessageSendStream,
     MessageListByConversationId,
     MessageDelete,
     MessageDeleteByConversationId,
@@ -801,7 +806,6 @@ impl ImUrl {
 
             // ai相关 - 聊天消息
             ImUrl::MessageSend => (http::Method::POST, "ai/chat/message/send"),
-            ImUrl::MessageSendStream => (http::Method::POST, "ai/chat/message/send-stream"),
             ImUrl::MessageListByConversationId => {
                 (http::Method::GET, "ai/chat/message/list-by-conversation-id")
             }
@@ -981,9 +985,7 @@ impl ImUrl {
             ImUrl::AiclawCreate => (http::Method::POST, "im/aiclaw/create"),
             ImUrl::AiclawList => (http::Method::GET, "im/aiclaw/list"),
             ImUrl::AiclawProfile => (http::Method::PUT, "im/aiclaw/{uid}/profile"),
-            ImUrl::AiclawActivationToken => {
-                (http::Method::GET, "im/aiclaw/{uid}/activation-token")
-            }
+            ImUrl::AiclawActivationToken => (http::Method::GET, "im/aiclaw/{uid}/activation-token"),
             ImUrl::AiclawRefreshActivation => {
                 (http::Method::POST, "im/aiclaw/{uid}/refresh-activation")
             }
@@ -992,25 +994,21 @@ impl ImUrl {
             ImUrl::AiclawAuthConfirm => (http::Method::POST, "im/aiclaw/{uid}/auth-confirm"),
             ImUrl::AiclawSetPersona => (http::Method::PUT, "im/aiclaw/{uid}/persona"),
             ImUrl::AiclawConversations => (http::Method::GET, "im/aiclaw/{uid}/conversations"),
-            ImUrl::AiclawConversationMessages => {
-                (http::Method::GET, "im/aiclaw/{uid}/conversations/{friendUid}/messages")
-            }
+            ImUrl::AiclawConversationMessages => (
+                http::Method::GET,
+                "im/aiclaw/{uid}/conversations/{friendUid}/messages",
+            ),
             ImUrl::AiclawFriends => (http::Method::GET, "im/aiclaw/{uid}/friends"),
             ImUrl::AiclawRemoveFriend => {
                 (http::Method::DELETE, "im/aiclaw/{uid}/friends/{friendUid}")
             }
-            ImUrl::AiclawSetRelation => {
-                (http::Method::PUT, "im/aiclaw/{uid}/friends/{friendUid}/relation")
-            }
-            ImUrl::AiclawGroupConfigList => {
-                (http::Method::GET, "im/aiclaw/group/config")
-            }
-            ImUrl::AiclawGroupConfigUpdate => {
-                (http::Method::PUT, "im/aiclaw/group/config")
-            }
-            ImUrl::AiclawThinkingDetail => {
-                (http::Method::GET, "im/aiclaw/thinking/{thinkingId}")
-            }
+            ImUrl::AiclawSetRelation => (
+                http::Method::PUT,
+                "im/aiclaw/{uid}/friends/{friendUid}/relation",
+            ),
+            ImUrl::AiclawGroupConfigList => (http::Method::GET, "im/aiclaw/group/config"),
+            ImUrl::AiclawGroupConfigUpdate => (http::Method::PUT, "im/aiclaw/group/config"),
+            ImUrl::AiclawThinkingDetail => (http::Method::GET, "im/aiclaw/thinking/{thinkingId}"),
         }
     }
 
@@ -1148,7 +1146,6 @@ impl ImUrl {
 
             // ================ AI 聊天消息 ================
             "messageSend" => Ok(ImUrl::MessageSend),
-            "messageSendStream" => Ok(ImUrl::MessageSendStream),
             "messageListByConversationId" => Ok(ImUrl::MessageListByConversationId),
             "messageDelete" => Ok(ImUrl::MessageDelete),
             "messageDeleteByConversationId" => Ok(ImUrl::MessageDeleteByConversationId),
