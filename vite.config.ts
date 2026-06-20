@@ -163,9 +163,7 @@ export default defineConfig(({ mode }: ConfigEnv) => {
     clearScreen: false,
     // 2. tauri expects a fixed port, fail if that port is not available
     server: {
-      hmr: isWebPlatform
-        ? { protocol: 'ws', port: serverPort }
-        : { protocol: 'ws', host: host, port: serverPort },
+      hmr: isWebPlatform ? { protocol: 'ws', port: serverPort } : { protocol: 'ws', host: host, port: serverPort },
       cors: true, // 配置 CORS
       host: '0.0.0.0',
       port: serverPort,

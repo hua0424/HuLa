@@ -31,9 +31,11 @@
                 class="flex-shrink-0" />
               <div
                 class="px-12px py-8px rounded-12px text-14px break-all"
-                :class="isAiclawMsg(msg)
-                  ? 'bg-white dark:bg-#2a2a2a text-[--text-color]'
-                  : 'bg-#95ec69 dark:bg-#3a6e2a text-black dark:text-white'">
+                :class="
+                  isAiclawMsg(msg)
+                    ? 'bg-white dark:bg-#2a2a2a text-[--text-color]'
+                    : 'bg-#95ec69 dark:bg-#3a6e2a text-black dark:text-white'
+                ">
                 {{ msg.message.body?.content || '' }}
               </div>
             </div>
@@ -41,7 +43,9 @@
         </div>
 
         <!-- 空状态 -->
-        <div v-if="!loading && messages.length === 0" class="flex flex-col items-center justify-center flex-1 text-14px text-#999">
+        <div
+          v-if="!loading && messages.length === 0"
+          class="flex flex-col items-center justify-center flex-1 text-14px text-#999">
           <span>{{ t('aiclaw.conversations.empty') }}</span>
         </div>
 
@@ -126,7 +130,9 @@ const fetchMessages = async (isLoadMore = false) => {
 const fetchFriendInfo = async () => {
   try {
     // 从对话列表页的路由参数或 API 获取好友信息
-    const conversations = await imRequest<{ list: Array<{ friendUid: string; friendName: string; friendAvatar: string }> }>({
+    const conversations = await imRequest<{
+      list: Array<{ friendUid: string; friendName: string; friendAvatar: string }>
+    }>({
       url: ImUrlEnum.AICLAW_CONVERSATIONS,
       params: { uid }
     })

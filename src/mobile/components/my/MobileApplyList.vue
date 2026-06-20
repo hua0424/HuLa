@@ -210,7 +210,10 @@ const applyMsg = computed(() => (item: any) => {
     if (item.eventType === NoticeType.ADD_ME && item.receiverUserType === 4) {
       const senderName = getUserInfo(item)?.name || t('mobile_mymessage.unknown_user')
       // aiclaw 名称：优先从 operateId 查缓存，fallback 到 receiverName
-      const aiclawName = (item.operateId && groupStore.getUserInfo(item.operateId)?.name) || item.receiverName || t('mobile_mymessage.unknown_user')
+      const aiclawName =
+        (item.operateId && groupStore.getUserInfo(item.operateId)?.name) ||
+        item.receiverName ||
+        t('mobile_mymessage.unknown_user')
       return t('aiclaw.friendApply.title', { name: senderName, aiclawName })
     }
     return isCurrentUser(item.senderId)

@@ -295,7 +295,9 @@ const parseSessionText = (text?: unknown) => {
   // 如果是对象（后端直接返回了 body 对象），提取 content
   if (typeof text === 'object') {
     const obj = text as Record<string, any>
-    return String(obj.content || '').split('\n')[0].trim()
+    return String(obj.content || '')
+      .split('\n')[0]
+      .trim()
   }
   let str = String(text)
   // 尝试解析 JSON 字符串

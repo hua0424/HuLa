@@ -311,9 +311,10 @@ onMounted(async () => {
   // 初始化状态
   await updateWindowMaximized()
 
-  unlistenResized = (await appWindow?.onResized?.(() => {
-    updateWindowMaximized()
-  })) ?? null
+  unlistenResized =
+    (await appWindow?.onResized?.(() => {
+      updateWindowMaximized()
+    })) ?? null
 
   // 监听 home 窗口的关闭事件
   if (appWindow?.label === 'home') {

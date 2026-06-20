@@ -2,10 +2,7 @@
   <AutoFixHeightPage :show-footer="false">
     <template #header>
       <div class="bg-white" style="border-bottom: 1px solid; border-color: #dfdfdf">
-        <HeaderBar
-          :isOfficial="false"
-          :hidden-right="true"
-          :room-name="aiclawInfo?.name || t('aiclaw.title')" />
+        <HeaderBar :isOfficial="false" :hidden-right="true" :room-name="aiclawInfo?.name || t('aiclaw.title')" />
       </div>
     </template>
 
@@ -126,8 +123,7 @@ const authStatusMap: Record<number, 'inactive' | 'activated' | 'deactivated'> = 
   2: 'deactivated'
 }
 
-const getOnlineKey = (activeStatus?: number): 'online' | 'offline' =>
-  activeStatus === 1 ? 'online' : 'offline'
+const getOnlineKey = (activeStatus?: number): 'online' | 'offline' => (activeStatus === 1 ? 'online' : 'offline')
 
 const getAuthKey = (authStatus?: number): 'inactive' | 'activated' | 'deactivated' =>
   authStatusMap[authStatus ?? 0] || 'inactive'

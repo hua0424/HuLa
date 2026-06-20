@@ -2,10 +2,7 @@
   <AutoFixHeightPage :show-footer="false">
     <template #header>
       <div class="bg-white" style="border-bottom: 1px solid; border-color: #dfdfdf">
-        <HeaderBar
-          :isOfficial="false"
-          :hidden-right="true"
-          :room-name="t('aiclaw.title')" />
+        <HeaderBar :isOfficial="false" :hidden-right="true" :room-name="t('aiclaw.title')" />
       </div>
     </template>
 
@@ -19,7 +16,10 @@
               :key="item.uid"
               class="flex items-center gap-12px p-12px rounded-12px bg-white dark:bg-#1a1a1a shadow-sm">
               <n-avatar
-                round :size="44" :src="item.avatar || '/logo.png'" fallback-src="/logo.png"
+                round
+                :size="44"
+                :src="item.avatar || '/logo.png'"
+                fallback-src="/logo.png"
                 class="cursor-pointer flex-shrink-0"
                 @click="router.push(`/mobile/mobileMy/aiAssistant/${item.uid}`)" />
               <div
@@ -42,19 +42,19 @@
                   {{ t('aiclaw.token.view') }}
                 </n-button>
                 <!-- 已激活：标签 -->
-                <span v-else-if="item.authStatus === 1" class="text-#18a058 text-11px font-500 px-6px py-2px rounded-4px bg-#18a05815">
+                <span
+                  v-else-if="item.authStatus === 1"
+                  class="text-#18a058 text-11px font-500 px-6px py-2px rounded-4px bg-#18a05815">
                   {{ t('aiclaw.token.activated') }}
                 </span>
                 <!-- 已停用：标签 -->
-                <span v-else-if="item.authStatus === 2" class="text-#d03050 text-11px font-500 px-6px py-2px rounded-4px bg-#d0305015">
+                <span
+                  v-else-if="item.authStatus === 2"
+                  class="text-#d03050 text-11px font-500 px-6px py-2px rounded-4px bg-#d0305015">
                   {{ t('aiclaw.token.deactivated') }}
                 </span>
                 <!-- 删除按钮 -->
-                <n-button
-                  size="tiny"
-                  type="error"
-                  quaternary
-                  @click="handleDelete(item)">
+                <n-button size="tiny" type="error" quaternary @click="handleDelete(item)">
                   {{ t('aiclaw.delete.title') }}
                 </n-button>
               </div>
@@ -82,16 +82,10 @@
   <AiclawCreateForm v-model:visible="showCreateForm" @created="onCreated" />
 
   <!-- Token 展示弹窗 -->
-  <AiclawTokenDialog
-    v-model:visible="showTokenDialog"
-    :token="createdToken"
-    :uid="viewingUid"
-    @refreshed="fetchList" />
+  <AiclawTokenDialog v-model:visible="showTokenDialog" :token="createdToken" :uid="viewingUid" @refreshed="fetchList" />
 
   <!-- 删除确认弹窗 -->
-  <AiclawDeleteConfirmDialog
-    v-model:visible="showDeleteDialog"
-    @confirm="handleDeleteConfirm" />
+  <AiclawDeleteConfirmDialog v-model:visible="showDeleteDialog" @confirm="handleDeleteConfirm" />
 </template>
 
 <script setup lang="ts">
@@ -130,11 +124,9 @@ const deletingUid = ref('')
 const aiclawList = ref<AiclawListItem[]>([])
 
 // ISS-010 A1: activeStatus → 实时在线; 右侧按钮区已用 aiclaw.token.* 表达 authStatus, 这里只保留在线状态文案
-const getOnlineKey = (activeStatus?: number): 'online' | 'offline' =>
-  activeStatus === 1 ? 'online' : 'offline'
+const getOnlineKey = (activeStatus?: number): 'online' | 'offline' => (activeStatus === 1 ? 'online' : 'offline')
 
-const onlineTextClass = (activeStatus?: number) =>
-  activeStatus === 1 ? 'text-#18a058' : 'text-#999'
+const onlineTextClass = (activeStatus?: number) => (activeStatus === 1 ? 'text-#18a058' : 'text-#999')
 
 const fetchList = async () => {
   try {

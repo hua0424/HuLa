@@ -278,12 +278,17 @@ onMounted(() => {
   userDetailInfo.value = foundedUser
 
   // aiclaw 用户需要额外获取 ownerInfo（缓存中没有）
-  if (foundedUser?.userType === UserType.AICLAW || contactStore.contactsList.find((c) => c.uid === uid)?.userType === 4) {
-    imRequest<any>({ url: ImUrlEnum.GET_USER_BY_ID, params: { id: uid } }).then((detail) => {
-      if (detail?.ownerInfo) {
-        userDetailInfo.value = { ...userDetailInfo.value, ...detail } as any
-      }
-    }).catch(() => {})
+  if (
+    foundedUser?.userType === UserType.AICLAW ||
+    contactStore.contactsList.find((c) => c.uid === uid)?.userType === 4
+  ) {
+    imRequest<any>({ url: ImUrlEnum.GET_USER_BY_ID, params: { id: uid } })
+      .then((detail) => {
+        if (detail?.ownerInfo) {
+          userDetailInfo.value = { ...userDetailInfo.value, ...detail } as any
+        }
+      })
+      .catch(() => {})
   }
 
   if (foundedUser?.userStateId && foundedUser?.userStateId !== '0') {
