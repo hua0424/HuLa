@@ -24,7 +24,12 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { MsgEnum, NotificationTypeEnum, TauriCommand } from '@/enums'
 import { useMitt } from '@/hooks/useMitt'
 import type { MessageType } from '@/services/types'
-import { WsResponseMessageType, type StreamStartPayload, type StreamDeltaPayload, type StreamEndPayload } from '@/services/wsType'
+import {
+  WsResponseMessageType,
+  type StreamStartPayload,
+  type StreamDeltaPayload,
+  type StreamEndPayload
+} from '@/services/wsType'
 import { useChatStore } from '@/stores/chat'
 import { useFileStore } from '@/stores/file'
 import { useGlobalStore } from '@/stores/global'

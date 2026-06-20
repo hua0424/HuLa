@@ -306,9 +306,7 @@ export const useLogin = () => {
     } catch (_e) {
       // 解析失败,忽略
     }
-    const existingEntry = loginHistoriesStore.loginHistories.find(
-      (h: any) => h.account === account.account
-    )
+    const existingEntry = loginHistoriesStore.loginHistories.find((h: any) => h.account === account.account)
     if (localStorage.getItem('rememberPassword') === 'true') {
       historyEntry.password = info.value.password || pendingPassword || existingEntry?.password || ''
     } else {
@@ -440,10 +438,7 @@ export const useLogin = () => {
     if (isWeb()) {
       try {
         const { webLoginCommand } = await import('@/services/webLoginCommand')
-        await webLoginCommand(
-          { account, password, uid: auto ? userStore.userInfo?.uid : undefined },
-          auto
-        )
+        await webLoginCommand({ account, password, uid: auto ? userStore.userInfo?.uid : undefined }, auto)
         loginDisabled.value = true
         loading.value = false
         loginText.value = t('login.status.success_redirect')
@@ -501,10 +496,7 @@ export const useLogin = () => {
         // 安全考虑:附带 timestamp,init() 端校验 30s TTL,避免崩溃/异常导致明文密码残留
         if (!isMobile() && !isWeb()) {
           if (localStorage.getItem('rememberPassword') === 'true' && password) {
-            localStorage.setItem(
-              '__pendingHistoryPassword',
-              JSON.stringify({ password, ts: Date.now() })
-            )
+            localStorage.setItem('__pendingHistoryPassword', JSON.stringify({ password, ts: Date.now() }))
           } else {
             // 未勾选"记住密码"时,主动清空,避免历史残留
             localStorage.removeItem('__pendingHistoryPassword')
