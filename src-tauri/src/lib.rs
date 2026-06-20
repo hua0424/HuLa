@@ -69,8 +69,6 @@ pub struct AppData {
     backend_task: Mutex<bool>,
     /// 限制对 SQLite 的写入并发，避免 database is locked
     pub write_lock: Arc<Mutex<()>>,
-    /// 记录正在进行的 AI 流式任务
-    pub stream_tasks: Arc<Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
 pub(crate) static APP_STATE_READY: AtomicBool = AtomicBool::new(false);
@@ -186,7 +184,10 @@ async fn initialize_app_data(
     match app_handle.path().app_log_dir() {
         Ok(log_dir) => {
             if let Err(create_err) = std::fs::create_dir_all(&log_dir) {
-                tracing::warn!("Failed to create app_log_dir for network.log: {}", create_err);
+                tracing::warn!(
+                    "Failed to create app_log_dir for network.log: {}",
+                    create_err
+                );
             }
             im_request_client::init_network_log_dir(log_dir);
         }
@@ -377,7 +378,6 @@ fn common_setup(app_handle: AppHandle) -> Result<(), Box<dyn std::error::Error>>
                 // 后端任务默认完成
                 backend_task: Mutex::new(true),
                 write_lock: Arc::new(Mutex::new(())),
-                stream_tasks: Arc::new(Mutex::new(std::collections::HashMap::new())),
             });
             app_handle.manage(OauthServerState::default());
             APP_STATE_READY.store(true, Ordering::SeqCst);
@@ -399,8 +399,6 @@ fn common_setup(app_handle: AppHandle) -> Result<(), Box<dyn std::error::Error>>
 // 公共的命令处理器函数
 fn get_invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static
 {
-    use crate::command::ai_command::ai_message_cancel_stream;
-    use crate::command::ai_command::ai_message_send_stream;
     use crate::command::markdown_command::{get_readme_html, parse_markdown};
     #[cfg(mobile)]
     use crate::command::set_complete;
@@ -492,9 +490,6 @@ fn get_invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         im_request_command,
         get_settings,
         update_settings,
-        // AI 相关命令
-        ai_message_send_stream,
-        ai_message_cancel_stream,
         // OAuth
         start_oauth_server,
         // Markdown 相关命令
