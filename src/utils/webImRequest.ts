@@ -128,74 +128,6 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   feedCommentAll: { method: 'GET', path: 'im/feed/comment/all' },
   feedCommentCount: { method: 'GET', path: 'im/feed/comment/count' },
 
-  // AI 聊天消息
-  messageSend: { method: 'POST', path: 'ai/chat/message/send' },
-  messageSendStream: { method: 'POST', path: 'ai/chat/message/send-stream' },
-  messageListByConversationId: { method: 'GET', path: 'ai/chat/message/list-by-conversation-id' },
-  messageDelete: { method: 'DELETE', path: 'ai/chat/message/delete' },
-  messageDeleteByConversationId: { method: 'DELETE', path: 'ai/chat/message/delete-by-conversation-id' },
-  messagePage: { method: 'GET', path: 'ai/chat/message/page' },
-  messageDeleteByAdmin: { method: 'DELETE', path: 'ai/chat/message/delete-by-admin' },
-  messageSaveGeneratedContent: { method: 'POST', path: 'ai/chat/message/save-generated-content' },
-
-  // AI 聊天对话
-  conversationCreateMy: { method: 'POST', path: 'ai/chat/conversation/create-my' },
-  conversationUpdateMy: { method: 'PUT', path: 'ai/chat/conversation/update-my' },
-  conversationMyList: { method: 'GET', path: 'ai/chat/conversation/my-list' },
-  conversationGetMy: { method: 'GET', path: 'ai/chat/conversation/get-my' },
-  conversationDeleteMy: { method: 'DELETE', path: 'ai/chat/conversation/delete-my' },
-  conversationPage: { method: 'GET', path: 'ai/chat/conversation/page' },
-
-  // AI 模型相关
-  modelCreate: { method: 'POST', path: 'ai/model/create' },
-  modelUpdate: { method: 'PUT', path: 'ai/model/update' },
-  modelDelete: { method: 'DELETE', path: 'ai/model/delete' },
-  modelGet: { method: 'GET', path: 'ai/model/get' },
-  modelRemainingUsage: { method: 'GET', path: 'ai/model/get-remaining-usage' },
-  modelPage: { method: 'GET', path: 'ai/model/page' },
-  modelSimpleList: { method: 'GET', path: 'ai/model/simple-list' },
-
-  // 聊天角色相关
-  chatRolePage: { method: 'GET', path: 'ai/chat-role/page' },
-  chatRoleCategoryList: { method: 'GET', path: 'ai/chat-role/category-list' },
-  chatRoleCreate: { method: 'POST', path: 'ai/chat-role/create' },
-  chatRoleUpdate: { method: 'PUT', path: 'ai/chat-role/update' },
-  chatRoleDelete: { method: 'DELETE', path: 'ai/chat-role/delete' },
-
-  // API 密钥相关
-  apiKeyPage: { method: 'GET', path: 'ai/api-key/page' },
-  apiKeySimpleList: { method: 'GET', path: 'ai/api-key/simple-list' },
-  apiKeyCreate: { method: 'POST', path: 'ai/api-key/create' },
-  apiKeyUpdate: { method: 'PUT', path: 'ai/api-key/update' },
-  apiKeyDelete: { method: 'DELETE', path: 'ai/api-key/delete' },
-  apiKeyBalance: { method: 'GET', path: 'ai/api-key/balance' },
-
-  // 平台相关
-  platformList: { method: 'GET', path: 'ai/platform/list' },
-  platformAddModel: { method: 'POST', path: 'ai/platform/add-model' },
-
-  // AI 绘画
-  imageMyPage: { method: 'GET', path: 'ai/image/my-page' },
-  imageGet: { method: 'GET', path: 'ai/image/get-my' },
-  imageDraw: { method: 'POST', path: 'ai/image/draw' },
-  imageMyListByIds: { method: 'GET', path: 'ai/image/my-list-by-ids' },
-  imageDeleteMy: { method: 'DELETE', path: 'ai/image/delete-my' },
-
-  // AI 视频生成
-  videoMyPage: { method: 'GET', path: 'ai/video/my-page' },
-  videoGet: { method: 'GET', path: 'ai/video/get' },
-  videoMyListByIds: { method: 'GET', path: 'ai/video/my-list-by-ids' },
-  videoGenerate: { method: 'POST', path: 'ai/video/generate' },
-  videoDeleteMy: { method: 'DELETE', path: 'ai/video/delete-my' },
-
-  // AI 音频生成
-  audioMyPage: { method: 'GET', path: 'ai/audio/my-page' },
-  audioGetMy: { method: 'GET', path: 'ai/audio/get-my' },
-  audioMyListByIds: { method: 'GET', path: 'ai/audio/my-list-by-ids' },
-  audioGenerate: { method: 'POST', path: 'ai/audio/generate' },
-  audioDeleteMy: { method: 'DELETE', path: 'ai/audio/delete-my' },
-  audioVoices: { method: 'GET', path: 'ai/audio/voices' },
-
   // AIclaw AI 助理（固定路径）
   aiclawCreate: { method: 'POST', path: 'im/aiclaw/create' },
   aiclawList: { method: 'GET', path: 'im/aiclaw/list' },
@@ -224,11 +156,7 @@ const BASIC_AUTH = btoa('luohuo_web:luohuo_web_secret')
 /**
  * Web 模式 IM HTTP 请求工具，替代 invoke('im_request_command')
  */
-export async function webImRequest<T = any>(
-  url: ImUrlEnum,
-  body?: any,
-  params?: Record<string, any>
-): Promise<T> {
+export async function webImRequest<T = any>(url: ImUrlEnum, body?: any, params?: Record<string, any>): Promise<T> {
   const baseUrl = import.meta.env.VITE_WEB_API_URL
   if (!baseUrl) {
     throw new Error('[webImRequest] VITE_WEB_API_URL 未配置')

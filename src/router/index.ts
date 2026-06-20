@@ -388,38 +388,6 @@ const getDesktopRoutes = (): Array<RouteRecordRaw> => [
     ]
   },
   {
-    path: '/robot',
-    name: 'robot',
-    component: () => import('@/plugins/robot/index.vue'),
-    children: [
-      {
-        path: '/welcome',
-        name: 'welcome',
-        component: () => import('@/plugins/robot/views/Welcome.vue')
-      },
-      {
-        path: '/chat',
-        name: 'chat',
-        component: () => import('@/plugins/robot/views/Chat.vue')
-      },
-      {
-        path: '/chatSettings',
-        name: 'chatSettings',
-        component: () => import('@/plugins/robot/views/chatSettings/index.vue')
-      },
-      {
-        path: '/imageGeneration',
-        name: 'imageGeneration',
-        component: () => import('@/plugins/robot/views/ImageGeneration.vue')
-      },
-      {
-        path: '/videoGeneration',
-        name: 'videoGeneration',
-        component: () => import('@/plugins/robot/views/VideoGeneration.vue')
-      }
-    ]
-  },
-  {
     path: '/aiAssistant',
     name: 'aiAssistant',
     component: () => import('@/views/aiAssistantWindow/index.vue')

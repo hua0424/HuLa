@@ -572,8 +572,6 @@ export enum TauriCommand {
   REMOVE_TOKENS = 'remove_tokens',
   /** 查询聊天历史记录 */
   QUERY_CHAT_HISTORY = 'query_chat_history',
-  /** AI 消息流式发送 */
-  AI_MESSAGE_SEND_STREAM = 'ai_message_send_stream',
   /** 生成 MinIO 预签名 URL */
   GENERATE_MINIO_PRESIGNED_URL = 'generate_minio_presigned_url',
   /** 通过 Rust 端 PUT 上传本地文件 */
@@ -825,104 +823,6 @@ export enum ImUrlEnum {
   MERGE_MSG = 'mergeMsg',
   GET_USER_BY_ID = 'getUserById',
   GET_USER_BY_IDS = 'getUserByIds',
-
-  /** 发送 AI 消息 */
-  MESSAGE_SEND_STREAM = 'messageSendStream',
-  /** 保存生成内容消息（用于音频、图片、视频等生成功能） */
-  MESSAGE_SAVE_GENERATED_CONTENT = 'messageSaveGeneratedContent',
-  /** 获取指定会话消息列表 */
-  MESSAGE_LIST_BY_CONVERSATION_ID = 'messageListByConversationId',
-  /** 删除单条消息 */
-  MESSAGE_DELETE = 'messageDelete',
-  /** 删除指定对话的消息 */
-  MESSAGE_DELETE_BY_CONVERSATION_ID = 'messageDeleteByConversationId',
-  /** 获取会话消息列表 */
-  CONVERSATION_PAGE = 'conversationPage',
-  /** 获得【我的】聊天对话 */
-  CONVERSATION_GET_MY = 'conversationGetMy',
-  /** 创建会话 */
-  CONVERSATION_CREATE_MY = 'conversationCreateMy',
-  /** 更新会话 */
-  CONVERSATION_UPDATE_MY = 'conversationUpdateMy',
-  /** 删除会话 */
-  CONVERSATION_DELETE_MY = 'conversationDeleteMy',
-  /** 获得模型 */
-  MODEL_GET = 'modelGet',
-  /** 获得模型剩余使用次数 */
-  MODEL_REMAINING_USAGE = 'modelRemainingUsage',
-  /** 获得模型分页 */
-  MODEL_PAGE = 'modelPage',
-  /** 创建模型 */
-  MODEL_CREATE = 'modelCreate',
-  /** 更新模型 */
-  MODEL_UPDATE = 'modelUpdate',
-  /** 删除模型 */
-  MODEL_DELETE = 'modelDelete',
-
-  // ==================== AI 图片生成 ====================
-  /** 获取【我的】图片生成分页 */
-  IMAGE_MY_PAGE = 'imageMyPage',
-  /** 获取【我的】图片生成记录 */
-  IMAGE_GET = 'imageGet',
-  /** 根据ID列表获取【我的】图片记录 */
-  IMAGE_MY_LIST_BY_IDS = 'imageMyListByIds',
-  /** 生成图片 */
-  IMAGE_DRAW = 'imageDraw',
-  /** 删除【我的】图片记录 */
-  IMAGE_DELETE_MY = 'imageDeleteMy',
-
-  // ==================== AI 视频生成 ====================
-  /** 获取【我的】视频生成分页 */
-  VIDEO_MY_PAGE = 'videoMyPage',
-  /** 获取【我的】视频生成记录 */
-  VIDEO_GET = 'videoGet',
-  /** 根据ID列表获取【我的】视频记录 */
-  VIDEO_MY_LIST_BY_IDS = 'videoMyListByIds',
-  /** 生成视频 */
-  VIDEO_GENERATE = 'videoGenerate',
-  /** 删除【我的】视频记录 */
-  VIDEO_DELETE_MY = 'videoDeleteMy',
-
-  // ==================== AI 音频生成 ====================
-  /** 获取【我的】音频生成分页 */
-  AUDIO_MY_PAGE = 'audioMyPage',
-  /** 获取【我的】音频生成记录 */
-  AUDIO_GET_MY = 'audioGetMy',
-  /** 根据ID列表获取【我的】音频记录 */
-  AUDIO_MY_LIST_BY_IDS = 'audioMyListByIds',
-  /** 生成音频 */
-  AUDIO_GENERATE = 'audioGenerate',
-  /** 删除【我的】音频记录 */
-  AUDIO_DELETE_MY = 'audioDeleteMy',
-  /** 获取指定模型支持的声音列表 */
-  AUDIO_VOICES = 'audioVoices',
-
-  /** API 密钥分页 */
-  API_KEY_PAGE = 'apiKeyPage',
-  /** API 密钥简单列表 */
-  API_KEY_SIMPLE_LIST = 'apiKeySimpleList',
-  /** 创建 API 密钥 */
-  API_KEY_CREATE = 'apiKeyCreate',
-  /** 更新 API 密钥 */
-  API_KEY_UPDATE = 'apiKeyUpdate',
-  /** 删除 API 密钥 */
-  API_KEY_DELETE = 'apiKeyDelete',
-  /** 查询 API 密钥余额 */
-  API_KEY_BALANCE = 'apiKeyBalance',
-  /** 获取平台列表 */
-  PLATFORM_LIST = 'platformList',
-  /** 添加平台模型 */
-  PLATFORM_ADD_MODEL = 'platformAddModel',
-  /** 聊天角色分页 */
-  CHAT_ROLE_PAGE = 'chatRolePage',
-  /** 聊天角色类别列表 */
-  CHAT_ROLE_CATEGORY_LIST = 'chatRoleCategoryList',
-  /** 创建聊天角色 */
-  CHAT_ROLE_CREATE = 'chatRoleCreate',
-  /** 更新聊天角色 */
-  CHAT_ROLE_UPDATE = 'chatRoleUpdate',
-  /** 删除聊天角色 */
-  CHAT_ROLE_DELETE = 'chatRoleDelete',
 
   // ==================== AIclaw AI助理 ====================
   /** 创建 AI 助理 */
