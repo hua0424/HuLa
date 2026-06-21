@@ -263,8 +263,7 @@ import { timeToStr } from '@/utils/ComputedTime'
 import { useCachedStore } from '@/stores/cached'
 import { isMessageMultiSelectEnabled } from '@/utils/MessageSelect'
 import { isMac, isMobile, isWeb, isWindows } from '@/utils/PlatformConstants'
-import { isAiclawUser as checkAiclaw } from '@/utils/AiclawUtils'
-import { useGroupStore } from '@/stores/group'
+import { useAiclawSession } from '@/hooks/useAiclawSession'
 import FileUploadProgress from '@/components/rightBox/FileUploadProgress.vue'
 import ThinkingPanel from '@/components/rightBox/chatBox/ThinkingPanel.vue'
 import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
@@ -288,7 +287,6 @@ const appWindow = isWeb() ? null : WebviewWindow.getCurrent()
 const globalStore = useGlobalStore()
 const chatStore = useChatStore()
 const userStore = useUserStore()
-const groupStore = useGroupStore()
 const networkStatus = useNetworkStatus()
 // const { footerHeight } = useChatLayoutGlobal() // 已移除，不再需要
 const { createWebviewWindow } = useWindow()
@@ -318,31 +316,11 @@ provide('popoverControls', { enableScroll })
 // 滚动意图状态
 const scrollIntent = ref<ScrollIntentEnum>(ScrollIntentEnum.NONE)
 
+// REQ-006-3：会话级 AI 判定 seam
+const { showThinking: showThinkingPanel } = useAiclawSession()
+
 // 计算属性
 const isGroup = computed<boolean>(() => chatStore.isGroup)
-/** 当前会话是否为 AI 助理 */
-const isAiclawSession = computed(() => {
-  const session = globalStore.currentSession
-  return session && !isGroup.value && checkAiclaw(session.detailId)
-})
-/** REQ-004 是否显示 ThinkingPanel（群聊含 aiclaw + 私聊 AI 助理，D1 决策统一） */
-const showThinkingPanel = computed(() => {
-  // 私聊 AI 助理
-  if (isAiclawSession.value) return true
-  // 群聊中有 aiclaw 成员时始终显示（防止布局跳动）
-  if (isGroup.value) {
-    const roomId = globalStore.currentSessionRoomId
-    if (roomId) {
-      // P2-1: 群中有 aiclaw 成员就始终显示面板
-      const members = groupStore.getUserListByRoomId(roomId)
-      if (members.some((m) => m.userType === 4)) return true
-      // 有活跃思考或归档也显示
-      if (chatStore.isCurrentRoomThinking) return true
-      if (chatStore.thinkingArchive.get(roomId)?.length) return true
-    }
-  }
-  return false
-})
 const userUid = computed(() => userStore.userInfo!.uid || '')
 const currentNewMsgCount = computed(() => chatStore.currentNewMsgCount || null)
 const newMsgCountLabel = computed(() => {

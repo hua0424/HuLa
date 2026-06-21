@@ -42,7 +42,7 @@
         <!-- AI助理主人信息 -->
         <div
           v-if="
-            userDetailInfo?.userType === UserType.AICLAW &&
+            isAiclawByUserType(userDetailInfo?.userType) &&
             userDetailInfo?.ownerInfo &&
             userDetailInfo?.ownerInfo?.uid !== userStore.userInfo?.uid
           "
@@ -171,6 +171,7 @@ import { useContactStore } from '@/stores/contacts'
 import { useGlobalStore } from '@/stores/global'
 import { useGroupStore } from '@/stores/group'
 import { getSessionDetailWithFriends } from '@/utils/ImRequestUtils'
+import { isAiclaw, isAiclawByUserType } from '@/utils/AiclawUtils'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
@@ -278,10 +279,7 @@ onMounted(() => {
   userDetailInfo.value = foundedUser
 
   // aiclaw 用户需要额外获取 ownerInfo（缓存中没有）
-  if (
-    foundedUser?.userType === UserType.AICLAW ||
-    contactStore.contactsList.find((c) => c.uid === uid)?.userType === 4
-  ) {
+  if (isAiclaw(uid)) {
     imRequest<any>({ url: ImUrlEnum.GET_USER_BY_ID, params: { id: uid } })
       .then((detail) => {
         if (detail?.ownerInfo) {

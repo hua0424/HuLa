@@ -1,23 +1,26 @@
-import { UserType, type OnlineEnum } from '@/enums'
-import { useGroupStore } from '@/stores/group'
+import { UserType } from '@/enums'
 import { useContactStore } from '@/stores/contacts'
+import { useGroupStore } from '@/stores/group'
 
 /**
- * 判断指定用户是否为 AI 助理（aiclaw）
- * 查询优先级：groupStore（群成员缓存）→ contactStore（好友列表）
- * 覆盖场景：群聊（groupStore 有数据）+ 私聊（contactStore 有数据）
+ * 判断指定用户是否为 AI 助理（aiclaw）。
+ * 单一事实源：优先查 groupStore 群成员缓存，fallback 到 contactStore 好友列表。
+ * 覆盖群聊、私聊两种场景，也兼容传入 number 类型的 uid。
  */
-export const isAiclawUser = (uid: string): boolean => {
+export const isAiclaw = (uid: string | number | undefined | null): boolean => {
+  if (uid === undefined || uid === null || uid === '') return false
+  const uidStr = String(uid)
+
   // 优先从群成员缓存查找（群聊场景）
   const groupStore = useGroupStore()
-  const userInfo = groupStore.getUserInfo(uid)
+  const userInfo = groupStore.getUserInfo(uidStr)
   if (userInfo?.userType !== undefined) {
     return userInfo.userType === UserType.AICLAW
   }
 
   // fallback: 从好友列表查找（私聊场景，groupStore 无该用户数据）
   const contactStore = useContactStore()
-  const friend = contactStore.contactsList.find((item) => item.uid === uid)
+  const friend = contactStore.contactsList.find((item) => item.uid === uidStr)
   if (friend?.userType !== undefined) {
     return friend.userType === UserType.AICLAW
   }
@@ -26,10 +29,11 @@ export const isAiclawUser = (uid: string): boolean => {
 }
 
 /**
- * 通过好友列表的 userType 字段判断是否为 AI 助理
+ * 通过 userType 判断是否为 AI 助理。
+ * 列表/排序等已有 userType 字段的场景使用，内部口径与 isAiclaw 一致。
  */
 export const isAiclawByUserType = (userType?: number): boolean => {
-  return userType === 4
+  return userType === UserType.AICLAW
 }
 
 /** AI 助理在线三态 */
@@ -45,7 +49,7 @@ export type AiclawStatus = 'inactive' | 'online' | 'offline'
  * 对于好友列表场景，统一按 activeStatus 判断在线/离线，
  * "未激活"状态仅在 AI 助理管理页（有 authStatus）中显示。
  */
-export const getAiclawStatus = (activeStatus: OnlineEnum): AiclawStatus => {
+export const getAiclawStatus = (activeStatus: number): AiclawStatus => {
   // OnlineEnum.ONLINE = 1
   if (activeStatus === 1) return 'online'
   return 'offline'
