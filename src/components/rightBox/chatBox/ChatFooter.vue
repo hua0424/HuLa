@@ -130,9 +130,7 @@
 
           <n-popover trigger="hover" :show-arrow="false" placement="bottom">
             <template #trigger>
-              <div
-                class="flex-center gap-2px mr-12px"
-                :class="{ 'opacity-30 pointer-events-none': isAiclawSession }">
+              <div class="flex-center gap-2px mr-12px" :class="{ 'opacity-30 pointer-events-none': isAiclawSession }">
                 <svg @click="handleFileOpen">
                   <use href="#file2"></use>
                 </svg>
@@ -228,7 +226,7 @@ import { readFile } from '@tauri-apps/plugin-fs'
 import { FOOTER_HEIGHT, MAX_FOOTER_HEIGHT, MIN_FOOTER_HEIGHT } from '@/common/constants'
 import LocationModal from '@/components/rightBox/location/LocationModal.vue'
 import { MittEnum, MobilePanelStateEnum, MsgEnum, RoomTypeEnum } from '@/enums'
-import { isAiclawUser as isAiclawCheck } from '@/utils/AiclawUtils'
+import { useAiclawSession } from '@/hooks/useAiclawSession'
 import { useChatLayoutGlobal } from '@/hooks/useChatLayout'
 import { type SelectionRange, useCommon } from '@/hooks/useCommon.ts'
 import { useGlobalShortcut } from '@/hooks/useGlobalShortcut.ts'
@@ -372,11 +370,7 @@ const isFriend = computed(() => {
 })
 
 /** 当前会话是否为 AI 助理（首期禁用语音/文件/图片） */
-const isAiclawSession = computed(() => {
-  if (!isSingleChat.value) return false
-  const target = detailId.value
-  return !!target && isAiclawCheck(target)
-})
+const { disableComposer: isAiclawSession } = useAiclawSession()
 
 // 监听emojiShow的变化，当emojiShow为true时关闭recentlyTip
 watch(emojiShow, (newValue) => {

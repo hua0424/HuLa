@@ -15,11 +15,7 @@
 
         <!-- AI 助理激活码管理（仅 owner 可见） -->
         <div v-if="isAiclawOwner" class="px-20px py-12px">
-          <n-button
-            block
-            secondary
-            :disabled="aiclawDeactivated"
-            @click="handleRefreshActivation">
+          <n-button block secondary :disabled="aiclawDeactivated" @click="handleRefreshActivation">
             {{ t('aiclaw.token.refresh') }}
           </n-button>
         </div>
@@ -114,7 +110,8 @@ import { ImUrlEnum } from '@/enums'
 import { useContactStore } from '@/stores/contacts'
 import { useUserStore } from '@/stores/user'
 import { useFeedStore } from '@/stores/feed'
-import { isAiclawUser } from '@/utils/AiclawUtils'
+import { useAiclawStore } from '@/stores/aiclaw'
+import { isAiclaw } from '@/utils/AiclawUtils'
 import { imRequest } from '@/utils/ImRequestUtils'
 
 const feedStore = useFeedStore()
@@ -141,9 +138,11 @@ const uid = route.params.uid as string
 
 const isMyPage = ref(false)
 
+const aiclawStore = useAiclawStore()
+
 // AI 助理激活码管理（仅 owner 可见）
-const isAiclawFriend = computed(() => isAiclawUser(uid))
-const isAiclawOwner = ref(false)
+const isAiclawFriend = computed(() => isAiclaw(uid))
+const isAiclawOwner = computed(() => aiclawStore.isMyAiclaw(uid))
 const aiclawDeactivated = computed(() => {
   const contact = contactStore.contactsList.find((c) => c.uid === uid)
   return (contact as any)?.authStatus === 2
@@ -253,14 +252,9 @@ onMounted(async () => {
     isMyPage.value = false
   }
 
-  // 检查当前用户是否为该 aiclaw 的 owner
+  // 检查当前用户是否为该 aiclaw 的 owner（统一走 aiclawStore，去重网络请求）
   if (isAiclawFriend.value) {
-    try {
-      const list = await imRequest<Array<{ uid: string }>>({ url: ImUrlEnum.AICLAW_LIST })
-      isAiclawOwner.value = (list || []).some((a) => String(a.uid) === String(uid))
-    } catch {
-      isAiclawOwner.value = false
-    }
+    await aiclawStore.ensureLoaded()
   }
 
   // 初始加载动态列表

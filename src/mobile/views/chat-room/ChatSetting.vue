@@ -240,14 +240,12 @@
   </AutoFixHeightPage>
 
   <!-- AI 助理删除强确认弹窗 -->
-  <AiclawDeleteConfirmDialog
-    v-model:visible="showAiclawDeleteDialog"
-    @confirm="handleAiclawDeleteConfirm" />
+  <AiclawDeleteConfirmDialog v-model:visible="showAiclawDeleteDialog" @confirm="handleAiclawDeleteConfirm" />
 </template>
 
 <script setup lang="ts">
 import { MittEnum, NotificationTypeEnum, OnlineEnum, RoleEnum, RoomTypeEnum } from '@/enums'
-import { isAiclawUser } from '@/utils/AiclawUtils'
+import { useAiclawSession } from '@/hooks/useAiclawSession'
 import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
 import { useAvatarUpload } from '@/hooks/useAvatarUpload'
 import { useMitt } from '@/hooks/useMitt.ts'
@@ -379,12 +377,9 @@ const goToNotice = () => {
   })
 }
 
-// AI 助理删除强确认
+// REQ-006-3：AI 助理会话判定收敛到 seam
+const { isAiclawPrivateSession: isCurrentAiclaw } = useAiclawSession()
 const showAiclawDeleteDialog = ref(false)
-const isCurrentAiclaw = computed(() => {
-  const session = activeItem.value
-  return session && !isGroup.value && isAiclawUser(session.detailId)
-})
 
 const handleAiclawDeleteConfirm = async (_password: string) => {
   const session = activeItem.value

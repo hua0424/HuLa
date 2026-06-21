@@ -170,10 +170,7 @@
             </div>
 
             <!-- AI 助理 Token 重置 -->
-            <div
-              v-if="isAiclawSession"
-              class="box-item cursor-pointer"
-              @click="handleAiclawRefreshActivation">
+            <div v-if="isAiclawSession" class="box-item cursor-pointer" @click="handleAiclawRefreshActivation">
               <p class="color-#7c5cfc">{{ t('aiclaw.token.refresh') }}</p>
             </div>
 
@@ -588,14 +585,10 @@
   <AvatarCropper ref="cropperRef" v-model:show="showCropper" :image-url="localImageUrl" @crop="handleCrop" />
 
   <!-- AI 助理删除强确认 -->
-  <AiclawDeleteConfirmDialog
-    v-model:visible="showAiclawDeleteDialog"
-    @confirm="handleAiclawDeleteConfirm" />
+  <AiclawDeleteConfirmDialog v-model:visible="showAiclawDeleteDialog" @confirm="handleAiclawDeleteConfirm" />
 
   <!-- AI 助理激活码展示 -->
-  <AiclawTokenDialog
-    v-model:visible="showAiclawTokenDialog"
-    :uid="activeItem?.detailId" />
+  <AiclawTokenDialog v-model:visible="showAiclawTokenDialog" :uid="activeItem?.detailId" />
 </template>
 
 <script setup lang="ts">
@@ -622,7 +615,7 @@ import {
   UserType,
   MsgEnum
 } from '@/enums'
-import { isAiclawUser as isAiclawCheck } from '@/utils/AiclawUtils'
+import { useAiclawSession } from '@/hooks/useAiclawSession'
 import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
 import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
 import { useAvatarUpload } from '@/hooks/useAvatarUpload'
@@ -787,11 +780,9 @@ const resolveQrExportIcon = async () => {
 const isChannel = computed(() => activeItem.value?.hotFlag === IsAllUserEnum.Yes || currentSessionRoomId.value === '1')
 // 是否为bot用户
 const isBotUser = computed(() => activeItem.value?.account === UserType.BOT)
-// 是否为 AI 助理会话
-const isAiclawSession = computed(() => {
-  if (!activeItem.value?.detailId || chatStore.isGroup) return false
-  return isAiclawCheck(activeItem.value.detailId)
-})
+// REQ-006-3：AI 助理会话模式统一收敛到 seam
+const { headerMode } = useAiclawSession()
+const isAiclawSession = computed(() => headerMode.value === 'aiclaw')
 
 // AI 助理删除确认
 const showAiclawDeleteDialog = ref(false)

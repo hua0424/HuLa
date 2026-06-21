@@ -69,7 +69,11 @@
                       <n-flex vertical justify="center" :size="10" class="flex-1">
                         <n-space align="center" :size="10">
                           <span class="text-(14px [--text-color])">{{ item.name }}</span>
-                          <span v-if="item.userType === 4" class="text-#7c5cfc text-11px font-500 px-4px py-1px rounded-4px bg-#7c5cfc15">AI</span>
+                          <span
+                            v-if="isAiclawByUserType(item.userType)"
+                            class="text-#7c5cfc text-11px font-500 px-4px py-1px rounded-4px bg-#7c5cfc15">
+                            AI
+                          </span>
                           <template v-for="account in item.itemIds" :key="account">
                             <img class="size-20px" :src="cachedStore.badgeById(account)?.img" alt="" />
                           </template>
@@ -154,6 +158,7 @@ import { useGroupStore } from '@/stores/group'
 import { useSettingStore } from '@/stores/setting'
 import { useUserStore } from '@/stores/user'
 import { AvatarUtils } from '@/utils/AvatarUtils'
+import { isAiclawByUserType } from '@/utils/AiclawUtils'
 import { searchGroup, searchUser } from '@/utils/ImRequestUtils'
 import { isMobile } from '@/utils/PlatformConstants'
 import router from '@/router'

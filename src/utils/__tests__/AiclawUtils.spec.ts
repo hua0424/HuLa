@@ -1,0 +1,76 @@
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ref } from 'vue'
+
+const mockGroupGetUserInfo = vi.fn()
+const mockContactList = ref<Array<{ uid: string; userType?: number }>>([])
+
+vi.mock('@/stores/group', () => ({
+  useGroupStore: vi.fn(() => ({
+    getUserInfo: mockGroupGetUserInfo
+  }))
+}))
+vi.mock('@/stores/contacts', () => ({
+  useContactStore: vi.fn(() => ({
+    contactsList: mockContactList.value
+  }))
+}))
+
+import { UserType } from '@/enums'
+import { isAiclaw, isAiclawByUserType } from '@/utils/AiclawUtils'
+
+describe('AiclawUtils', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockGroupGetUserInfo.mockReset()
+    mockContactList.value = []
+  })
+
+  describe('isAiclaw', () => {
+    it('群成员缓存命中时按 userType 判断', () => {
+      mockGroupGetUserInfo.mockReturnValue({ uid: '1001', userType: UserType.AICLAW })
+      expect(isAiclaw('1001')).toBe(true)
+
+      mockGroupGetUserInfo.mockReturnValue({ uid: '1002', userType: 1 })
+      expect(isAiclaw('1002')).toBe(false)
+    })
+
+    it('群成员缓存未命中时 fallback 到好友列表', () => {
+      mockGroupGetUserInfo.mockReturnValue(undefined)
+      mockContactList.value = [{ uid: '1003', userType: UserType.AICLAW as number }]
+      expect(isAiclaw('1003')).toBe(true)
+
+      mockContactList.value = [{ uid: '1004', userType: 1 }]
+      expect(isAiclaw('1004')).toBe(false)
+    })
+
+    it('两处都没数据时返回 false', () => {
+      mockGroupGetUserInfo.mockReturnValue(undefined)
+      mockContactList.value = []
+      expect(isAiclaw('9999')).toBe(false)
+    })
+
+    it('userType 为 undefined 时继续 fallback', () => {
+      mockGroupGetUserInfo.mockReturnValue({ uid: '1005', userType: undefined })
+      mockContactList.value = [{ uid: '1005', userType: UserType.AICLAW as number }]
+      expect(isAiclaw('1005')).toBe(true)
+    })
+
+    it('对 number uid 归一化后判断', () => {
+      mockGroupGetUserInfo.mockReturnValue({ uid: 2001, userType: UserType.AICLAW })
+      expect(isAiclaw(2001)).toBe(true)
+    })
+  })
+
+  describe('isAiclawByUserType', () => {
+    it('userType 为 AICLAW 时返回 true', () => {
+      expect(isAiclawByUserType(UserType.AICLAW)).toBe(true)
+    })
+
+    it('userType 为其他值或 undefined 时返回 false', () => {
+      expect(isAiclawByUserType(1)).toBe(false)
+      expect(isAiclawByUserType(2)).toBe(false)
+      expect(isAiclawByUserType(undefined)).toBe(false)
+    })
+  })
+})
