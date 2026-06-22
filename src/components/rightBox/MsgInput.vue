@@ -16,7 +16,10 @@
         <div v-if="isMobile()" class="flex items-center justify-center w-6 ms-5px h-2.5rem">
           <svg
             @click="handleVoiceClick"
-            :class="mobilePanelState === MobilePanelStateEnum.VOICE ? 'text-#169781' : ''"
+            :class="[
+              mobilePanelState === MobilePanelStateEnum.VOICE ? 'text-#169781' : '',
+              isVoiceUploadDisabled ? 'opacity-30 pointer-events-none' : ''
+            ]"
             class="w-25px h-25px mt-2px outline-none">
             <use href="#voice"></use>
           </svg>
@@ -245,6 +248,7 @@ import { type VirtualListInst } from 'naive-ui'
 import { storeToRefs } from 'pinia'
 import type { Ref } from 'vue'
 import { MacOsKeyEnum, MittEnum, RoomTypeEnum, ThemeEnum, WinKeyEnum } from '@/enums'
+import { useAiclawSession } from '@/hooks/useAiclawSession'
 import { useCommon } from '@/hooks/useCommon.ts'
 import { useMitt } from '@/hooks/useMitt.ts'
 import { useMsgInput } from '@/hooks/useMsgInput.ts'
@@ -287,6 +291,10 @@ const virtualListInstAI = useTemplateRef<VirtualListInst>('virtualListInst-AI')
 // 录音模式状态
 const isVoiceMode = ref(false)
 const groupStore = useGroupStore()
+const { allowedUploadTypes } = useAiclawSession()
+const isVoiceUploadDisabled = computed(
+  () => allowedUploadTypes.value !== null && !allowedUploadTypes.value.includes('voice')
+)
 
 // 文件上传弹窗状态
 const showFileModal = ref(false)
@@ -534,6 +542,7 @@ const handleEmojiClick = () => {
 
 /** 点击语音按钮 */
 const handleVoiceClick = () => {
+  if (isVoiceUploadDisabled.value) return
   mobilePanelState.value =
     mobilePanelState.value === MobilePanelStateEnum.VOICE ? MobilePanelStateEnum.NONE : MobilePanelStateEnum.VOICE
 

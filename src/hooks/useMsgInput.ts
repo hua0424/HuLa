@@ -868,7 +868,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
       path: file.path,
       fileName: file.name,
       size: file.size,
-      mimeType: file.type,
+      mime: file.type,
       reply: reply.value.content
         ? {
             content: reply.value.content,
@@ -1060,7 +1060,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
           url: '',
           fileName: job.file.name,
           size: job.file.size,
-          mimeType: job.file.type,
+          mime: job.file.type,
           replyMsgId: reply.value.content ? reply.value.key : undefined,
           reply: replyPayload
         },

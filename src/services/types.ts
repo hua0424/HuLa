@@ -406,6 +406,9 @@ export type ImageBody = {
   width: number
   height: number
   thumbnailPath?: string
+  /** REQ-007-71：服务端/ plugins 解析需要 mime + fileName */
+  mime?: string
+  fileName?: string
 }
 /** 语音消息体 */
 export type VoiceBody = {
@@ -441,6 +444,8 @@ export type FileBody = {
   fileName: string
   url: string
   localPath?: string
+  /** REQ-007-71：服务端/ plugins 解析需要 mime */
+  mime?: string
 }
 /** 文本消息体 */
 export type TextBody = {
