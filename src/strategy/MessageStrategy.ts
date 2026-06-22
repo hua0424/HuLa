@@ -267,6 +267,8 @@ class ImageMessageStrategyImpl extends AbstractMessageStrategy {
         type: this.msgType,
         path: tempPath, // 用于上传
         url: previewUrl, // 用于预览显示
+        fileName: file.name, // REQ-007-71：服务端/ plugins 解析需要 fileName
+        mime: file.type, // REQ-007-71：服务端/ plugins 解析需要 mime
         imageInfo: {
           width, // 原始图片宽度
           height, // 原始图片高度
@@ -350,6 +352,8 @@ class ImageMessageStrategyImpl extends AbstractMessageStrategy {
         type: this.msgType,
         path: normalizedPath, // 用于上传
         url: previewUrl, // 用于预览显示
+        fileName: originalFile.name, // REQ-007-71
+        mime: originalFile.type, // REQ-007-71
         imageInfo: {
           width, // 原始图片宽度
           height, // 原始图片高度
@@ -441,6 +445,8 @@ class ImageMessageStrategyImpl extends AbstractMessageStrategy {
       width: msg.imageInfo.width,
       height: msg.imageInfo.height,
       size: msg.imageInfo.size,
+      fileName: msg.fileName,
+      mime: msg.mime,
       replyMsgId: msg.reply?.key || void 0,
       reply: reply.value.content
         ? {
@@ -644,7 +650,7 @@ class FileMessageStrategyImpl extends AbstractMessageStrategy {
       path: tempPath,
       fileName: validatedFile.name,
       size: validatedFile.size,
-      mimeType: validatedFile.type,
+      mime: validatedFile.type, // REQ-007-71：与服务端/ plugins 契约对齐为 mime
       reply: replyValue.content
         ? {
             content: replyValue.content,
@@ -660,7 +666,7 @@ class FileMessageStrategyImpl extends AbstractMessageStrategy {
       path: msg.path,
       fileName: msg.fileName,
       size: msg.size,
-      mimeType: msg.mimeType,
+      mime: msg.mime, // REQ-007-71：与服务端/ plugins 契约对齐为 mime
       replyMsgId: msg.reply?.key || undefined,
       reply: reply.value.content
         ? {

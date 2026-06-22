@@ -67,28 +67,58 @@ describe('useAiclawSession', () => {
     mockGroupMembers.value = members
   }
 
-  it('私聊 aiclaw：isAiclawPrivateSession=true, disableComposer=true, headerMode=aiclaw', () => {
+  it('私聊 aiclaw：isAiclawPrivateSession=true, allowedUploadTypes=["image","file"], headerMode=aiclaw', () => {
     setPrivateSession('2001', true)
     const session = useAiclawSession()
     expect(session.isAiclawPrivateSession.value).toBe(true)
-    expect(session.disableComposer.value).toBe(true)
+    expect(session.allowedUploadTypes.value).toEqual(['image', 'file'])
+    expect(session.disableComposer.value).toBe(false)
     expect(session.headerMode.value).toBe('aiclaw')
   })
 
-  it('普通私聊：isAiclawPrivateSession=false, disableComposer=false, headerMode=normal', () => {
+  it('普通私聊：isAiclawPrivateSession=false, allowedUploadTypes=null, headerMode=normal', () => {
     setPrivateSession('1001', false)
     const session = useAiclawSession()
     expect(session.isAiclawPrivateSession.value).toBe(false)
+    expect(session.allowedUploadTypes.value).toBeNull()
     expect(session.disableComposer.value).toBe(false)
     expect(session.headerMode.value).toBe('normal')
   })
 
-  it('群聊不是私聊 aiclaw 会话', () => {
+  it('群聊不是私聊 aiclaw 会话，allowedUploadTypes=null', () => {
     setGroupSession('room-g1')
     const session = useAiclawSession()
     expect(session.isAiclawPrivateSession.value).toBe(false)
+    expect(session.allowedUploadTypes.value).toBeNull()
     expect(session.disableComposer.value).toBe(false)
     expect(session.headerMode.value).toBe('normal')
+  })
+
+  describe('allowedUploadTypes 语义（P1-4）', () => {
+    it('1:1 私聊 aiclaw 返回 ["image","file"]，不含 voice', () => {
+      setPrivateSession('2001', true)
+      const session = useAiclawSession()
+      expect(session.allowedUploadTypes.value).toEqual(['image', 'file'])
+      expect(session.allowedUploadTypes.value).not.toContain('voice')
+    })
+
+    it('普通私聊返回 null（表示不限）', () => {
+      setPrivateSession('1001', false)
+      const session = useAiclawSession()
+      expect(session.allowedUploadTypes.value).toBeNull()
+    })
+
+    it('群聊返回 null（表示不限）', () => {
+      setGroupSession('room-g1', [{ uid: '2001', userType: 4 }])
+      const session = useAiclawSession()
+      expect(session.allowedUploadTypes.value).toBeNull()
+    })
+
+    it('显式断言不会返回空数组 [] 表"不限"', () => {
+      setPrivateSession('1001', false)
+      const session = useAiclawSession()
+      expect(session.allowedUploadTypes.value).not.toEqual([])
+    })
   })
 
   it('showThinking：私聊 aiclaw 为 true', () => {

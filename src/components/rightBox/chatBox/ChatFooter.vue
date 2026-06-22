@@ -130,7 +130,9 @@
 
           <n-popover trigger="hover" :show-arrow="false" placement="bottom">
             <template #trigger>
-              <div class="flex-center gap-2px mr-12px" :class="{ 'opacity-30 pointer-events-none': isAiclawSession }">
+              <div
+                class="flex-center gap-2px mr-12px"
+                :class="{ 'opacity-30 pointer-events-none': isUploadDisabled('file') }">
                 <svg @click="handleFileOpen">
                   <use href="#file2"></use>
                 </svg>
@@ -139,29 +141,29 @@
                 </svg>
               </div>
             </template>
-            <span>{{ isAiclawSession ? t('aiclaw.chat.notice') : t('editor.file') }}</span>
+            <span>{{ isUploadDisabled('file') ? t('aiclaw.chat.notice') : t('editor.file') }}</span>
           </n-popover>
           <n-popover trigger="hover" :show-arrow="false" placement="bottom">
             <template #trigger>
               <svg
                 @click="handleImageOpen"
                 class="mr-18px"
-                :class="{ 'opacity-30 pointer-events-none': isAiclawSession }">
+                :class="{ 'opacity-30 pointer-events-none': isUploadDisabled('image') }">
                 <use href="#photo"></use>
               </svg>
             </template>
-            <span>{{ isAiclawSession ? t('aiclaw.chat.notice') : t('editor.image') }}</span>
+            <span>{{ isUploadDisabled('image') ? t('aiclaw.chat.notice') : t('editor.image') }}</span>
           </n-popover>
           <n-popover trigger="hover" :show-arrow="false" placement="bottom">
             <template #trigger>
               <svg
                 @click="handleVoiceRecord"
                 class="mr-18px"
-                :class="{ 'opacity-30 pointer-events-none': isAiclawSession }">
+                :class="{ 'opacity-30 pointer-events-none': isUploadDisabled('voice') }">
                 <use href="#voice"></use>
               </svg>
             </template>
-            <span>{{ isAiclawSession ? t('aiclaw.chat.notice') : t('editor.voice') }}</span>
+            <span>{{ isUploadDisabled('voice') ? t('aiclaw.chat.notice') : t('editor.voice') }}</span>
           </n-popover>
           <n-popover v-if="!isMac()" trigger="hover" :show-arrow="false" placement="bottom">
             <template #trigger>
@@ -226,7 +228,7 @@ import { readFile } from '@tauri-apps/plugin-fs'
 import { FOOTER_HEIGHT, MAX_FOOTER_HEIGHT, MIN_FOOTER_HEIGHT } from '@/common/constants'
 import LocationModal from '@/components/rightBox/location/LocationModal.vue'
 import { MittEnum, MobilePanelStateEnum, MsgEnum, RoomTypeEnum } from '@/enums'
-import { useAiclawSession } from '@/hooks/useAiclawSession'
+import { useAiclawSession, type AllowedUploadType } from '@/hooks/useAiclawSession'
 import { useChatLayoutGlobal } from '@/hooks/useChatLayout'
 import { type SelectionRange, useCommon } from '@/hooks/useCommon.ts'
 import { useGlobalShortcut } from '@/hooks/useGlobalShortcut.ts'
@@ -369,8 +371,10 @@ const isFriend = computed(() => {
   return contactStore.contactsList.some((contact: FriendItem) => contact.uid === target)
 })
 
-/** 当前会话是否为 AI 助理（首期禁用语音/文件/图片） */
-const { disableComposer: isAiclawSession } = useAiclawSession()
+/** 当前会话是否为 AI 助理（上传能力按类型判定） */
+const { allowedUploadTypes } = useAiclawSession()
+const isUploadDisabled = (type: AllowedUploadType) =>
+  allowedUploadTypes.value !== null && !allowedUploadTypes.value.includes(type)
 
 // 监听emojiShow的变化，当emojiShow为true时关闭recentlyTip
 watch(emojiShow, (newValue) => {

@@ -96,6 +96,13 @@ vi.mock('@/hooks/useMsgInput.ts', () => ({
   })
 }))
 
+// --- useAiclawSession：上传能力 seam；本测试只关心 composer 错误，给默认不限 ---
+vi.mock('@/hooks/useAiclawSession', () => ({
+  useAiclawSession: () => ({
+    allowedUploadTypes: ref(null)
+  })
+}))
+
 // --- hooks / 工具汇聚点：仅提供被测无关的安全默认 ---
 vi.mock('@/hooks/useMitt.ts', () => ({
   useMitt: { on: vi.fn(), off: vi.fn(), emit: vi.fn() }

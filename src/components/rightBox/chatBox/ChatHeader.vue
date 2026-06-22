@@ -32,6 +32,7 @@
             <!-- AI 助理标签 -->
             <div
               v-if="isAiclawSession"
+              data-testid="aiclaw-badge"
               class="dark:bg-[#7c5cfc40] bg-[#7c5cfc15] dark:border-(1px solid #7c5cfc) border-(1px solid #7c5cfc) flex-center px-8px py-4px rounded-6px">
               <p class="text-(11px #7c5cfc)">{{ t('aiclaw.badge') }}</p>
             </div>
