@@ -29,6 +29,9 @@ export const useAiclawGroupConfigStore = defineStore(StoresEnum.AICLAW_GROUP_CON
     config: AiclawGroupConfigItem
   } | null>(null)
 
+  // 防止关闭弹窗后仍在飞的 openModal 异步加载覆盖新的弹窗上下文
+  let openModalCallId = 0
+
   const defaultConfigFor = (roomId: string): AiclawGroupConfigItem => ({
     roomId,
     rateLimitPerMinute: 10,
@@ -51,6 +54,7 @@ export const useAiclawGroupConfigStore = defineStore(StoresEnum.AICLAW_GROUP_CON
       return
     }
 
+    const callId = ++openModalCallId
     modalContext.value = null
     modalVisible.value = true
     modalLoading.value = true
@@ -59,6 +63,10 @@ export const useAiclawGroupConfigStore = defineStore(StoresEnum.AICLAW_GROUP_CON
     try {
       // 并行加载群配置与 aiclaw adapterType（后者通常已缓存）
       const [ok] = await Promise.all([chatStore.loadAiclawGroupConfigs(Number(targetUid)), aiclawStore.ensureLoaded()])
+      // 如果期间又打开了新弹窗，旧请求结果直接丢弃，避免覆盖新上下文
+      if (callId !== openModalCallId) {
+        return
+      }
       if (!ok) {
         modalError.value = t('aiclaw.group_settings.load_failed')
         return
@@ -77,7 +85,10 @@ export const useAiclawGroupConfigStore = defineStore(StoresEnum.AICLAW_GROUP_CON
       console.error('[AiclawGroupConfigStore] 加载 aiclaw 群配置失败:', error)
       modalError.value = t('aiclaw.group_settings.load_failed')
     } finally {
-      modalLoading.value = false
+      // 只有最新一次调用才能解除 loading，否则可能把新弹窗的 loading 提前关掉
+      if (callId === openModalCallId) {
+        modalLoading.value = false
+      }
     }
   }
 

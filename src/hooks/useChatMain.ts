@@ -33,7 +33,6 @@ import { useSettingStore } from '@/stores/setting.ts'
 import { useUserStore } from '@/stores/user'
 import { useAiclawStore } from '@/stores/aiclaw'
 import { useAiclawGroupConfigStore } from '@/stores/aiclawGroupConfig'
-import { isAiclaw } from '@/utils/AiclawUtils'
 import { saveFileAttachmentAs, saveVideoAttachmentAs } from '@/utils/AttachmentSaver'
 import { isDiffNow } from '@/utils/ComputedTime.ts'
 import { extractFileName, removeTag } from '@/utils/Formatting'
@@ -876,7 +875,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
       visible: (item: any) => {
         const targetUid = getTargetUid(item)
         if (!targetUid) return false
-        return isAiclaw(String(targetUid)) && aiclawStore.isMyAiclaw(targetUid)
+        return aiclawStore.isMyAiclaw(targetUid)
       }
     },
     {

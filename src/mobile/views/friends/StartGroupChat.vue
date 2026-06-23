@@ -197,16 +197,16 @@ const createGroup = async () => {
       )
     })
 
-    if (matchedSession?.roomId) {
-      globalStore.updateCurrentSessionRoomId(matchedSession.roomId)
-      await Promise.all([
-        groupStore.addGroupDetail(matchedSession.roomId),
-        groupStore.getGroupUserList(matchedSession.roomId, true)
-      ])
+    // #87：无论会话列表是否已刷新到新群，都使用创建返回的 roomId 作为兜底
+    const roomId = matchedSession?.roomId ?? resultRoomId ?? resultId
+    if (roomId) {
+      if (matchedSession?.roomId) {
+        globalStore.updateCurrentSessionRoomId(matchedSession.roomId)
+      }
+      await Promise.all([groupStore.addGroupDetail(roomId), groupStore.getGroupUserList(roomId, true)])
 
       // #87：如果新建群中包含当前用户拥有的 aiclaw，弹出批量入群配置
       await aiclawStore.ensureLoaded()
-      const roomId = matchedSession.roomId
       const detail = groupStore.getGroupDetail(roomId)
       const account = detail?.account
       const aiclawItems = selectedList.value
