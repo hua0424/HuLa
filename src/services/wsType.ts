@@ -361,9 +361,9 @@ export type AiclawGroupConfig = {
   respondToAi: boolean
   /** 是否需要 @ 触发（server 返回 1/0，前端转 boolean） */
   mentionRequired?: boolean
-  /** 是否已批准入群（server 返回 1/0，前端转 boolean；undefined=尚未加载） */
+  /** 是否已被主人批准在该群响应（server 返回 1/0，前端转 boolean；REQ-009 #86 / #88） */
   approved?: boolean
-  /** 群工作目录（dir-based agent 生效；空/undefined=使用默认派生路径） */
+  /** 群工作目录（dir-based agent 生效；空/undefined=使用默认派生路径；REQ-009 #87） */
   workspaceDir?: string
 }
 

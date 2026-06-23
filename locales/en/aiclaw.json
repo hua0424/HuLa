@@ -37,6 +37,7 @@
     "activated": "Activated",
     "deactivated": "Deactivated"
   },
+  "silent_badge": "Silent",
   "chat": {
     "notice": "AI Assistant Chat - Responses are AI-generated",
     "streaming": "Responding..."

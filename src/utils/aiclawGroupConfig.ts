@@ -42,6 +42,21 @@ export const buildAiclawGroupConfigUpdateBody = (
 })
 
 /**
+ * 把 server 返回的原始群配置归一化成前端 AiclawGroupConfig。
+ *
+ * #82 / REQ-009：server 对 boolean 类字段（respondToAi / mentionRequired / approved）
+ * 可能返回 true/false 或 Integer 1/0；前端统一转成 boolean，避免 n-switch / 徽标判断混乱。
+ * 缺省时：rate/daily 为 0，开关类字段为 false，approved 未返回时 undefined（不显示沉默标识）。
+ */
+export const normalizeAiclawGroupConfig = (raw: Record<string, unknown>): AiclawGroupConfig => ({
+  rateLimitPerMinute: Number(raw.rateLimitPerMinute ?? 0),
+  dailyLimit: Number(raw.dailyLimit ?? 0),
+  respondToAi: raw.respondToAi === true || raw.respondToAi === 1,
+  mentionRequired: raw.mentionRequired === true || raw.mentionRequired === 1,
+  approved: raw.approved === undefined ? undefined : raw.approved === true || raw.approved === 1
+})
+
+/**
  * #56 群卡片标题：把内部数字 room_id 显示替换成「群名称(群号)」，
  * 例 `Dawn的群组(hula_mq8zrGyH)`。群号 = im_room_group.account（唯一人类可读群标识，
  * 用于进群核对）。取数在 chat.ts loadAiclawGroupConfigs 侧 enrich（groupStore 共享缓存

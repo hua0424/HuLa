@@ -56,9 +56,16 @@
                       style="border: 1px solid var(--avatar-border-color)" />
                     <!-- 文字信息 -->
                     <div class="flex flex-col leading-tight truncate">
-                      <span class="text-14px font-medium truncate">
-                        {{ groupStore.getUserInfo(item.uid)?.name }}
-                      </span>
+                      <div class="flex items-center gap-4px">
+                        <span class="text-14px font-medium truncate">
+                          {{ groupStore.getUserInfo(item.uid)?.name }}
+                        </span>
+                        <span
+                          v-if="isSilentMember(item.uid)"
+                          class="text-10px px-4px py-1px rounded-3px bg-#d0305015 text-#d03050 flex-shrink-0">
+                          {{ t('aiclaw.silent_badge') }}
+                        </span>
+                      </div>
                       <div class="text-12px text-gray-500 flex items-center gap-4px truncate">
                         <n-badge :color="item.activeStatus === OnlineEnum.ONLINE ? '#1ab292' : '#909090'" dot />
                         {{
@@ -142,9 +149,16 @@
                     style="border: 1px solid var(--avatar-border-color)" />
                   <!-- 文字信息 -->
                   <div class="flex flex-col leading-tight truncate">
-                    <span class="text-13px font-medium truncate text-[--text-color]">
-                      {{ groupStore.getUserInfo(item.uid)?.name }}
-                    </span>
+                    <div class="flex items-center gap-4px">
+                      <span class="text-13px font-medium truncate text-[--text-color]">
+                        {{ groupStore.getUserInfo(item.uid)?.name }}
+                      </span>
+                      <span
+                        v-if="isSilentMember(item.uid)"
+                        class="text-10px px-4px py-1px rounded-3px bg-#d0305015 text-#d03050 flex-shrink-0">
+                        {{ t('aiclaw.silent_badge') }}
+                      </span>
+                    </div>
                     <div class="text-11px text-[--chat-text-color] flex items-center gap-4px truncate">
                       <n-badge :color="item.activeStatus === OnlineEnum.ONLINE ? '#1ab292' : '#909090'" dot />
                       {{
@@ -199,10 +213,12 @@
 import MobileLayout from '#/components/MobileLayout.vue'
 import HeaderBar from '#/components/chat-room/HeaderBar.vue'
 import { type } from '@tauri-apps/plugin-os'
-import { OnlineEnum, RoleEnum } from '@/enums'
+import { OnlineEnum, RoleEnum, UserType } from '@/enums'
 import { useGroupStore } from '@/stores/group'
 import { useGlobalStore } from '@/stores/global'
+import { useChatStore } from '@/stores/chat'
 import { AvatarUtils } from '@/utils/AvatarUtils'
+import { isSilentAiclaw } from '@/utils/AiclawUtils'
 import router from '@/router'
 import { useI18n } from 'vue-i18n'
 
@@ -216,6 +232,7 @@ const emit = defineEmits<{
 
 const groupStore = useGroupStore()
 const globalStore = useGlobalStore()
+const chatStore = useChatStore()
 const dialog = useDialog()
 const { t } = useI18n()
 
@@ -225,6 +242,23 @@ const isLoading = ref(false)
 const showDeleteConfirm = ref(false)
 const scrollHeight = ref(0)
 const scrollArea = ref<HTMLElement>()
+
+// REQ-009 #86：判断成员是否为「未批准的 AI 助理」，用于头像旁沉默标识
+const isSilentMember = (uid: string): boolean => {
+  const userInfo = groupStore.getUserInfo(uid)
+  const roomId = globalStore.currentSessionRoomId
+  if (!roomId || !userInfo) return false
+  const approved = chatStore.getAiclawGroupConfig(Number(uid), roomId)?.approved
+  return isSilentAiclaw(userInfo.userType, approved)
+}
+
+// 为当前群的所有 AI 助理成员加载 approved 状态
+const loadSilentConfigsForCurrentRoom = async () => {
+  const roomId = globalStore.currentSessionRoomId
+  if (!roomId) return
+  const aiclawMembers = groupStore.userList.filter((m) => m.userType === UserType.AICLAW)
+  await Promise.all(aiclawMembers.map((m) => chatStore.loadAiclawGroupConfig(Number(m.uid), roomId)))
+}
 
 // 判断是否为移动端视图
 const isMobileView = computed(() => {
@@ -340,6 +374,8 @@ onMounted(async () => {
     // 加载当前群的成员列表
     if (globalStore.currentSessionRoomId) {
       await groupStore.getGroupUserList(globalStore.currentSessionRoomId)
+      // REQ-009 #86：成员列表加载后再拉取 AI 助理 approved 状态
+      await loadSilentConfigsForCurrentRoom()
     }
   } catch (error) {
     console.error('加载成员列表失败:', error)

@@ -17,7 +17,7 @@ vi.mock('@/stores/contacts', () => ({
 }))
 
 import { UserType } from '@/enums'
-import { isAiclaw, isAiclawByUserType } from '@/utils/AiclawUtils'
+import { isAiclaw, isAiclawByUserType, isSilentAiclaw } from '@/utils/AiclawUtils'
 
 describe('AiclawUtils', () => {
   beforeEach(() => {
@@ -71,6 +71,26 @@ describe('AiclawUtils', () => {
       expect(isAiclawByUserType(1)).toBe(false)
       expect(isAiclawByUserType(2)).toBe(false)
       expect(isAiclawByUserType(undefined)).toBe(false)
+    })
+  })
+
+  describe('isSilentAiclaw', () => {
+    it('AI 助理且 approved=false → true', () => {
+      expect(isSilentAiclaw(UserType.AICLAW, false)).toBe(true)
+    })
+
+    it('AI 助理但 approved=true → false', () => {
+      expect(isSilentAiclaw(UserType.AICLAW, true)).toBe(false)
+    })
+
+    it('AI 助理但 approved 未加载(undefined) → false', () => {
+      expect(isSilentAiclaw(UserType.AICLAW, undefined)).toBe(false)
+    })
+
+    it('普通用户无论 approved 为何 → false', () => {
+      expect(isSilentAiclaw(1, false)).toBe(false)
+      expect(isSilentAiclaw(1, true)).toBe(false)
+      expect(isSilentAiclaw(undefined, false)).toBe(false)
     })
   })
 })

@@ -18,6 +18,7 @@ import { renderReplyContent } from '@/utils/RenderReplyContent.ts'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useSessionUnreadStore } from '@/stores/sessionUnread'
 import type { AiclawGroupConfig } from '@/services/wsType'
+import { normalizeAiclawGroupConfig } from '@/utils/aiclawGroupConfig'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 import { isWeb } from '@/utils/PlatformConstants'
 import { useMitt } from '@/hooks/useMitt'
@@ -1840,13 +1841,50 @@ export const useChatStore = defineStore(
       return allSuccess
     }
 
+    /** 加载单个 aiclaw 群配置（REQ-009 #86 成员列表按需拉取 approved） */
+    const loadAiclawGroupConfig = async (aiclawUid: number, roomId: string | number): Promise<boolean> => {
+      const { imRequest } = await import('@/utils/ImRequestUtils')
+      const { ImUrlEnum } = await import('@/enums')
+      const key = `${aiclawUid}:${roomId}`
+      try {
+        const raw = await imRequest<Record<string, unknown>>({
+          url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
+          params: { aiclawUid, roomId: Number(roomId) }
+        })
+        if (!raw) return false
+        const existing = aiclawGroupConfigs.get(key)
+        const normalized: AiclawGroupConfigItem = {
+          ...normalizeAiclawGroupConfig(raw),
+          roomId: String(raw.roomId ?? roomId),
+          roomName: existing?.roomName,
+          account: existing?.account
+        }
+        aiclawGroupConfigs.set(key, normalized)
+        return true
+      } catch (error) {
+        console.error(`[ChatStore] Failed to load aiclaw group config: ${key}`, error)
+        return false
+      }
+    }
+
+    /** 获取单个 aiclaw 群配置缓存（用于沉默标识等读场景） */
+    const getAiclawGroupConfig = (aiclawUid: number, roomId: string | number): AiclawGroupConfigItem | undefined => {
+      return aiclawGroupConfigs.get(`${aiclawUid}:${roomId}`)
+    }
+
     /** 更新 aiclaw 群配置（本地缓存，WS 通知时调用） */
-    const updateAiclawGroupConfig = async (aiclawUid: number, roomId: number, config: AiclawGroupConfig) => {
+    const updateAiclawGroupConfig = (aiclawUid: number, roomId: number, config: AiclawGroupConfig) => {
       const key = `${aiclawUid}:${roomId}`
       const existing = aiclawGroupConfigs.get(key)
-      const { normalizeAiclawGroupConfig } = await import('@/utils/aiclawGroupConfig')
-      const normalized = normalizeAiclawGroupConfig(config as Record<string, unknown>)
-      aiclawGroupConfigs.set(key, { ...normalized, roomId: String(roomId), roomName: existing?.roomName })
+      // WS 广播的 boolean 字段可能是 1/0 integer，统一经 normalizeAiclawGroupConfig 归一化
+      const raw = config as Record<string, unknown>
+      const normalized: AiclawGroupConfig = normalizeAiclawGroupConfig(raw)
+      aiclawGroupConfigs.set(key, {
+        ...normalized,
+        roomId: String(roomId),
+        roomName: existing?.roomName,
+        account: existing?.account
+      })
     }
 
     /** 保存 aiclaw 群配置到 server */
@@ -2068,6 +2106,8 @@ export const useChatStore = defineStore(
       // aiclaw 群配置
       aiclawGroupConfigs,
       loadAiclawGroupConfigs,
+      loadAiclawGroupConfig,
+      getAiclawGroupConfig,
       updateAiclawGroupConfig,
       saveAiclawGroupConfig,
       getAiclawGroupConfigList
