@@ -322,6 +322,8 @@
               <AiclawGroupConfigForm
                 :config="config"
                 :saving="savingGroupConfig === config.roomId"
+                :adapter-type="selectedItem?.adapterType"
+                :default-workspace-dir="buildDefaultWorkspaceDir(selectedItem?.uid ?? '', config.account)"
                 @save="handleSaveGroupConfig" />
             </div>
           </template>
@@ -396,7 +398,7 @@ import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue
 import { ImUrlEnum } from '@/enums'
 import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
 import { isWeb } from '@/utils/PlatformConstants'
-import { buildGroupCardLabel } from '@/utils/aiclawGroupConfig'
+import { buildDefaultWorkspaceDir, buildGroupCardLabel } from '@/utils/aiclawGroupConfig'
 import { useChatStore } from '@/stores/chat'
 import { useAiclawStore } from '@/stores/aiclaw'
 
@@ -767,7 +769,9 @@ const handleSaveGroupConfig = async (
       rateLimitPerMinute: config.rateLimitPerMinute,
       dailyLimit: config.dailyLimit,
       respondToAi: config.respondToAi,
-      mentionRequired: config.mentionRequired
+      mentionRequired: config.mentionRequired,
+      approved: config.approved,
+      workspaceDir: config.workspaceDir
     })
     window.$message?.success?.(t('aiclaw.group_settings.save_success'))
   } catch (error) {

@@ -22,6 +22,8 @@ export const useAiclawStore = defineStore(
     const loading = ref(false)
     /** 当前用户拥有的 aiclaw uid 集合（统一用 String 归一；运行时可能因外部序列化变成数组） */
     const myAiclawUids = ref<Set<string> | string[]>(new Set())
+    /** uid → adapterType 映射，供群配置表单判断是否需要显示工作目录 */
+    const myAiclawAdapterTypes = ref<Map<string, string>>(new Map())
 
     /**
      * 幂等地预取当前用户的 aiclaw 列表。
@@ -40,7 +42,7 @@ export const useAiclawStore = defineStore(
       const callGen = ++generation
       loading.value = true
       try {
-        const list = await imRequestSilent<Array<{ uid: string | number }>>({
+        const list = await imRequestSilent<Array<{ uid: string | number; adapterType?: string }>>({
           url: ImUrlEnum.AICLAW_LIST
         })
         // 若此期间发生过 invalidate，则丢弃过期结果
@@ -48,6 +50,7 @@ export const useAiclawStore = defineStore(
           return
         }
         myAiclawUids.value = new Set((list || []).map((item) => String(item.uid)))
+        myAiclawAdapterTypes.value = new Map((list || []).map((item) => [String(item.uid), item.adapterType || '']))
         loaded.value = true
         invalidated.value = false
       } catch (err) {
@@ -85,12 +88,21 @@ export const useAiclawStore = defineStore(
       return false
     }
 
+    /**
+     * 同步获取某 aiclaw 的 adapterType；未加载或不存在返回 undefined。
+     */
+    const getAdapterType = (uid: string | number | undefined | null): string | undefined => {
+      if (!uid) return undefined
+      return myAiclawAdapterTypes.value.get(String(uid))
+    }
+
     /** 使缓存失效，下次 ensureLoaded() 会重新拉取 */
     const invalidate = () => {
       generation++
       loaded.value = false
       invalidated.value = true
       myAiclawUids.value = new Set()
+      myAiclawAdapterTypes.value = new Map()
       loading.value = false
     }
 
@@ -98,8 +110,10 @@ export const useAiclawStore = defineStore(
       loaded,
       loading,
       myAiclawUids,
+      myAiclawAdapterTypes,
       ensureLoaded,
       isMyAiclaw,
+      getAdapterType,
       invalidate
     }
   },

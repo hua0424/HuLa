@@ -34,6 +34,22 @@
         :aria-label="t('aiclaw.group_settings.mention_required')" />
       <span class="text-11px text-#999 ml-8px">{{ t('aiclaw.group_settings.mention_required_hint') }}</span>
     </n-form-item>
+    <n-form-item :label="t('aiclaw.group_settings.approved')" class="mb-12px">
+      <n-switch
+        v-model:value="localConfig.approved"
+        data-testid="aiclaw-group-config-approved"
+        :aria-label="t('aiclaw.group_settings.approved')" />
+      <span class="text-11px text-#999 ml-8px">{{ t('aiclaw.group_settings.approved_hint') }}</span>
+    </n-form-item>
+    <n-form-item v-if="showWorkspaceDir" :label="t('aiclaw.group_settings.workspace_dir')" class="mb-12px">
+      <n-input
+        v-model:value="localConfig.workspaceDir"
+        :placeholder="t('aiclaw.group_settings.workspace_dir_placeholder')"
+        size="small"
+        style="width: 280px"
+        data-testid="aiclaw-group-config-workspace-dir"
+        :aria-label="t('aiclaw.group_settings.workspace_dir')" />
+    </n-form-item>
   </n-form>
   <n-button
     size="small"
@@ -47,8 +63,10 @@
 </template>
 
 <script setup lang="ts">
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiclawGroupConfig } from '@/services/wsType'
+import { isDirBasedAdapter } from '@/utils/aiclawGroupConfig'
 
 type ConfigItem = AiclawGroupConfig & { roomId: string }
 
@@ -56,6 +74,8 @@ const props = withDefaults(
   defineProps<{
     config: ConfigItem
     saving?: boolean
+    adapterType?: string
+    defaultWorkspaceDir?: string
   }>(),
   {
     saving: false
@@ -66,12 +86,20 @@ const emit = defineEmits<(e: 'save', payload: ConfigItem) => void>()
 
 const { t } = useI18n()
 
-const localConfig = ref<ConfigItem>({ ...props.config })
+const showWorkspaceDir = computed(() => isDirBasedAdapter(props.adapterType))
+
+const ensureDefaults = (cfg: ConfigItem): ConfigItem => ({
+  ...cfg,
+  approved: cfg.approved ?? false,
+  workspaceDir: cfg.workspaceDir ?? (showWorkspaceDir.value ? props.defaultWorkspaceDir : undefined)
+})
+
+const localConfig = ref<ConfigItem>(ensureDefaults({ ...props.config }))
 
 watch(
   () => props.config,
   (newConfig) => {
-    localConfig.value = { ...newConfig }
+    localConfig.value = ensureDefaults({ ...newConfig })
   },
   { deep: true }
 )

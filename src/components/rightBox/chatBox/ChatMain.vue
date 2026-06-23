@@ -227,6 +227,8 @@
             v-else-if="modalContext"
             :config="modalContext.config"
             :saving="modalSaving"
+            :adapter-type="modalContext.adapterType"
+            :default-workspace-dir="buildDefaultWorkspaceDir(modalContext.aiclawUid, modalContext.config.account)"
             @save="saveModal" />
         </n-spin>
         <n-flex justify="end" :size="12">
@@ -263,6 +265,7 @@ import { timeToStr } from '@/utils/ComputedTime'
 import { useCachedStore } from '@/stores/cached'
 import { isMessageMultiSelectEnabled } from '@/utils/MessageSelect'
 import { isMac, isMobile, isWeb, isWindows } from '@/utils/PlatformConstants'
+import { buildDefaultWorkspaceDir } from '@/utils/aiclawGroupConfig'
 import { useAiclawSession } from '@/hooks/useAiclawSession'
 import FileUploadProgress from '@/components/rightBox/FileUploadProgress.vue'
 import ThinkingPanel from '@/components/rightBox/chatBox/ThinkingPanel.vue'

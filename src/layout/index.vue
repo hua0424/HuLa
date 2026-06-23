@@ -522,8 +522,8 @@ useMitt.on(WsResponseMessageType.THINKING_END, (data: ThinkingEndPayload) => {
 })
 
 // REQ-004: 群配置变更通知（X5: 推送范围为群内所有在线成员）
-useMitt.on(WsResponseMessageType.AICLAW_GROUP_CONFIG_UPDATE, (data: AiclawGroupConfigUpdatePayload) => {
-  chatStore.updateAiclawGroupConfig(data.aiclawUid, data.roomId, data.config)
+useMitt.on(WsResponseMessageType.AICLAW_GROUP_CONFIG_UPDATE, async (data: AiclawGroupConfigUpdatePayload) => {
+  await chatStore.updateAiclawGroupConfig(data.aiclawUid, data.roomId, data.config)
   // ui-tester 发现并修复 toast 缺失（frontend-dev review ack）
   const aiclawUser = groupStore.getUserInfo(String(data.aiclawUid), String(data.roomId))
   const aiclawName = aiclawUser?.name || 'AI'

@@ -1785,6 +1785,7 @@ export const useChatStore = defineStore(
     const loadAiclawGroupConfigs = async (aiclawUid: number): Promise<boolean> => {
       const { imRequest } = await import('@/utils/ImRequestUtils')
       const { ImUrlEnum } = await import('@/enums')
+      const { normalizeAiclawGroupConfig } = await import('@/utils/aiclawGroupConfig')
       const groupStore = useGroupStore()
       let allSuccess = true
       try {
@@ -1820,10 +1821,7 @@ export const useChatStore = defineStore(
                 // 取数失败：保留 server raw.roomName（若有），account 留空，由显示层兜底
               }
               const normalized: AiclawGroupConfigItem = {
-                rateLimitPerMinute: Number(raw.rateLimitPerMinute ?? 0),
-                dailyLimit: Number(raw.dailyLimit ?? 0),
-                respondToAi: raw.respondToAi === true || raw.respondToAi === 1,
-                mentionRequired: raw.mentionRequired === true || raw.mentionRequired === 1,
+                ...normalizeAiclawGroupConfig(raw),
                 roomId: String(raw.roomId ?? roomId),
                 roomName: groupName,
                 account
@@ -1843,18 +1841,11 @@ export const useChatStore = defineStore(
     }
 
     /** 更新 aiclaw 群配置（本地缓存，WS 通知时调用） */
-    const updateAiclawGroupConfig = (aiclawUid: number, roomId: number, config: AiclawGroupConfig) => {
+    const updateAiclawGroupConfig = async (aiclawUid: number, roomId: number, config: AiclawGroupConfig) => {
       const key = `${aiclawUid}:${roomId}`
       const existing = aiclawGroupConfigs.get(key)
-      // WS 广播的 respondToAi/mentionRequired 可能是 1/0 integer，需统一转为 boolean
-      // 用 as unknown as number 绕过 TS 类型窄化（运行时 server 返回 integer）
-      const raw = config as Record<string, unknown>
-      const normalized: AiclawGroupConfig = {
-        rateLimitPerMinute: Number(config.rateLimitPerMinute ?? 0),
-        dailyLimit: Number(config.dailyLimit ?? 0),
-        respondToAi: raw.respondToAi === true || raw.respondToAi === 1,
-        mentionRequired: raw.mentionRequired === true || raw.mentionRequired === 1
-      }
+      const { normalizeAiclawGroupConfig } = await import('@/utils/aiclawGroupConfig')
+      const normalized = normalizeAiclawGroupConfig(config as Record<string, unknown>)
       aiclawGroupConfigs.set(key, { ...normalized, roomId: String(roomId), roomName: existing?.roomName })
     }
 
