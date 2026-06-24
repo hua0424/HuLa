@@ -5,17 +5,18 @@ import aiclawZh from '~/locales/zh-CN/aiclaw.json'
 
 // useRoute stub：提供 uid 路由参数
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { uid: '1001' } })
+  useRoute: () => ({ params: { uid: '1001' }, query: {} })
 }))
 
-// chatStore stub：返回一条群配置，覆盖全部 4 个保留字段
+// chatStore stub：返回一条群配置，覆盖全部 5 个保留字段
 const groupConfig = {
   roomId: 'room-1',
   roomName: '测试群',
   rateLimitPerMinute: 5,
   dailyLimit: 100,
   respondToAi: false,
-  mentionRequired: true
+  mentionRequired: true,
+  approved: false
 }
 vi.mock('@/stores/chat', () => ({
   useChatStore: () => ({
@@ -23,6 +24,11 @@ vi.mock('@/stores/chat', () => ({
     getAiclawGroupConfigList: vi.fn().mockReturnValue([groupConfig]),
     saveAiclawGroupConfig: vi.fn().mockResolvedValue(undefined)
   })
+}))
+
+// 避免测试里 fetchAdapterType 走真实网络/Pinia，让 onMounted 同步完成
+vi.mock('@/utils/ImRequestUtils', () => ({
+  imRequest: vi.fn().mockResolvedValue([])
 }))
 
 import AiclawGroupSettings from './AiclawGroupSettings.vue'
@@ -70,21 +76,21 @@ function i18nCompileErrors(): string[] {
 }
 
 describe('AiclawGroupSettings 群配置表单（S7 回归锁 + #51 i18n @ 转义守卫）', () => {
-  it('恰好渲染 4 个保留字段：频率限制 / 每日上限 / AI互触发 / @触发', async () => {
+  it('恰好渲染 5 个保留字段：频率限制 / 每日上限 / AI互触发 / @触发 / 已批准', async () => {
     const wrapper = mountForm()
     await flushPromises()
 
     const labels = wrapper.findAll('.n-form-item-label__text').map((n) => n.text())
-    expect(labels).toEqual(['频率限制', '每日上限', '响应其他 AI', '需要 @ 触发'])
-    expect(labels).toHaveLength(4)
+    expect(labels).toEqual(['频率限制', '每日上限', '响应其他 AI', '需要 @ 触发', '已批准'])
+    expect(labels).toHaveLength(5)
   })
 
   it('#51：表单文案在真实 locale JSON 下无 i18n 编译错误（裸 @ 会让此断言 RED）', async () => {
     const wrapper = mountForm()
     await flushPromises()
     expect(i18nCompileErrors()).toEqual([])
-    // 表单子树真实渲染（未因 t() 抛错降级为 comment）：4 个 form-item 都在
-    expect(wrapper.findAll('.n-form-item-label__text')).toHaveLength(4)
+    // 表单子树真实渲染（未因 t() 抛错降级为 comment）：5 个 form-item 都在
+    expect(wrapper.findAll('.n-form-item-label__text')).toHaveLength(5)
   })
 
   it('不存在任何 short-reply 字段（回归锁）', async () => {

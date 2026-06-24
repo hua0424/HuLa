@@ -584,7 +584,9 @@ export enum NoticeType {
   /** 取消群管理员 */
   GROUP_RECALL_ADMIN = 9,
   /** AI 助理设备授权 */
-  AICLAW_DEVICE_AUTH = 10
+  AICLAW_DEVICE_AUTH = 10,
+  /** AI 助理入群待批准（REQ-009 #88） */
+  AICLAW_GROUP_APPROVE = 11
 }
 
 /** 请求添加好友的列表项 */
@@ -610,12 +612,16 @@ export type RequestFriendItem = {
 export interface NoticeItem {
   /** 实体ID */
   id?: string
-  /** 通知类型:1-好友申请;2-群申请;3-群邀请;5-移除群成员;6-好友被申请;7-被邀请进群 */
+  /** 通知类型:1-好友申请;2-群申请;3-群邀请;5-移除群成员;6-好友被申请;7-被邀请进群;10-AI助理设备授权;11-AI助理入群待批准 */
   eventType: number
   /** 通知类型 1群聊 2加好友 */
   type: number
   /** 发起人UID */
   senderId: string
+  /** 发起人名称（服务端可选返回，作为 getUserInfo 的 fallback） */
+  senderName?: string
+  /** 发起人头像（服务端可选返回） */
+  senderAvatar?: string
   /** 接收人UID */
   receiverId: string
   /** 接收人用户类型（0=普通用户, 4=AI助理） */

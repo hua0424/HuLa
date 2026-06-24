@@ -113,11 +113,21 @@
     "respond_to_ai": "Respond to other AI",
     "mention_required": "Require {'@'} mention",
     "mention_required_hint": "AI only replies when {'@'}mentioned",
+    "approved": "Approved",
+    "approved_hint": "When off, the AI will not respond in this group",
+    "workspace_dir": "Workspace Directory",
+    "workspace_dir_placeholder": "Leave blank to use default path",
     "save": "Save",
     "save_success": "Settings saved",
     "save_failed": "Save failed",
     "load_failed": "Failed to load group chat settings",
     "config_changed": "AI assistant {name}'s group settings have been updated"
   },
-  "auto_reply_tag": "Auto-reply"
+  "auto_reply_tag": "Auto-reply",
+  "notice": {
+    "group_approve": {
+      "title": "AI assistant {name} requests to join [{group}]",
+      "action": "Approve"
+    }
+  }
 }

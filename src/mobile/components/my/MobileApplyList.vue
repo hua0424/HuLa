@@ -116,6 +116,17 @@
               }}
             </span>
           </div>
+          <div
+            v-else-if="isAiclawGroupApproveNotice(item)"
+            class="flex min-w-70px w-70px max-h-64px flex-col items-center justify-center flex-shrink-0">
+            <n-button
+              size="small"
+              secondary
+              data-testid="aiclaw-notice-approve-action"
+              @click="handleAiclawApprove(item)">
+              {{ t('aiclaw.notice.group_approve.action') }}
+            </n-button>
+          </div>
         </div>
       </template>
     </n-virtual-list>
@@ -138,12 +149,14 @@ import { useUserStore } from '@/stores/user'
 import { AvatarUtils } from '@/utils/AvatarUtils'
 import { useGroupStore } from '@/stores/group'
 import { getGroupInfo } from '@/utils/ImRequestUtils'
+import { isAiclawGroupApproveNotice, getAiclawGroupApproveTarget } from '@/utils/aiclawNotice'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const userStore = useUserStore()
 const contactStore = useContactStore()
 const groupStore = useGroupStore()
+const router = useRouter()
 const currentUserId = ref('0')
 const loadingMap = ref<Record<string, boolean>>({})
 const isLoadingMore = ref(false)
@@ -230,6 +243,10 @@ const applyMsg = computed(() => (item: any) => {
       return t('mobile_mymessage.loading', { tail: '...' })
     }
 
+    if (item.eventType === NoticeType.AICLAW_GROUP_APPROVE) {
+      const aiclawName = getUserInfo(item)?.name || item.senderName || t('mobile_mymessage.unknown_user')
+      return t('aiclaw.notice.group_approve.title', { name: aiclawName, group: groupDetail.name })
+    }
     if (item.eventType === NoticeType.GROUP_APPLY) {
       return t('mobile_mymessage.group.apply_to_join', { name: groupDetail.name })
     } else if (item.eventType === NoticeType.GROUP_INVITE) {
@@ -276,6 +293,7 @@ const isCurrentUser = (uid: string) => {
 const getUserInfo = (item: any) => {
   let info: any
   switch (item.eventType) {
+    case NoticeType.AICLAW_GROUP_APPROVE:
     case NoticeType.FRIEND_APPLY:
     case NoticeType.GROUP_MEMBER_DELETE:
     case NoticeType.GROUP_SET_ADMIN:
@@ -376,6 +394,16 @@ const handleFriendAction = async (action: string, applyId: string) => {
       loadingMap.value[applyId] = false
     }, 600)
   }
+}
+
+const handleAiclawApprove = (item: NoticeItem) => {
+  const target = getAiclawGroupApproveTarget(item)
+  if (!target) return
+  router.push({
+    name: 'mobileAiclawGroupSettings',
+    params: { uid: target.aiclawUid },
+    query: { roomId: target.roomId }
+  })
 }
 
 onMounted(() => {
