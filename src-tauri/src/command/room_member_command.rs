@@ -39,6 +39,7 @@ pub struct RoomMemberResponse {
     pub item_ids: Option<Vec<String>>,
     pub linked_gitee: Option<bool>,
     pub linked_github: Option<bool>,
+    pub user_type: Option<i64>,
 }
 
 #[tauri::command]

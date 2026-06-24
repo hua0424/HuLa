@@ -237,8 +237,7 @@ pub async fn im_request_command(
             }
         }
 
-        let result: Result<Option<serde_json::Value>, anyhow::Error> = if resolved_path
-            != base_path
+        let result: Result<Option<serde_json::Value>, anyhow::Error> = if resolved_path != base_path
         {
             // 路径有变量替换，直接使用 request 方法
             use crate::pojo::common::ApiResult;
