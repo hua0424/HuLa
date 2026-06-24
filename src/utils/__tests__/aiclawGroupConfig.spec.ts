@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildAiclawGroupConfigUpdateBody, buildGroupCardLabel } from '@/utils/aiclawGroupConfig'
+import {
+  buildAiclawGroupConfigUpdateBody,
+  buildGroupCardLabel,
+  normalizeAiclawGroupConfig
+} from '@/utils/aiclawGroupConfig'
 import type { AiclawGroupConfig } from '@/services/wsType'
 
 /**
@@ -60,8 +64,46 @@ describe('#53 buildAiclawGroupConfigUpdateBody：boolean 开关转 Integer 0/1',
   })
 })
 
-/**
- * #56 群卡片标题显示：`Group <数字 room_id>` → `<群名称>(<群号>)`，
+describe('#82 / REQ-009 normalizeAiclawGroupConfig：server 1/0 与 boolean 归一化', () => {
+  it('approved=1 → true', () => {
+    const cfg = normalizeAiclawGroupConfig({ approved: 1 })
+    expect(cfg.approved).toBe(true)
+  })
+
+  it('approved=true → true', () => {
+    const cfg = normalizeAiclawGroupConfig({ approved: true })
+    expect(cfg.approved).toBe(true)
+  })
+
+  it('approved=0 → false', () => {
+    const cfg = normalizeAiclawGroupConfig({ approved: 0 })
+    expect(cfg.approved).toBe(false)
+  })
+
+  it('approved=false → false', () => {
+    const cfg = normalizeAiclawGroupConfig({ approved: false })
+    expect(cfg.approved).toBe(false)
+  })
+
+  it('approved 缺省 → undefined', () => {
+    const cfg = normalizeAiclawGroupConfig({})
+    expect(cfg.approved).toBeUndefined()
+  })
+
+  it('respondToAi / mentionRequired 同样做 1/0 ↔ boolean 归一化', () => {
+    const cfg = normalizeAiclawGroupConfig({ respondToAi: 1, mentionRequired: 0 })
+    expect(cfg.respondToAi).toBe(true)
+    expect(cfg.mentionRequired).toBe(false)
+  })
+
+  it('rateLimitPerMinute / dailyLimit 缺省 → 0', () => {
+    const cfg = normalizeAiclawGroupConfig({})
+    expect(cfg.rateLimitPerMinute).toBe(0)
+    expect(cfg.dailyLimit).toBe(0)
+  })
+})
+
+/**`Group <数字 room_id>` → `<群名称>(<群号>)`，
  * 例 `Dawn的群组(hula_mq8zrGyH)`（群号 = im_room_group.account，唯一人类可读群标识）。
  *
  * buildGroupCardLabel 是显示拼接 + 兜底阶梯的纯函数（取数在 chat.ts 侧 enrich，

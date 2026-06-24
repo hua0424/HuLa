@@ -37,6 +37,7 @@
     "activated": "已激活",
     "deactivated": "已停用"
   },
+  "silent_badge": "沉默",
   "chat": {
     "notice": "AI 助理对话 · 回复由 AI 生成",
     "streaming": "正在回复..."

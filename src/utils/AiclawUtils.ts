@@ -36,6 +36,15 @@ export const isAiclawByUserType = (userType?: number): boolean => {
   return userType === UserType.AICLAW
 }
 
+/**
+ * 判断群成员列表中的 AI 助理是否处于「沉默/不可用」状态。
+ * REQ-009 #86：仅当 userType 是 AI 助理且 approved 显式为 false 时返回 true；
+ * approved 为 undefined（尚未加载）时不应显示沉默标识，避免误标。
+ */
+export const isSilentAiclaw = (userType?: number, approved?: boolean): boolean => {
+  return isAiclawByUserType(userType) && approved === false
+}
+
 /** AI 助理在线三态 */
 export type AiclawStatus = 'inactive' | 'online' | 'offline'
 

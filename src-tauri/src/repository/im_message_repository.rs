@@ -500,15 +500,17 @@ pub async fn cursor_page_messages(
     // cursor 复合编码格式："<send_time>:<id>"。
     // 解析失败（格式不对/旧版纯 id 等）→ 当作空 cursor（首页），不报错：
     // cursor 是前端内存态、会话重置即丢、不跨版本持久，无兼容包袱，加此兜底防御。
-    if let Some((cursor_send_time, cursor_id)) =
-        parse_cursor(&cursor_page_param.cursor)
-    {
+    if let Some((cursor_send_time, cursor_id)) = parse_cursor(&cursor_page_param.cursor) {
         // DESC 严格全序 keyset 过滤：
         //   COALESCE(send_time,0) < st
         //   OR (COALESCE(send_time,0) = st AND CAST(id AS INTEGER) < id_int)
         message_query = message_query.filter(
             Condition::any()
-                .add(Expr::col(im_message::Column::SendTime).if_null(0).lt(cursor_send_time))
+                .add(
+                    Expr::col(im_message::Column::SendTime)
+                        .if_null(0)
+                        .lt(cursor_send_time),
+                )
                 .add(
                     Condition::all()
                         .add(
@@ -833,12 +835,18 @@ pub async fn update_message_status(
             .exec(&txn)
             .await
             .map_err(|e| {
-                anyhow::anyhow!("Failed to delete existing server message {}: {}", message_id, e)
+                anyhow::anyhow!(
+                    "Failed to delete existing server message {}: {}",
+                    message_id,
+                    e
+                )
             })?;
         im_message::Entity::insert(record.message.clone().into_active_model())
             .exec(&txn)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to insert collapsed message {}: {}", message_id, e))?;
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to insert collapsed message {}: {}", message_id, e)
+            })?;
         txn.commit().await.map_err(CommonError::DatabaseError)?;
 
         update_thumbnail_path(db, &record.key(), record.thumbnail_path.as_deref()).await?;

@@ -299,6 +299,12 @@
                       <p class="text-(10px --text-color center) w-30px truncate">
                         {{ item.name }}
                       </p>
+                      <p
+                        v-if="isSilentMember(item.uid)"
+                        class="text-(9px #d03050 center) w-34px truncate leading-tight"
+                        :title="t('aiclaw.silent_badge')">
+                        {{ t('aiclaw.silent_badge') }}
+                      </p>
                     </n-flex>
                   </template>
                 </n-flex>
@@ -398,6 +404,7 @@
                 groupStore.isAdminOrLord() && activeItem?.hotFlag !== IsAllUserEnum.Yes && currentSessionRoomId !== '1'
               "
               class="box-item cursor-pointer mb-20px"
+              data-testid="manage-group-members"
               @click="handleManageGroupMember">
               <p>{{ t('home.chat_header.sidebar.group.manage_members') }}</p>
             </div>
@@ -633,6 +640,7 @@ import { useGroupStore } from '@/stores/group.ts'
 import { useSettingStore } from '@/stores/setting'
 import { useUserStore } from '@/stores/user.ts'
 import { AvatarUtils } from '@/utils/AvatarUtils'
+import { isSilentAiclaw } from '@/utils/AiclawUtils'
 import { notification, setSessionTop, shield, updateRoomInfo } from '@/utils/ImRequestUtils'
 import { canvasToImageBytes } from '@/utils/Canvas2Dom'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
@@ -911,6 +919,32 @@ const userList = computed(() => {
     })
     .slice(0, 10)
 })
+
+// REQ-009 #86：为侧边栏成员列表加载 AI 助理 approved 状态
+const isSilentMember = (uid: string): boolean => {
+  const roomId = currentSessionRoomId.value
+  if (!roomId) return false
+  const approved = chatStore.getAiclawGroupConfig(Number(uid), roomId)?.approved
+  const userInfo = groupStore.getUserInfo(uid)
+  return isSilentAiclaw(userInfo?.userType, approved)
+}
+
+const loadSilentConfigsForSidebar = async () => {
+  const roomId = currentSessionRoomId.value
+  if (!roomId) return
+  const aiclawMembers = groupStore.userList.filter((m) => m.userType === UserType.AICLAW)
+  await Promise.all(aiclawMembers.map((m) => chatStore.loadAiclawGroupConfig(Number(m.uid), roomId)))
+}
+
+watch(
+  () => groupStore.userList.length,
+  () => {
+    if (chatStore.isGroup) {
+      loadSilentConfigsForSidebar()
+    }
+  },
+  { immediate: true }
+)
 
 // 获取用户的最新头像
 const currentUserAvatar = computed(() => {
