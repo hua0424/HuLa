@@ -61,7 +61,7 @@
                 <p v-else class="text-(12px [--text-color])">
                   {{
                     t('home.apply_list.handler_label', {
-                      name: groupStore.getUserInfo(item.senderId)?.name || item.senderName || t('home.apply_list.unknown_user')
+                      name: groupStore.getUserInfo(item.senderId)?.name || t('home.apply_list.unknown_user')
                     })
                   }}
                 </p>
@@ -110,6 +110,12 @@
                 }}
               </span>
             </div>
+
+            <div v-else-if="isAiclawGroupApproveNotice(item)" class="shrink-0 flex items-center gap-10px">
+              <n-button secondary data-testid="aiclaw-notice-approve-action" @click="handleAiclawApprove(item)">
+                {{ t('aiclaw.notice.group_approve.action') }}
+              </n-button>
+            </div>
           </n-flex>
         </n-flex>
       </template>
@@ -123,6 +129,7 @@
   </n-flex>
 </template>
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { uniq } from 'es-toolkit'
 import type { NoticeItem } from '@/services/types.ts'
@@ -133,8 +140,13 @@ import { AvatarUtils } from '@/utils/AvatarUtils'
 import { formatTimestamp } from '@/utils/ComputedTime.ts'
 import { useGroupStore } from '@/stores/group'
 import { getGroupInfo } from '@/utils/ImRequestUtils'
+import { isAiclawGroupApproveNotice, getAiclawGroupApproveTarget } from '@/utils/aiclawNotice'
+import { useWindow } from '@/hooks/useWindow'
+import { isDesktop } from '@/utils/PlatformConstants'
 
 const userStore = useUserStore()
+const router = useRouter()
+const { createWebviewWindow } = useWindow()
 const contactStore = useContactStore()
 const groupStore = useGroupStore()
 const { t } = useI18n()
@@ -215,6 +227,10 @@ const applyMsg = computed(() => (item: NoticeItem) => {
   }
 
   const groupName = groupDetail.name?.toString() ?? ''
+  if (item.eventType === NoticeType.AICLAW_GROUP_APPROVE) {
+    const aiclawName = getUserInfo(item)?.name || t('home.apply_list.unknown_user')
+    return t('aiclaw.notice.group_approve.title', { name: aiclawName, group: groupName })
+  }
   if (item.eventType === NoticeType.GROUP_APPLY) {
     return t('home.apply_list.group.apply', { group: groupName })
   }
@@ -272,6 +288,7 @@ const isCurrentUser = (uid: string) => {
 const getUserInfo = (item: any) => {
   let info: any
   switch (item.eventType) {
+    case NoticeType.AICLAW_GROUP_APPROVE:
     case NoticeType.FRIEND_APPLY:
     case NoticeType.GROUP_MEMBER_DELETE:
     case NoticeType.GROUP_SET_ADMIN:
@@ -372,6 +389,36 @@ const handleFriendAction = async (action: string, applyId: string) => {
       loadingMap.value[applyId] = false
     }, 600)
   }
+}
+
+const handleAiclawApprove = async (item: NoticeItem) => {
+  const target = getAiclawGroupApproveTarget(item)
+  if (!target) return
+  if (!isDesktop()) {
+    await router.push({ name: 'aiAssistant', query: { uid: target.aiclawUid, roomId: target.roomId } })
+    return
+  }
+  const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+  const existing = await WebviewWindow.getByLabel('aiAssistant')
+  if (existing) {
+    const { emitTo } = await import('@tauri-apps/api/event')
+    await emitTo('aiAssistant', 'aiclaw:approve-target', target)
+    await existing.setFocus()
+    return
+  }
+  await createWebviewWindow(
+    t('aiclaw.title'),
+    'aiAssistant',
+    1000,
+    700,
+    undefined,
+    true,
+    800,
+    550,
+    false,
+    false,
+    target
+  )
 }
 
 onMounted(() => {

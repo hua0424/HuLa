@@ -313,7 +313,13 @@
             <div
               v-for="config in groupConfigList"
               :key="config.roomId"
-              class="border-b border-[--line-color] px-24px py-16px">
+              :ref="
+                (el) => {
+                  if (el) groupConfigRefs[config.roomId] = el as HTMLElement
+                }
+              "
+              class="border-b border-[--line-color] px-24px py-16px transition-colors"
+              :class="{ 'bg-#13987f08': highlightRoomId === config.roomId }">
               <div class="flex items-center justify-between mb-12px">
                 <span class="text-14px font-500 text-[--text-color]">
                   {{ buildGroupCardLabel(config.roomName, config.account, config.roomId) }}
@@ -390,6 +396,8 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import ActionBar from '@/components/windows/ActionBar.vue'
 import AiclawCreateForm from '@/components/aiclaw/AiclawCreateForm.vue'
 import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
@@ -397,15 +405,21 @@ import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDi
 import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
 import { ImUrlEnum } from '@/enums'
 import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
-import { isWeb } from '@/utils/PlatformConstants'
+import { isDesktop, isWeb } from '@/utils/PlatformConstants'
 import { buildDefaultWorkspaceDir, buildGroupCardLabel } from '@/utils/aiclawGroupConfig'
 import { useChatStore } from '@/stores/chat'
 import { useAiclawStore } from '@/stores/aiclaw'
 
 const { t } = useI18n()
+const route = useRoute()
 
 // Window label for ActionBar (matches the url used in config.tsx)
 const windowLabel = ref('aiAssistant')
+
+// REQ-009 #88：从通知跳转过来时高亮的群卡片
+const highlightRoomId = ref<string | null>(null)
+const groupConfigRefs = ref<Record<string, HTMLElement>>({})
+const approveTargetUnlisten = ref<UnlistenFn | null>(null)
 
 type AiclawListItem = {
   uid: string
@@ -782,6 +796,36 @@ const handleSaveGroupConfig = async (
   }
 }
 
+// REQ-009 #88: 从通知跳转到指定 aiclaw 的群设置卡片
+const selectAiclawAndOpenGroupSettings = async (aiclawUid: string, roomId: string) => {
+  if (aiclawList.value.length === 0) {
+    await fetchList()
+  }
+  selectedUid.value = aiclawUid
+  await handleOpenGroupSettings()
+  highlightRoomId.value = roomId
+  nextTick(() => {
+    const el = groupConfigRefs.value[roomId]
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  })
+}
+
+const setupApproveTargetListener = async () => {
+  if (!isDesktop()) return
+  try {
+    approveTargetUnlisten.value = await listen('aiclaw:approve-target', (event) => {
+      const payload = event.payload as { aiclawUid: string; roomId: string }
+      if (payload?.aiclawUid && payload?.roomId) {
+        selectAiclawAndOpenGroupSettings(payload.aiclawUid, payload.roomId)
+      }
+    })
+  } catch (error) {
+    console.error('[AiAssistant] Failed to listen approve target:', error)
+  }
+}
+
 const handleBackToConversations = () => {
   rightView.value = 'conversations'
 }
@@ -839,6 +883,20 @@ onMounted(async () => {
       // Fallback to default label
     }
   }
-  fetchList()
+  await fetchList()
+
+  // REQ-009 #88: 从通知 URL query 跳转
+  const uidFromQuery = route.query.uid as string | undefined
+  const roomIdFromQuery = route.query.roomId as string | undefined
+  if (uidFromQuery && roomIdFromQuery) {
+    await selectAiclawAndOpenGroupSettings(uidFromQuery, roomIdFromQuery)
+  }
+
+  // REQ-009 #88: 监听来自通知的跳转事件（窗口已存在时）
+  await setupApproveTargetListener()
+})
+
+onUnmounted(() => {
+  approveTargetUnlisten.value?.()
 })
 </script>

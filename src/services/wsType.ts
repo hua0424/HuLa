@@ -104,7 +104,9 @@ export enum NoticeTypeEnum {
   /** 设置群管理员 */
   GROUP_SET_ADMIN = 8,
   /** 取消群管理员 */
-  GROUP_RECALL_ADMIN = 9
+  GROUP_RECALL_ADMIN = 9,
+  /** AI 助理入群待批准（REQ-009 #88） */
+  AICLAW_GROUP_APPROVE = 11
 }
 
 /**

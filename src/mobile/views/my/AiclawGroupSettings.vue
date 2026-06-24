@@ -12,32 +12,21 @@
           <div
             v-for="config in groupConfigList"
             :key="config.roomId"
-            class="mx-16px mt-16px p-16px rounded-12px bg-white dark:bg-#1a1a1a">
+            :ref="
+              (el) => {
+                if (el) groupConfigRefs[config.roomId] = el as HTMLElement
+              }
+            "
+            class="mx-16px mt-16px p-16px rounded-12px bg-white dark:bg-#1a1a1a"
+            :class="{ 'ring-(1px solid #13987f)': highlightRoomId === config.roomId }">
             <div class="text-15px font-500 mb-12px">{{ config.roomName || `Group ${config.roomId}` }}</div>
             <!-- Config form -->
-            <n-form label-placement="left" label-width="auto" size="small" :show-feedback="false">
-              <n-form-item :label="t('aiclaw.group_settings.rate_limit')" class="mb-10px">
-                <n-input-number v-model:value="config.rateLimitPerMinute" :min="0" :max="100" size="small" style="width: 90px" />
-                <span class="text-11px text-#999 ml-6px">{{ t('aiclaw.group_settings.rate_limit_hint') }}</span>
-              </n-form-item>
-              <n-form-item :label="t('aiclaw.group_settings.daily_limit')" class="mb-10px">
-                <n-input-number v-model:value="config.dailyLimit" :min="0" :max="10000" size="small" style="width: 90px" />
-              </n-form-item>
-              <n-form-item :label="t('aiclaw.group_settings.respond_to_ai')" class="mb-10px">
-                <n-switch v-model:value="config.respondToAi" />
-              </n-form-item>
-              <n-form-item :label="t('aiclaw.group_settings.mention_required')" class="mb-10px">
-                <n-switch v-model:value="config.mentionRequired" />
-              </n-form-item>
-            </n-form>
-            <n-button
-              size="small"
-              type="primary"
-              block
-              :loading="savingGroupConfig === config.roomId"
-              @click="handleSaveGroupConfig(config)">
-              {{ t('aiclaw.group_settings.save') }}
-            </n-button>
+            <AiclawGroupConfigForm
+              :config="config"
+              :saving="savingGroupConfig === config.roomId"
+              :adapter-type="adapterType"
+              :default-workspace-dir="buildDefaultWorkspaceDir(uid, config.account)"
+              @save="handleSaveGroupConfig" />
           </div>
         </template>
         <div v-else-if="!loading" class="flex flex-col items-center justify-center flex-1 text-13px text-#999">
@@ -57,9 +46,18 @@
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
+import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
+import { buildDefaultWorkspaceDir } from '@/utils/aiclawGroupConfig'
+import { ImUrlEnum } from '@/enums'
+import { imRequest } from '@/utils/ImRequestUtils'
 import type { AiclawGroupConfig } from '@/services/wsType'
 
-type GroupConfigItem = AiclawGroupConfig & { roomId: string; roomName?: string }
+type GroupConfigItem = AiclawGroupConfig & { roomId: string; roomName?: string; account?: string }
+
+type AiclawListItem = {
+  uid: string
+  adapterType: string
+}
 
 const { t } = useI18n()
 const route = useRoute()
@@ -70,6 +68,19 @@ const uid = route.params.uid as string
 const loading = ref(false)
 const savingGroupConfig = ref<string | null>(null)
 const groupConfigList = ref<GroupConfigItem[]>([])
+const adapterType = ref('')
+const highlightRoomId = ref<string | null>(null)
+const groupConfigRefs = ref<Record<string, HTMLElement>>({})
+
+const fetchAdapterType = async () => {
+  try {
+    const list = await imRequest<AiclawListItem[]>({ url: ImUrlEnum.AICLAW_LIST })
+    const item = (list || []).find((a) => String(a.uid) === String(uid))
+    adapterType.value = item?.adapterType ?? ''
+  } catch (error) {
+    console.error('[AiclawGroupSettings] Failed to fetch adapter type:', error)
+  }
+}
 
 const fetchConfigs = async () => {
   loading.value = true
@@ -90,7 +101,9 @@ const handleSaveGroupConfig = async (config: GroupConfigItem) => {
       rateLimitPerMinute: config.rateLimitPerMinute,
       dailyLimit: config.dailyLimit,
       respondToAi: config.respondToAi,
-      mentionRequired: config.mentionRequired
+      mentionRequired: config.mentionRequired,
+      approved: config.approved,
+      workspaceDir: config.workspaceDir
     })
     window.$message?.success?.(t('aiclaw.group_settings.save_success'))
   } catch (error) {
@@ -101,7 +114,15 @@ const handleSaveGroupConfig = async (config: GroupConfigItem) => {
   }
 }
 
-onMounted(() => {
-  fetchConfigs()
+onMounted(async () => {
+  highlightRoomId.value = (route.query.roomId as string) || null
+  await fetchAdapterType()
+  await fetchConfigs()
+  if (highlightRoomId.value) {
+    nextTick(() => {
+      const el = groupConfigRefs.value[highlightRoomId.value!]
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }
 })
 </script>

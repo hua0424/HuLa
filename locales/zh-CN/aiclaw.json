@@ -125,5 +125,11 @@
     "batch_subtitle": "请为新加入的 AI 助理批准入群并设置工作目录",
     "config_changed": "AI 助理 {name} 的群聊配置已更新"
   },
-  "auto_reply_tag": "自动回复"
+  "auto_reply_tag": "自动回复",
+  "notice": {
+    "group_approve": {
+      "title": "AI 助理 {name} 申请加入 [{group}]",
+      "action": "去批准"
+    }
+  }
 }
