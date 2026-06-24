@@ -886,7 +886,8 @@ onMounted(async () => {
   await fetchList()
 
   // REQ-009 #88: 从通知 URL query 跳转
-  const uidFromQuery = route.query.uid as string | undefined
+  // createWebviewWindow 的 payload 会序列化为 query，字段名为 aiclawUid；也兼容 uid。
+  const uidFromQuery = (route.query.aiclawUid as string | undefined) || (route.query.uid as string | undefined)
   const roomIdFromQuery = route.query.roomId as string | undefined
   if (uidFromQuery && roomIdFromQuery) {
     await selectAiclawAndOpenGroupSettings(uidFromQuery, roomIdFromQuery)
