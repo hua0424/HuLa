@@ -87,6 +87,12 @@
       <span class="text-14px">已选择 {{ selectedList.length }} 人</span>
       <n-button type="primary" :disabled="selectedList.length === 0" @click="createGroup">发起群聊</n-button>
     </div>
+    <!-- 创建群聊后批量配置 owner aiclaw -->
+    <AiclawBatchGroupConfigModal
+      v-model:visible="batchConfigModalVisible"
+      :room-id="batchConfigRoomId"
+      :account="batchConfigAccount"
+      :aiclaw-items="batchConfigAiclawItems" />
   </div>
 </template>
 
@@ -98,6 +104,8 @@ import { useGroupStore } from '@/stores/group'
 import { useUserStatusStore } from '@/stores/userStatus'
 import { AvatarUtils } from '@/utils/AvatarUtils'
 import * as ImRequestUtils from '@/utils/ImRequestUtils'
+import { useAiclawStore } from '@/stores/aiclaw'
+import AiclawBatchGroupConfigModal from '@/components/aiclaw/AiclawBatchGroupConfigModal.vue'
 import { useChatStore } from '@/stores/chat.ts'
 import { useGlobalStore } from '@/stores/global.ts'
 
@@ -106,6 +114,13 @@ const { stateList } = storeToRefs(userStatusStore)
 const groupStore = useGroupStore()
 const chatStore = useChatStore()
 const globalStore = useGlobalStore()
+const aiclawStore = useAiclawStore()
+
+// 创建群聊后批量 aiclaw 配置弹窗
+const batchConfigModalVisible = ref(false)
+const batchConfigRoomId = ref('')
+const batchConfigAccount = ref('')
+const batchConfigAiclawItems = ref<Array<{ uid: string; name?: string; adapterType?: string }>>([])
 
 /** 获取用户状态 */
 const getUserState = (uid: string) => {
@@ -182,12 +197,34 @@ const createGroup = async () => {
       )
     })
 
-    if (matchedSession?.roomId) {
-      globalStore.updateCurrentSessionRoomId(matchedSession.roomId)
-      await Promise.all([
-        groupStore.addGroupDetail(matchedSession.roomId),
-        groupStore.getGroupUserList(matchedSession.roomId, true)
-      ])
+    // #87：无论会话列表是否已刷新到新群，都使用创建返回的 roomId 作为兜底
+    const roomId = matchedSession?.roomId ?? resultRoomId ?? resultId
+    if (roomId) {
+      if (matchedSession?.roomId) {
+        globalStore.updateCurrentSessionRoomId(matchedSession.roomId)
+      }
+      await Promise.all([groupStore.addGroupDetail(roomId), groupStore.getGroupUserList(roomId, true)])
+
+      // #87：如果新建群中包含当前用户拥有的 aiclaw，弹出批量入群配置
+      await aiclawStore.ensureLoaded()
+      const detail = groupStore.getGroupDetail(roomId)
+      const account = detail?.account
+      const aiclawItems = selectedList.value
+        .filter((uid) => aiclawStore.isMyAiclaw(uid))
+        .map((uid) => {
+          const user = groupStore.userList.find((m) => String(m.uid) === uid)
+          return {
+            uid,
+            name: user?.name,
+            adapterType: aiclawStore.getAdapterType(uid)
+          }
+        })
+      if (aiclawItems.length > 0) {
+        batchConfigRoomId.value = roomId
+        batchConfigAccount.value = account || ''
+        batchConfigAiclawItems.value = aiclawItems
+        batchConfigModalVisible.value = true
+      }
     }
 
     resetCreateGroupState()

@@ -113,10 +113,16 @@
     "respond_to_ai": "响应其他 AI",
     "mention_required": "需要 {'@'} 触发",
     "mention_required_hint": "开启后 AI 仅在被 {'@'} 时回复",
+    "approved": "已批准",
+    "approved_hint": "关闭后 AI 在该群不会响应任何消息",
+    "workspace_dir": "工作目录",
+    "workspace_dir_placeholder": "留空使用默认路径",
     "save": "保存",
     "save_success": "配置已保存",
     "save_failed": "保存失败",
     "load_failed": "加载群聊配置失败",
+    "batch_title": "AI 助理入群配置",
+    "batch_subtitle": "请为新加入的 AI 助理批准入群并设置工作目录",
     "config_changed": "AI 助理 {name} 的群聊配置已更新"
   },
   "auto_reply_tag": "自动回复"

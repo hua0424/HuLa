@@ -73,8 +73,7 @@ vi.mock('@/hooks/useMitt', () => ({
 
 const mockFns = vi.hoisted(() => ({
   isMyAiclaw: vi.fn(() => false),
-  openModal: vi.fn(),
-  isAiclaw: vi.fn(() => false)
+  openModal: vi.fn()
 }))
 
 vi.mock('@/stores/aiclaw', () => ({
@@ -117,9 +116,6 @@ vi.mock('@/stores/setting', () => ({
 vi.mock('@/stores/user', () => ({
   useUserStore: vi.fn(() => ({ userInfo: { uid: '1000' } }))
 }))
-vi.mock('@/utils/AiclawUtils', () => ({
-  isAiclaw: mockFns.isAiclaw
-}))
 
 import { useChatMain } from '@/hooks/useChatMain.ts'
 
@@ -155,7 +151,6 @@ const mountHook = () => {
 
 describe('useChatMain aiclaw 群设置入口', () => {
   beforeEach(() => {
-    mockFns.isAiclaw.mockReturnValue(false)
     mockFns.isMyAiclaw.mockReturnValue(false)
     mockFns.openModal.mockReset()
   })
@@ -166,8 +161,7 @@ describe('useChatMain aiclaw 群设置入口', () => {
     expect(item).toBeTruthy()
   })
 
-  it('目标用户是 aiclaw 且为当前用户所有时，菜单项可见', () => {
-    mockFns.isAiclaw.mockReturnValue(true)
+  it('目标用户为当前用户所有的 aiclaw 时，菜单项可见', () => {
     mockFns.isMyAiclaw.mockReturnValue(true)
 
     const wrapper = mountHook()
@@ -175,17 +169,7 @@ describe('useChatMain aiclaw 群设置入口', () => {
     expect(item!.visible!({ uid: '2001' })).toBe(true)
   })
 
-  it('目标用户不是 aiclaw 时，菜单项不可见', () => {
-    mockFns.isAiclaw.mockReturnValue(false)
-    mockFns.isMyAiclaw.mockReturnValue(true)
-
-    const wrapper = mountHook()
-    const item = wrapper.vm.ctx.optionsList.value.find((it: any) => it?.testid === 'aiclaw-group-settings-menu')
-    expect(item!.visible!({ uid: '2001' })).toBe(false)
-  })
-
-  it('aiclaw 不是当前用户所有时，菜单项不可见', () => {
-    mockFns.isAiclaw.mockReturnValue(true)
+  it('目标用户不是当前用户所有时，菜单项不可见', () => {
     mockFns.isMyAiclaw.mockReturnValue(false)
 
     const wrapper = mountHook()
@@ -194,7 +178,6 @@ describe('useChatMain aiclaw 群设置入口', () => {
   })
 
   it('点击「群设置」菜单项时调用 aiclawGroupConfigStore.openModal', async () => {
-    mockFns.isAiclaw.mockReturnValue(true)
     mockFns.isMyAiclaw.mockReturnValue(true)
 
     const wrapper = mountHook()
@@ -205,7 +188,6 @@ describe('useChatMain aiclaw 群设置入口', () => {
   })
 
   it('菜单项无 uid 时不调用 aiclawGroupConfigStore.openModal', () => {
-    mockFns.isAiclaw.mockReturnValue(true)
     mockFns.isMyAiclaw.mockReturnValue(true)
 
     const wrapper = mountHook()

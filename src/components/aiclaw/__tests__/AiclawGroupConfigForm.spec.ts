@@ -18,14 +18,20 @@ const baseConfig: AiclawGroupConfig & { roomId: string } = {
   rateLimitPerMinute: 5,
   dailyLimit: 100,
   respondToAi: false,
-  mentionRequired: true
+  mentionRequired: true,
+  approved: false
 }
 
-const mountForm = (overrides?: Partial<typeof baseConfig>, saving = false) =>
+const mountForm = (
+  overrides?: Partial<typeof baseConfig> & { adapterType?: string; defaultWorkspaceDir?: string },
+  saving = false
+) =>
   mount(AiclawGroupConfigForm, {
     props: {
       config: { ...baseConfig, ...overrides },
-      saving
+      saving,
+      adapterType: overrides?.adapterType,
+      defaultWorkspaceDir: overrides?.defaultWorkspaceDir
     },
     global: {
       plugins: [i18n]
@@ -49,17 +55,42 @@ function i18nCompileErrors(): string[] {
 }
 
 describe('AiclawGroupConfigForm 纯展示表单', () => {
-  it('渲染四个保留字段且真实 locale 无 i18n 编译错误', async () => {
+  it('渲染五个保留字段且真实 locale 无 i18n 编译错误', async () => {
     const wrapper = mountForm()
     await flushPromises()
 
     const labels = wrapper.findAll('.n-form-item-label__text').map((n) => n.text())
-    expect(labels).toEqual(['频率限制', '每日上限', '响应其他 AI', '需要 @ 触发'])
+    expect(labels).toEqual(['频率限制', '每日上限', '响应其他 AI', '需要 @ 触发', '已批准'])
     expect(i18nCompileErrors()).toEqual([])
   })
 
+  it('dir-based adapter 显示工作目录输入并预填默认值', async () => {
+    const wrapper = mountForm({
+      adapterType: 'opencode',
+      defaultWorkspaceDir: '~/.aichat/opencode/workspace/1/group/g1'
+    })
+    await flushPromises()
+
+    const labels = wrapper.findAll('.n-form-item-label__text').map((n) => n.text())
+    expect(labels).toContain('工作目录')
+
+    const input = wrapper.find('[data-testid="aiclaw-group-config-workspace-dir"] .n-input__input-el')
+    expect((input.element as HTMLInputElement).value).toBe('~/.aichat/opencode/workspace/1/group/g1')
+  })
+
+  it('openclaw adapter 不显示工作目录输入', async () => {
+    const wrapper = mountForm({ adapterType: 'openclaw' })
+    await flushPromises()
+
+    const labels = wrapper.findAll('.n-form-item-label__text').map((n) => n.text())
+    expect(labels).not.toContain('工作目录')
+  })
+
   it('保存时 emit save 并携带当前编辑值（boolean 保持 boolean）', async () => {
-    const wrapper = mountForm()
+    const wrapper = mountForm({
+      adapterType: 'opencode',
+      defaultWorkspaceDir: '~/.aichat/opencode/workspace/1/group/g1'
+    })
     await flushPromises()
 
     // 修改频率限制
@@ -70,12 +101,15 @@ describe('AiclawGroupConfigForm 纯展示表单', () => {
     const dailyInput = wrapper.find('[data-testid="aiclaw-group-config-daily-limit"] .n-input__input-el')
     await dailyInput.setValue('200')
 
-    // 切换两个开关
+    // 切换三个开关
     const respondSwitch = wrapper.find('[data-testid="aiclaw-group-config-respond-ai"]')
     await respondSwitch.trigger('click')
 
     const mentionSwitch = wrapper.find('[data-testid="aiclaw-group-config-mention"]')
     await mentionSwitch.trigger('click')
+
+    const approvedSwitch = wrapper.find('[data-testid="aiclaw-group-config-approved"]')
+    await approvedSwitch.trigger('click')
 
     await wrapper.find('[data-testid="aiclaw-group-config-save"]').trigger('click')
     await flushPromises()
@@ -87,8 +121,11 @@ describe('AiclawGroupConfigForm 纯展示表单', () => {
     expect(payload.dailyLimit).toBe(200)
     expect(payload.respondToAi).toBe(true)
     expect(payload.mentionRequired).toBe(false)
+    expect(payload.approved).toBe(true)
+    expect(payload.workspaceDir).toBe('~/.aichat/opencode/workspace/1/group/g1')
     expect(typeof payload.respondToAi).toBe('boolean')
     expect(typeof payload.mentionRequired).toBe('boolean')
+    expect(typeof payload.approved).toBe('boolean')
   })
 
   it('saving=true 时保存按钮显示 loading', async () => {

@@ -359,6 +359,10 @@ export type AiclawGroupConfig = {
   respondToAi: boolean
   /** 是否需要 @ 触发（server 返回 1/0，前端转 boolean） */
   mentionRequired?: boolean
+  /** 是否已批准入群（server 返回 1/0，前端转 boolean；undefined=尚未加载） */
+  approved?: boolean
+  /** 群工作目录（dir-based agent 生效；空/undefined=使用默认派生路径） */
+  workspaceDir?: string
 }
 
 /** 群配置变更通知 payload（server → client，推送给群内所有在线成员 + aichat-node） */

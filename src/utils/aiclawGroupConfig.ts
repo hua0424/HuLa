@@ -1,14 +1,30 @@
 import type { AiclawGroupConfig } from '@/services/wsType'
 
 /**
+ * 把 server 原始群配置（Integer 0/1 与 boolean 混用）归一化成前端 AiclawGroupConfig。
+ *
+ * #53：respondToAi / mentionRequired / approved 在 server 侧是 Integer(0/1)，前端统一用 boolean。
+ * 对 approved 特殊处理：字段缺失时返回 undefined，避免 unloaded 状态被误判为未批准。
+ */
+export const normalizeAiclawGroupConfig = (raw: Record<string, unknown>): AiclawGroupConfig => ({
+  rateLimitPerMinute: Number(raw.rateLimitPerMinute ?? 0),
+  dailyLimit: Number(raw.dailyLimit ?? 0),
+  respondToAi: raw.respondToAi === true || raw.respondToAi === 1,
+  mentionRequired:
+    raw.mentionRequired === undefined ? undefined : raw.mentionRequired === true || raw.mentionRequired === 1,
+  approved: raw.approved === undefined ? undefined : raw.approved === true || raw.approved === 1,
+  workspaceDir: typeof raw.workspaceDir === 'string' ? raw.workspaceDir : undefined
+})
+
+/**
  * 把本地群配置（n-switch 的 boolean 开关 + number）转成 server VO
  * AiclawGroupConfigUpdateReq 期望的 body。
  *
- * #53：server VO 的 respondToAi / mentionRequired 是 Integer(0/1)，前端 load 时把
+ * #53：server VO 的 respondToAi / mentionRequired / approved 是 Integer(0/1)，前端 load 时把
  * server 的 1/0 归一成 boolean 喂 n-switch；保存若把 boolean 原样发，Jackson 反序列化
  * Integer 失败 → "参数类型解析异常"、保存不落库（加载转 boolean、保存没转回 = 不对称）。
- * 故这里把两个开关转回 0/1（Integer）；rateLimitPerMinute / dailyLimit 是 number 直传；
- * aiclawUid / roomId 是 Long（JSON number，< 2^53 安全）。不改 server VO。
+ * 故这里把开关转回 0/1（Integer）；rateLimitPerMinute / dailyLimit 是 number 直传；
+ * workspaceDir 有值时原样下发；aiclawUid / roomId 是 Long（JSON number，< 2^53 安全）。
  */
 export const buildAiclawGroupConfigUpdateBody = (
   aiclawUid: number,
@@ -20,7 +36,9 @@ export const buildAiclawGroupConfigUpdateBody = (
   rateLimitPerMinute: config.rateLimitPerMinute,
   dailyLimit: config.dailyLimit,
   respondToAi: config.respondToAi ? 1 : 0,
-  mentionRequired: config.mentionRequired ? 1 : 0
+  mentionRequired: config.mentionRequired ? 1 : 0,
+  approved: config.approved === true ? 1 : 0,
+  workspaceDir: config.workspaceDir
 })
 
 /**
@@ -47,4 +65,23 @@ export const buildGroupCardLabel = (
   if (name) return name
   if (acct) return acct
   return `Group ${roomId ?? ''}`.trim()
+}
+
+/**
+ * 默认工作目录模板：dir-based agent（opencode/codex）在群场景缺省落盘位置。
+ * 与 plugins 派生规则保持一致，方便主人到机器上识别。
+ */
+export const buildDefaultWorkspaceDir = (aiclawUid: string | number, groupAccount?: string | null): string => {
+  const account = groupAccount?.trim() || 'unknown'
+  return `~/.aichat/opencode/workspace/${aiclawUid}/group/${account}`
+}
+
+/**
+ * 判断该 aiclaw 类型是否需要显示工作目录字段。
+ * 目前 dir-based agent：opencode / codex；openclaw 等不显示。
+ */
+export const isDirBasedAdapter = (adapterType?: string | null): boolean => {
+  if (!adapterType) return false
+  const lower = adapterType.toLowerCase()
+  return lower === 'opencode' || lower === 'codex'
 }
