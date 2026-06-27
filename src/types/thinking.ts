@@ -32,6 +32,4 @@ export interface ThinkingState {
   triggerMsgId?: string
   /** 是否已折叠 */
   collapsed: boolean
-  /** 30s 延迟归档的 timeout ID（仅 store 层使用） */
-  archiveTimeoutId?: ReturnType<typeof setTimeout>
 }
