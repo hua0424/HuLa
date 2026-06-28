@@ -329,6 +329,7 @@
                 :config="config"
                 :saving="savingGroupConfig === config.roomId"
                 :adapter-type="selectedItem?.adapterType"
+                :aiclaw-uid="selectedItem?.uid"
                 :default-workspace-dir="buildDefaultWorkspaceDir(selectedItem?.uid ?? '', config.account)"
                 @save="handleSaveGroupConfig" />
             </div>

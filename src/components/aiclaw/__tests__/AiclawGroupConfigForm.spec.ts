@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import aiclawZh from '~/locales/zh-CN/aiclaw.json'
 import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
 import type { AiclawGroupConfig } from '@/services/wsType'
+import { imRequest } from '@/utils/ImRequestUtils'
+
+vi.mock('@/utils/ImRequestUtils', () => ({
+  imRequest: vi.fn()
+}))
 
 const i18n = createI18n({
   legacy: false,
@@ -23,7 +28,7 @@ const baseConfig: AiclawGroupConfig & { roomId: string } = {
 }
 
 const mountForm = (
-  overrides?: Partial<typeof baseConfig> & { adapterType?: string; defaultWorkspaceDir?: string },
+  overrides?: Partial<typeof baseConfig> & { adapterType?: string; defaultWorkspaceDir?: string; aiclawUid?: string },
   saving = false
 ) =>
   mount(AiclawGroupConfigForm, {
@@ -31,7 +36,8 @@ const mountForm = (
       config: { ...baseConfig, ...overrides },
       saving,
       adapterType: overrides?.adapterType,
-      defaultWorkspaceDir: overrides?.defaultWorkspaceDir
+      defaultWorkspaceDir: overrides?.defaultWorkspaceDir,
+      aiclawUid: overrides?.aiclawUid
     },
     global: {
       plugins: [i18n]
@@ -42,6 +48,7 @@ let errorSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.mocked(imRequest).mockReset()
 })
 
 afterEach(() => {
@@ -147,5 +154,31 @@ describe('AiclawGroupConfigForm 纯展示表单', () => {
     await flushPromises()
 
     expect((rateInput.element as HTMLInputElement).value).toBe('1')
+  })
+
+  it('claude-code adapter 显示 CC 启动命令区域', async () => {
+    vi.mocked(imRequest).mockResolvedValue({
+      launchCommand: 'claude --room room-1',
+      workspaceDir: '/workspace'
+    })
+    const wrapper = mountForm({ adapterType: 'claude-code', aiclawUid: '1001' })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="aiclaw-cc-launch"]').exists()).toBe(true)
+    expect(imRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: { roomId: 'room-1', uid: '1001' }
+      })
+    )
+  })
+
+  it('opencode / openclaw adapter 不显示 CC 启动命令区域', async () => {
+    const opencode = mountForm({ adapterType: 'opencode' })
+    const openclaw = mountForm({ adapterType: 'openclaw' })
+    await flushPromises()
+
+    expect(opencode.find('[data-testid="aiclaw-cc-launch"]').exists()).toBe(false)
+    expect(openclaw.find('[data-testid="aiclaw-cc-launch"]').exists()).toBe(false)
+    expect(imRequest).not.toHaveBeenCalled()
   })
 })

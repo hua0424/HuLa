@@ -858,7 +858,9 @@ export enum ImUrlEnum {
   /** 更新 aiclaw 群聊配置 */
   AICLAW_GROUP_CONFIG_UPDATE = 'aiclawGroupConfigUpdate',
   /** 获取 aiclaw 思考完整内容（S7：思考全文不再走 WS，改为按需 REST 拉取） */
-  AICLAW_THINKING_DETAIL = 'aiclawThinkingDetail'
+  AICLAW_THINKING_DETAIL = 'aiclawThinkingDetail',
+  /** 获取 CC 启动命令（S9） */
+  AICLAW_CC_LAUNCH = 'aiclawCcLaunch'
 }
 
 // 滚动意图管理枚举
