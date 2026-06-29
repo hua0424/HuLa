@@ -26,6 +26,17 @@
     "activated": "Activated",
     "deactivated": "Deactivated"
   },
+  "cc_launch": {
+    "title": "Claude Code Launch Command",
+    "hint": "Run the following command on the host where this AI assistant runs",
+    "workspace_dir": "Workspace Directory",
+    "copy": "Copy Command",
+    "copied": "Copied",
+    "copy_failed": "Copy failed",
+    "open": "View Launch Command",
+    "load_failed": "Failed to get launch command",
+    "retry": "Retry"
+  },
   "badge": "AI",
   "status": {
     "inactive": "Inactive",
