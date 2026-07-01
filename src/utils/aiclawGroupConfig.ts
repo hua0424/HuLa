@@ -85,3 +85,20 @@ export const isDirBasedAdapter = (adapterType?: string | null): boolean => {
   const lower = adapterType.toLowerCase()
   return lower === 'opencode' || lower === 'codex'
 }
+
+/**
+ * REQ-012 #114：把 per-AI 群配置列表排序，未激活（approved !== true）的群卡排在最前，
+ * 让主人一眼看到需要批准的群。同活跃态内按群名拼音/字母升序，再按 roomId 稳定兜底。
+ */
+export const sortAiclawGroupConfigs = <T extends { approved?: boolean; roomName?: string; roomId: string }>(
+  list: T[]
+): T[] =>
+  [...list].sort((a, b) => {
+    const aInactive = a.approved !== true
+    const bInactive = b.approved !== true
+    if (aInactive !== bInactive) return aInactive ? -1 : 1
+    const nameA = (a.roomName ?? '').trim()
+    const nameB = (b.roomName ?? '').trim()
+    if (nameA !== nameB) return nameA.localeCompare(nameB, 'zh-CN')
+    return a.roomId.localeCompare(b.roomId)
+  })
