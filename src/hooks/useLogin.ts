@@ -325,7 +325,11 @@ export const useLogin = () => {
     await invokeWithErrorHandler(
       TauriCommand.SAVE_USER_INFO,
       {
-        userInfo: userDetail
+        userInfo: {
+          uid: account.uid,
+          // aichatoverview#47: 把当前用户类型入库，send_msg 创建乐观消息时使用。
+          userType: userDetail.userType
+        }
       },
       {
         customErrorMessage: '保存用户信息失败',

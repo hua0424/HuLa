@@ -22,6 +22,8 @@ pub struct Model {
     pub login_uid: String,
     /// 消息发送状态: pending, success, fail
     pub send_status: String,
+    /// 发送者用户类型（1系统 2机器人 3普通用户 4AI助理），来自服务端 fromUser.userType
+    pub user_type: Option<i32>,
     pub time_block: Option<i64>,
 }
 
