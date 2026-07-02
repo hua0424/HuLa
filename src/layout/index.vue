@@ -65,7 +65,7 @@ import { useFileStore } from '@/stores/file'
 import { useUserStore } from '@/stores/user'
 import { useSettingStore } from '@/stores/setting.ts'
 import { useInitialSyncStore } from '@/stores/initialSync.ts'
-import { invokeSilently } from '@/utils/TauriInvokeHandler'
+import { invokeSilently, invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useRoute } from 'vue-router'
 import { audioManager } from '@/utils/AudioManager'
 import { useOverlayController } from '@/hooks/useOverlayController'
@@ -364,19 +364,32 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
     return
   }
 
-  // #38: 服务器回推「自己发的消息」时先尝试就地认领未确认的乐观气泡，命中则不再 pushMsg（避免重复气泡）
+  // #38/#42: 服务器回推「自己发的消息」时先尝试就地认领未确认的乐观气泡，命中则不再 pushMsg（避免重复气泡）
   if (data.fromUser.uid === userUid.value) {
     const reconciledTempId = chatStore.reconcileSelfOptimisticMessage(data)
     if (reconciledTempId) {
-      // 删除本地 SQLite 里那条孤儿 temp 行，否则下次重载历史时 temp 行复活导致重复气泡回归
-      await invokeSilently(TauriCommand.DELETE_MESSAGE, {
-        messageId: reconciledTempId,
-        roomId: data.message.roomId
-      })
-      await invokeSilently(TauriCommand.SAVE_MSG, { data })
-      // 跳过了 pushMsg 的 updateSession，需手动刷新会话最近活跃时间，与正常成功路径语义对齐
-      chatStore.updateSessionLastActiveTime(data.message.roomId)
-      return
+      // F3-2: reconcile 清理改 try/catch，JS 层能告警。
+      try {
+        // Web 端无本地 SQLite，跳过 Tauri 清理。
+        if (!isWeb()) {
+          // 删除本地 SQLite 里那条孤儿 temp 行，否则下次重载历史时 temp 行复活导致重复气泡回归
+          await invokeWithErrorHandler(
+            TauriCommand.DELETE_MESSAGE,
+            {
+              messageId: reconciledTempId,
+              roomId: data.message.roomId
+            },
+            { showError: false }
+          )
+          await invokeWithErrorHandler(TauriCommand.SAVE_MSG, { data }, { showError: false })
+        }
+        // 跳过了 pushMsg 的 updateSession，需手动刷新会话最近活跃时间，与正常成功路径语义对齐
+        chatStore.updateSessionLastActiveTime(data.message.roomId)
+        return
+      } catch (error) {
+        console.warn('[RECEIVE_MESSAGE] reconcile cleanup failed:', error)
+        // 气泡已在内存中重命名；SQLite 清理失败会留下孤儿 temp 行，警告出来便于排查。
+      }
     }
   }
 

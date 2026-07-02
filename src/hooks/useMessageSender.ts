@@ -24,7 +24,9 @@ export const useMessageSender = () => {
       data: payload,
       onSuccess: (response) => {
         chatStore.updateMsg({
-          msgId: response?.oldMsgId ?? tempMsgId,
+          // aichatoverview#42: 优先按服务端回显的 clientMsgId 认领 temp 气泡；
+          // 兼容未部署该字段的服务端或 web 路径时 fallback 到 oldMsgId / tempMsgId。
+          msgId: response?.message?.clientMsgId ?? response?.oldMsgId ?? tempMsgId,
           status: MessageStatusEnum.SUCCESS,
           newMsgId: response?.message?.id,
           body: response?.message?.body,

@@ -93,7 +93,13 @@ const makeTempMsg = (
 
 // 构造服务器回推的同内容自发消息（带服务器雪花 id）
 const makeServerMsg = (
-  overrides: Partial<{ id: string; content: string; uid: string; sendTime: number }> = {}
+  overrides: Partial<{
+    id: string
+    content: string
+    uid: string
+    sendTime: number
+    clientMsgId: string
+  }> = {}
 ): MessageType => ({
   fromUser: { uid: overrides.uid ?? ME, username: 'me', avatar: '', locPlace: '' },
   isCheck: false,
@@ -105,7 +111,8 @@ const makeServerMsg = (
     status: MessageStatusEnum.SUCCESS,
     sendTime: overrides.sendTime ?? BASE_TIME + 50,
     body: { content: overrides.content ?? 'hello-retry' },
-    messageMarks: {}
+    messageMarks: {},
+    clientMsgId: overrides.clientMsgId
   }
 })
 
@@ -260,5 +267,53 @@ describe('#47 userType threading', () => {
     msg.fromUser.userType = 4
     await store.pushMsg(msg)
     expect(store.messageMap[ROOM]['srv-1'].fromUser.userType).toBe(4)
+  })
+})
+
+describe('#42 clientMsgId reconcile', () => {
+  it('按 clientMsgId 精确命中 temp 气泡并改名为 server id', () => {
+    seedRoom(store, [makeTempMsg()])
+
+    const result = store.reconcileSelfOptimisticMessage(makeServerMsg({ id: 'srv-1', clientMsgId: 'T1781432449441' }))
+
+    expect(result).toBe('T1781432449441')
+    const room = store.messageMap[ROOM]
+    expect(Object.keys(room)).toHaveLength(1)
+    expect(room['srv-1']).toBeDefined()
+    expect(room['srv-1'].message.status).toBe(MessageStatusEnum.SUCCESS)
+    expect(room['T1781432449441']).toBeUndefined()
+  })
+
+  it('clientMsgId 不匹配时不误删，fallback 到 F1 启发式', () => {
+    seedRoom(store, [makeTempMsg()])
+
+    const result = store.reconcileSelfOptimisticMessage(makeServerMsg({ id: 'srv-1', clientMsgId: 'T-NOT-EXIST' }))
+
+    // clientMsgId 没命中，但内容/时间/发送者匹配，F1 兜底仍应命中
+    expect(result).toBe('T1781432449441')
+    expect(store.messageMap[ROOM]['srv-1']).toBeDefined()
+  })
+
+  it('clientMsgId 缺失时完全 fallback 到 F1 启发式', () => {
+    seedRoom(store, [makeTempMsg()])
+
+    const result = store.reconcileSelfOptimisticMessage(makeServerMsg({ id: 'srv-1' }))
+
+    expect(result).toBe('T1781432449441')
+    expect(store.messageMap[ROOM]['srv-1']).toBeDefined()
+  })
+
+  it('clientMsgId 命中后忽略 F1 的 >=2 候选限制', () => {
+    // 两条内容完全相同的 temp 消息，F1 会因候选 >=2 而放弃；clientMsgId 精确命中第一条。
+    seedRoom(store, [makeTempMsg({ id: 'T1781432449441' }), makeTempMsg({ id: 'T1781432449999' })])
+
+    const result = store.reconcileSelfOptimisticMessage(makeServerMsg({ id: 'srv-1', clientMsgId: 'T1781432449999' }))
+
+    expect(result).toBe('T1781432449999')
+    const room = store.messageMap[ROOM]
+    expect(room['srv-1']).toBeDefined()
+    expect(room['T1781432449999']).toBeUndefined()
+    // 另一条 temp 仍保留（它不应被 clientMsgId 误伤）
+    expect(room['T1781432449441']).toBeDefined()
   })
 })
