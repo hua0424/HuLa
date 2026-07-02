@@ -90,6 +90,9 @@ pub struct MessageResp {
 pub struct FromUser {
     pub uid: String,
     pub nickname: Option<String>,
+    /// 发送者用户类型（1系统 2机器人 3普通用户 4AI助理），来自服务端 fromUser.userType。
+    /// aichatoverview#47: 透传入本地 SQLite，使重载后 :data-user-type 绑定仍有效。
+    pub user_type: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -279,6 +282,8 @@ pub fn convert_message_to_resp(
         from_user: FromUser {
             uid: msg.uid,
             nickname: msg.nickname,
+            // aichatoverview#47: 从本地 DB 回放 userType，reload 后模板 :data-user-type 仍能命中。
+            user_type: msg.user_type,
         },
         message: Message {
             id: Some(msg.id),
@@ -556,7 +561,11 @@ fn convert_resp_to_record_for_fetch(msg_resp: MessageResp, uid: String) -> Messa
         create_time: msg_resp.create_time,
         update_time: msg_resp.update_time,
         login_uid: uid.to_string(),
+        // aichatoverview#35: sync 拉下来的都是服务端已持久化的消息，等价于发送成功；
+        // 服务端不返回发送状态字段，故硬编码 success 是正确行为（详见 issue #35 诊断结论）。
         send_status: "success".to_string(),
+        // aichatoverview#47: 透传服务端 fromUser.userType，供重载后 :data-user-type 使用。
+        user_type: msg_resp.from_user.user_type,
         time_block: msg_resp.time_block,
     };
 
@@ -608,9 +617,18 @@ pub async fn send_msg(
     error_channel: Channel<String>,
 ) -> Result<(), String> {
     // 获取当前登录用户信息
-    let (login_uid, nickname) = {
+    let (login_uid, nickname, current_user_type) = {
         let user_info = state.user_info.lock().await;
-        (user_info.uid.clone(), None) // UserInfo只有uid和token字段，nickname暂时设为None
+        let user_type = ImUserEntity::find()
+            .filter(im_user::Column::Id.eq(&user_info.uid))
+            .select_only()
+            .column(im_user::Column::UserType)
+            .into_tuple::<Option<i32>>()
+            .one(&*state.db_conn.read().await)
+            .await
+            .unwrap_or(None)
+            .flatten();
+        (user_info.uid.clone(), None, user_type) // UserInfo只有uid和token字段，nickname暂时设为None
     };
 
     // 生成消息ID
@@ -640,6 +658,8 @@ pub async fn send_msg(
         update_time: Some(current_time),
         login_uid: login_uid.clone(),
         send_status: "pending".to_string(), // 初始状态为pending
+        // aichatoverview#47: Outgoing optimistic 消息也带当前用户 userType，与 incoming 消息保持一致。
+        user_type: current_user_type,
         time_block: None,
     };
 
@@ -874,4 +894,64 @@ pub async fn delete_room_messages(
     );
 
     Ok(affected_rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn convert_resp_to_record_for_fetch_preserves_user_type() {
+        let msg_resp = MessageResp {
+            create_id: Some("1".to_string()),
+            create_time: Some(1000),
+            update_id: None,
+            update_time: None,
+            from_user: FromUser {
+                uid: "u1".to_string(),
+                nickname: Some("nick".to_string()),
+                user_type: Some(4),
+            },
+            message: Message {
+                id: Some("m1".to_string()),
+                room_id: Some("r1".to_string()),
+                message_type: Some(1),
+                body: Some(json!({"content": "hello"})),
+                message_marks: None,
+                send_time: Some(1000),
+                status: None,
+            },
+            old_msg_id: None,
+            time_block: None,
+        };
+
+        let record = convert_resp_to_record_for_fetch(msg_resp, "login".to_string());
+        assert_eq!(record.message.user_type, Some(4));
+        assert_eq!(record.message.uid, "u1");
+    }
+
+    #[test]
+    fn convert_message_to_resp_preserves_user_type() {
+        let model = im_message::Model {
+            id: "m1".to_string(),
+            uid: "u1".to_string(),
+            nickname: Some("nick".to_string()),
+            room_id: "r1".to_string(),
+            send_time: Some(1000),
+            message_type: Some(1),
+            body: Some(r#"{"content":"hello"}"#.to_string()),
+            message_marks: None,
+            create_time: Some(1000),
+            update_time: None,
+            login_uid: "login".to_string(),
+            send_status: "success".to_string(),
+            user_type: Some(4),
+            time_block: None,
+        };
+        let record = MessageWithThumbnail::new(model, None);
+        let resp = convert_message_to_resp(record, None);
+        assert_eq!(resp.from_user.user_type, Some(4));
+        assert_eq!(resp.from_user.uid, "u1");
+    }
 }

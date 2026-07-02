@@ -16,6 +16,8 @@ use tracing::{debug, info};
 #[serde(rename_all = "camelCase")]
 pub struct SaveUserInfoRequest {
     uid: String,
+    /// aichatoverview#47: 当前登录用户类型，入库供 send_msg 等场景使用。
+    user_type: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -61,6 +63,8 @@ pub async fn save_user_info(
             id: Set(user_info.uid.clone()),
             // TODO 这里先设置为 true，后续需要根据配置调整
             is_init: Set(true),
+            // aichatoverview#47: 保存当前用户类型，供发送消息时填充 userType。
+            user_type: Set(user_info.user_type),
             ..Default::default()
         };
 
@@ -69,7 +73,16 @@ pub async fn save_user_info(
             .await
             .map_err(|err| format!("Failed to insert user: {}", err))?;
     } else {
-        debug!("User already exists, no need to insert");
+        // aichatoverview#47: 用户已存在也要更新 user_type，确保换号/升级后字段不滞后。
+        debug!("User already exists, updating user_type");
+        if let Some(user) = exists {
+            let mut active_model = user.into_active_model();
+            active_model.user_type = Set(user_info.user_type);
+            ImUserEntity::update(active_model)
+                .exec(&*db)
+                .await
+                .map_err(|err| format!("Failed to update user_type: {}", err))?;
+        }
     }
     Ok(())
 }

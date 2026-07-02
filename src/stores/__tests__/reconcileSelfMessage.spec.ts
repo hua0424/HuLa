@@ -252,3 +252,13 @@ describe('#38 reconcileSelfOptimisticMessage', () => {
     expect(store.messageMap[ROOM]['T1781432449441']).toBeDefined()
   })
 })
+
+describe('#47 userType threading', () => {
+  it('pushMsg 透传服务器消息的 fromUser.userType', async () => {
+    store.sessionList = [{ roomId: ROOM, activeTime: Date.now(), unreadCount: 0, type: 1 }] as any
+    const msg = makeServerMsg({ id: 'srv-1' })
+    msg.fromUser.userType = 4
+    await store.pushMsg(msg)
+    expect(store.messageMap[ROOM]['srv-1'].fromUser.userType).toBe(4)
+  })
+})
