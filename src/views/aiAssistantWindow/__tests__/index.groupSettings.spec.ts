@@ -86,6 +86,7 @@ const mountWindow = () =>
         AiclawTokenDialog: true,
         AiclawDeleteConfirmDialog: true,
         AiclawGroupConfigForm: {
+          name: 'AiclawGroupConfigFormStub',
           template: '<div data-testid="aiclaw-group-config-form" />',
           props: ['config', 'saving', 'adapterType', 'aiclawUid', 'defaultWorkspaceDir'],
           emits: ['save']
@@ -186,5 +187,79 @@ describe('REQ-012 #114：AI 助理群设置未激活群卡显眼化 + 一键批�
       expect.objectContaining({ approved: true })
     )
     expect(chatStoreMocks.loadAiclawGroupConfig).toHaveBeenCalledWith(1001, 'room-2')
+  })
+
+  it('P2：表单保存 approved=false 后重载配置并同步列表，立即显示未激活徽章', async () => {
+    chatStoreMocks.getAiclawGroupConfigList.mockReturnValue([
+      {
+        roomId: 'room-2',
+        roomName: 'Beta 群',
+        rateLimitPerMinute: 5,
+        dailyLimit: 100,
+        respondToAi: false,
+        mentionRequired: true,
+        approved: true
+      },
+      {
+        roomId: 'room-1',
+        roomName: 'Alpha 群',
+        rateLimitPerMinute: 5,
+        dailyLimit: 100,
+        respondToAi: false,
+        mentionRequired: true,
+        approved: false
+      }
+    ])
+
+    const wrapper = mountWindow()
+    await flushPromises()
+
+    const forms = wrapper.findAllComponents({ name: 'AiclawGroupConfigFormStub' })
+    expect(forms).toHaveLength(2)
+
+    // 模拟 Beta 群表单把 approved toggle 从 true 改为 false 保存
+    chatStoreMocks.getAiclawGroupConfigList.mockReturnValue([
+      {
+        roomId: 'room-2',
+        roomName: 'Beta 群',
+        rateLimitPerMinute: 5,
+        dailyLimit: 100,
+        respondToAi: false,
+        mentionRequired: true,
+        approved: false
+      },
+      {
+        roomId: 'room-1',
+        roomName: 'Alpha 群',
+        rateLimitPerMinute: 5,
+        dailyLimit: 100,
+        respondToAi: false,
+        mentionRequired: true,
+        approved: false
+      }
+    ])
+
+    await forms[1].vm.$emit('save', {
+      roomId: 'room-2',
+      roomName: 'Beta 群',
+      rateLimitPerMinute: 5,
+      dailyLimit: 100,
+      respondToAi: false,
+      mentionRequired: true,
+      approved: false
+    })
+    await flushPromises()
+
+    expect(chatStoreMocks.saveAiclawGroupConfig).toHaveBeenCalledWith(
+      1001,
+      'room-2',
+      expect.objectContaining({ approved: false })
+    )
+    expect(chatStoreMocks.loadAiclawGroupConfig).toHaveBeenCalledWith(1001, 'room-2')
+
+    const cards = wrapper.findAll('[data-testid="aiclaw-group-card"]')
+    const betaCard = cards.find((c) => c.text().includes('Beta 群'))
+    expect(betaCard).toBeDefined()
+    expect(betaCard!.find('[data-testid="aiclaw-group-card-inactive-badge"]').exists()).toBe(true)
   })
 })

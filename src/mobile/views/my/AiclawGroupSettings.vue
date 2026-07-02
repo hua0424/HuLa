@@ -129,6 +129,9 @@ const handleSaveGroupConfig = async (config: GroupConfigItem) => {
       approved: config.approved,
       workspaceDir: config.workspaceDir
     })
+    await chatStore.loadAiclawGroupConfig(Number(uid), config.roomId)
+    // 同步本地列表，让排序/徽章立即刷新（P2：表单 toggle 关闭批准也要即时生效）
+    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
     window.$message?.success?.(t('aiclaw.group_settings.save_success'))
   } catch (error) {
     console.error('[AiclawGroupSettings] Failed to save config:', error)

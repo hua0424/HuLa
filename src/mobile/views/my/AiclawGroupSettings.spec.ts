@@ -141,6 +141,97 @@ describe('REQ-012 #114：未激活群卡显眼化 + 一键批准', () => {
   })
 })
 
+describe('P2：表单保存 approved=false 后同步本地列表立即刷新徽章/排序', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getAiclawGroupConfigListMock.mockReturnValue([
+      {
+        roomId: 'room-2',
+        roomName: 'Beta 群',
+        rateLimitPerMinute: 5,
+        dailyLimit: 100,
+        respondToAi: false,
+        mentionRequired: true,
+        approved: true
+      },
+      {
+        roomId: 'room-1',
+        roomName: 'Alpha 群',
+        rateLimitPerMinute: 5,
+        dailyLimit: 100,
+        respondToAi: false,
+        mentionRequired: true,
+        approved: false
+      }
+    ])
+  })
+
+  const mountWithStubbedForm = () =>
+    mount(AiclawGroupSettings, {
+      global: {
+        plugins: [i18n],
+        stubs: {
+          AutoFixHeightPage: { template: '<div><slot name="header" /><slot name="container" /></div>' },
+          HeaderBar: true,
+          AiclawGroupConfigForm: {
+            name: 'AiclawGroupConfigFormStub',
+            template: '<div data-testid="aiclaw-group-config-form" />',
+            props: ['config', 'saving', 'adapterType', 'aiclawUid', 'defaultWorkspaceDir'],
+            emits: ['save']
+          }
+        }
+      }
+    })
+
+  it('表单保存 approved=false 后重载配置并同步列表，立即显示未激活徽章', async () => {
+    const wrapper = mountWithStubbedForm()
+    await flushPromises()
+
+    const forms = wrapper.findAllComponents({ name: 'AiclawGroupConfigFormStub' })
+    expect(forms).toHaveLength(2)
+
+    getAiclawGroupConfigListMock.mockReturnValue([
+      {
+        roomId: 'room-2',
+        roomName: 'Beta 群',
+        rateLimitPerMinute: 5,
+        dailyLimit: 100,
+        respondToAi: false,
+        mentionRequired: true,
+        approved: false
+      },
+      {
+        roomId: 'room-1',
+        roomName: 'Alpha 群',
+        rateLimitPerMinute: 5,
+        dailyLimit: 100,
+        respondToAi: false,
+        mentionRequired: true,
+        approved: false
+      }
+    ])
+
+    await forms[0].vm.$emit('save', {
+      roomId: 'room-2',
+      roomName: 'Beta 群',
+      rateLimitPerMinute: 5,
+      dailyLimit: 100,
+      respondToAi: false,
+      mentionRequired: true,
+      approved: false
+    })
+    await flushPromises()
+
+    expect(saveAiclawGroupConfigMock).toHaveBeenCalledWith(1001, 'room-2', expect.objectContaining({ approved: false }))
+    expect(loadAiclawGroupConfigMock).toHaveBeenCalledWith(1001, 'room-2')
+
+    const cards = wrapper.findAll('[data-testid="aiclaw-group-card"]')
+    const betaCard = cards.find((c) => c.text().includes('Beta 群'))
+    expect(betaCard).toBeDefined()
+    expect(betaCard!.find('[data-testid="aiclaw-group-card-inactive-badge"]').exists()).toBe(true)
+  })
+})
+
 describe('AiclawGroupSettings 群配置表单（S7 回归锁 + #51 i18n @ 转义守卫）', () => {
   beforeEach(() => {
     getAiclawGroupConfigListMock.mockReturnValue([groupConfig])
