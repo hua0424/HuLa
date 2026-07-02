@@ -564,6 +564,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
         tempMsgId,
         payload: {
           id: tempMsgId,
+          clientMsgId: tempMsgId,
           roomId: targetRoomId,
           msgType: msg.type,
           body: messageBody
@@ -841,6 +842,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
         tempMsgId,
         payload: {
           id: tempMsgId,
+          clientMsgId: tempMsgId,
           roomId: targetRoomId,
           msgType: MsgEnum.FILE,
           body: messageBody
@@ -916,6 +918,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
         tempMsgId,
         payload: {
           id: tempMsgId,
+          clientMsgId: tempMsgId,
           roomId: targetRoomId,
           msgType: MsgEnum.FILE,
           body: messageBody
@@ -1227,6 +1230,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
           tempMsgId,
           payload: {
             id: tempMsgId,
+            clientMsgId: tempMsgId,
             roomId: targetRoomId,
             msgType: MsgEnum.VOICE,
             body: messageBody
@@ -1283,6 +1287,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
         tempMsgId,
         payload: {
           id: tempMsgId,
+          clientMsgId: tempMsgId,
           roomId: targetRoomId,
           msgType: MsgEnum.LOCATION,
           body: messageBody
@@ -1326,6 +1331,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
         tempMsgId,
         payload: {
           id: tempMsgId,
+          clientMsgId: tempMsgId,
           roomId: targetRoomId,
           msgType: MsgEnum.EMOJI,
           body: messageBody

@@ -656,6 +656,39 @@ pub async fn delete_messages_by_room(
     Ok(result.rows_affected)
 }
 
+/// aichatoverview#42: 按服务端回显的 client_msg_id 删除本地乐观 temp 行。
+/// 仅删除 id 以 'T' 开头的临时消息，避免误删正式消息。
+pub async fn delete_temp_messages_by_client_msg_id<C>(
+    db: &C,
+    login_uid: &str,
+    client_msg_ids: &[String],
+) -> Result<u64, CommonError>
+where
+    C: ConnectionTrait,
+{
+    if client_msg_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let backend = db.get_database_backend();
+    let placeholders = client_msg_ids
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "DELETE FROM im_message WHERE login_uid = ? AND id IN ({}) AND id LIKE 'T%'",
+        placeholders
+    );
+
+    let mut values: Vec<Value> = vec![Value::from(login_uid.to_string())];
+    values.extend(client_msg_ids.iter().map(|id| Value::from(id.clone())));
+
+    let stmt = Statement::from_sql_and_values(backend, &sql, values);
+    let result = db.execute(stmt).await?;
+    Ok(result.rows_affected())
+}
+
 pub async fn get_room_max_message_id(
     db: &DatabaseConnection,
     room_id: &str,

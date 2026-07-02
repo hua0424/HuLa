@@ -13,6 +13,8 @@ pub struct MyRoomInfoReq {
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessageReq {
     pub id: String,
+    /// aichatoverview#42: 客户端临时消息 id，服务端原样回显，用于精确 reconcile 乐观气泡。
+    pub client_msg_id: Option<String>,
     pub room_id: Option<String>,
     pub msg_type: Option<u8>,
     pub body: Option<serde_json::Value>,

@@ -897,19 +897,12 @@ export const useChatStore = defineStore(
     }
 
     /**
-     * #38 重复幽灵气泡修复（F1）：服务器回推「自己发的消息」时，就地认领仍未确认的乐观气泡，
-     * 复用 updateMsg 把临时气泡（client temp id，如 'T1781432449441'）改名为服务器雪花 id，
-     * 避免再 pushMsg 出第二个气泡。正常发送由 onSuccess 改名；本方法兜底「重试时 HTTP 响应丢失、
-     * 临时气泡停留在 FAILED 未改名，但服务器实际已持久化并回推」的场景。
+     * #42 clientMsgId 精确 reconcile（F3-1）：服务器回推「自己发的消息」时，
+     * 若消息携带了客户端临时 id（clientMsgId），直接认领对应乐观气泡，避免 #38 F1
+     * 启发式在「内容相同 + 时间接近」时的错配风险。
      *
-     * 启发式局限：这是基于 (内容相同 + 同发送者 + 时间接近) 的匹配，
-     * 极快连发两条内容完全相同的消息时可能错配（故 >=2 个候选时直接放弃，宁可漏配不可错配）。
-     * 真正的根治是服务器在 WS 回推里带回客户端原始 msgId（F3，独立的 server 后续项）；
-     * F1 仅为加固后的启发式兜底。
-     *
-     * 本方法保持纯逻辑（不做 Tauri invoke）：命中时返回被认领的临时气泡 id（'T...'），
-     * 由调用方（layout RECEIVE_MESSAGE 处理器）据此删除本地 SQLite 里那条孤儿 temp 行，
-     * 防止下次从 SQLite 重载历史时 temp 行复活导致重复气泡回归；未命中 / 放弃时返回 null。
+     * 优先按 clientMsgId 精确匹配；未命中或字段缺失时 fallback 到 #38 F1 启发式。
+     * 本方法保持纯逻辑（不做 Tauri invoke）：命中时返回被认领的临时气泡 id（'T...'）。
      */
     const reconcileSelfOptimisticMessage = (data: MessageType): string | null => {
       const roomId = data?.message?.roomId
@@ -919,9 +912,41 @@ export const useChatStore = defineStore(
       if (!roomMessages) return null
 
       const serverMsgId = data.message.id
-      const serverContent = data.message.body?.content
       const serverUid = data.fromUser?.uid
-      if (serverContent === undefined || !serverUid) return null
+      if (!serverUid) return null
+
+      // F3-1: 精确匹配 — 按服务端回显的 clientMsgId 直接 lookup temp 行。
+      const clientMsgId = data.message.clientMsgId
+      if (clientMsgId) {
+        const tempMsg = roomMessages[clientMsgId]
+        if (tempMsg && tempMsg.message.id.startsWith('T')) {
+          updateMsg({
+            msgId: clientMsgId,
+            newMsgId: serverMsgId,
+            status: MessageStatusEnum.SUCCESS,
+            body: data.message.body,
+            timeBlock: data.timeBlock,
+            roomId
+          })
+          return clientMsgId
+        }
+      }
+
+      // Fallback: #38 F1 启发式（内容 + 发送者 + 时间窗口）。
+      return reconcileSelfOptimisticMessageHeuristic(data, roomMessages, serverMsgId, serverUid)
+    }
+
+    /**
+     * #38 重复幽灵气泡修复（F1）：clientMsgId 缺失时的启发式兜底。
+     */
+    const reconcileSelfOptimisticMessageHeuristic = (
+      data: MessageType,
+      roomMessages: Record<string, MessageType>,
+      serverMsgId: string,
+      serverUid: string
+    ): string | null => {
+      const serverContent = data.message.body?.content
+      if (serverContent === undefined) return null
 
       const toNum = (raw: number | string | undefined): number => {
         if (typeof raw === 'number') return raw
@@ -954,8 +979,7 @@ export const useChatStore = defineStore(
         const candidateTime = toNum(candidate.message.sendTime ?? candidate.sendTime)
         if (Number.isNaN(candidateTime) || Number.isNaN(serverTime)) continue
         // 容忍时钟偏差窗口：client temp.sendTime 用本地时钟、server.sendTime 用服务端时钟，
-        // 设备时钟偏差可能 >60s，故放宽到 300000ms（5 分钟）避免合法 reconcile 漏配；
-        // >=2 候选直接放弃的保护仍在，放宽窗口是安全的。
+        // 设备时钟偏差可能 >60s，故放宽到 300000ms（5 分钟）。
         if (Math.abs(candidateTime - serverTime) > 300000) continue
 
         candidateIds.push(candidateId)

@@ -5,6 +5,8 @@ import { imRequest } from '@/utils/ImRequestUtils'
 
 export type SendMessagePayload = {
   id: string
+  /** 客户端临时消息 id（F3-1 #42：服务端原样回显，用于精确 reconcile） */
+  clientMsgId?: string
   roomId: string
   msgType: MsgEnum
   body: unknown

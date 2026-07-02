@@ -99,6 +99,8 @@ pub struct FromUser {
 #[serde(rename_all = "camelCase")]
 pub struct Message {
     pub id: Option<String>,
+    /// aichatoverview#42: 服务端回显的客户端临时消息 id，用于精确 reconcile 乐观气泡。
+    pub client_msg_id: Option<String>,
     pub room_id: Option<String>,
     #[serde(rename = "type")]
     pub message_type: Option<u8>,
@@ -294,6 +296,8 @@ pub fn convert_message_to_resp(
             send_time: msg.send_time,
             // aichatoverview#34: 透传本地 DB 的发送状态，让重载后的消息持久保留 FAILED/SUCCESS 等。
             status: Some(msg.send_status),
+            // aichatoverview#42: 本地 DB 回放不携带 client_msg_id，保持 None。
+            client_msg_id: None,
         },
         old_msg_id: old_msg_id,
         time_block: msg.time_block,
@@ -462,6 +466,26 @@ pub async fn fetch_all_messages(
 
             // 当前消息成为下一条的参考
             last_send_time_map.insert(room_id, Some(send_time));
+        }
+
+        // aichatoverview#42: 持久化前先按 client_msg_id 删除本地乐观 temp 行，
+        // 防止 sync 后原来的 T... 行复活成重复气泡。
+        let client_msg_ids: Vec<String> = messages
+            .iter()
+            .filter_map(|m| m.message.client_msg_id.clone())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !client_msg_ids.is_empty() {
+            let deleted = im_message_repository::delete_temp_messages_by_client_msg_id(
+                db_conn,
+                uid,
+                &client_msg_ids,
+            )
+            .await?;
+            debug!(
+                "fetch_all_messages deleted {} optimistic temp rows by client_msg_id",
+                deleted
+            );
         }
 
         // 开启事务
@@ -953,5 +977,20 @@ mod tests {
         let resp = convert_message_to_resp(record, None);
         assert_eq!(resp.from_user.user_type, Some(4));
         assert_eq!(resp.from_user.uid, "u1");
+    }
+
+    #[test]
+    fn deserializes_message_with_client_msg_id() {
+        let json = json!({
+            "id": "srv-1",
+            "clientMsgId": "T123456789",
+            "roomId": "r1",
+            "type": 1,
+            "body": {"content": "hi"},
+            "sendTime": 1000
+        });
+        let msg: Message = serde_json::from_value(json).unwrap();
+        assert_eq!(msg.id, Some("srv-1".to_string()));
+        assert_eq!(msg.client_msg_id, Some("T123456789".to_string()));
     }
 }

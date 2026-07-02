@@ -517,6 +517,8 @@ export type MsgType = {
   status: MessageStatusEnum
   /** 消息元数据扩展字段（REQ-004: autoReply 等标记，仅 WS payload 携带，不入库） */
   extra?: Record<string, unknown>
+  /** 客户端临时消息 id（F3-1 #42：发送时传入，服务端原样回显，用于精确 reconcile 乐观气泡） */
+  clientMsgId?: string
 }
 
 export type ReplyType = {
