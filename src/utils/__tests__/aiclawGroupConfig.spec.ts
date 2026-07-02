@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   buildAiclawGroupConfigUpdateBody,
   buildGroupCardLabel,
-  normalizeAiclawGroupConfig
+  normalizeAiclawGroupConfig,
+  sortAiclawGroupConfigs
 } from '@/utils/aiclawGroupConfig'
 import type { AiclawGroupConfig } from '@/services/wsType'
 
@@ -100,6 +101,50 @@ describe('#82 / REQ-009 normalizeAiclawGroupConfig：server 1/0 与 boolean 归�
     const cfg = normalizeAiclawGroupConfig({})
     expect(cfg.rateLimitPerMinute).toBe(0)
     expect(cfg.dailyLimit).toBe(0)
+  })
+})
+
+describe('REQ-012 #114 sortAiclawGroupConfigs：未激活群卡排前', () => {
+  it('未激活（approved=false）排在已激活前面', () => {
+    const sorted = sortAiclawGroupConfigs([
+      { roomId: '1', approved: true, roomName: '活跃群 A' },
+      { roomId: '2', approved: false, roomName: '未激活群' },
+      { roomId: '3', approved: true, roomName: '活跃群 B' }
+    ])
+    expect(sorted.map((c) => c.roomId)).toEqual(['2', '1', '3'])
+  })
+
+  it('同活跃态内按群名升序', () => {
+    const sorted = sortAiclawGroupConfigs([
+      { roomId: '1', approved: true, roomName: 'Beta 群' },
+      { roomId: '2', approved: true, roomName: 'Alpha 群' }
+    ])
+    expect(sorted.map((c) => c.roomId)).toEqual(['2', '1'])
+  })
+
+  it('群名相同按 roomId 稳定兜底', () => {
+    const sorted = sortAiclawGroupConfigs([
+      { roomId: 'b', approved: false, roomName: '同名' },
+      { roomId: 'a', approved: false, roomName: '同名' }
+    ])
+    expect(sorted.map((c) => c.roomId)).toEqual(['a', 'b'])
+  })
+
+  it('approved 缺失视为未激活', () => {
+    const sorted = sortAiclawGroupConfigs([
+      { roomId: '1', approved: true, roomName: '活跃群' },
+      { roomId: '2', approved: undefined, roomName: '缺失群' }
+    ])
+    expect(sorted.map((c) => c.roomId)).toEqual(['2', '1'])
+  })
+
+  it('不修改原数组', () => {
+    const original = [
+      { roomId: '1', approved: true },
+      { roomId: '2', approved: false }
+    ]
+    sortAiclawGroupConfigs(original)
+    expect(original.map((c) => c.roomId)).toEqual(['1', '2'])
   })
 })
 

@@ -309,9 +309,9 @@
           <span class="text-15px font-500 text-[--text-color]">{{ t('aiclaw.group_settings.title') }}</span>
         </div>
         <div class="flex-1 overflow-auto">
-          <template v-if="groupConfigList.length > 0">
+          <template v-if="sortedGroupConfigList.length > 0">
             <div
-              v-for="config in groupConfigList"
+              v-for="config in sortedGroupConfigList"
               :key="config.roomId"
               :ref="
                 (el) => {
@@ -319,11 +319,29 @@
                 }
               "
               class="border-b border-[--line-color] px-24px py-16px transition-colors"
+              data-testid="aiclaw-group-card"
               :class="{ 'bg-#13987f08': highlightRoomId === config.roomId }">
-              <div class="flex items-center justify-between mb-12px">
-                <span class="text-14px font-500 text-[--text-color]">
-                  {{ buildGroupCardLabel(config.roomName, config.account, config.roomId) }}
-                </span>
+              <div class="flex items-center justify-between mb-12px" data-testid="aiclaw-group-card-header">
+                <div class="flex items-center gap-8px">
+                  <span class="text-14px font-500 text-[--text-color]">
+                    {{ buildGroupCardLabel(config.roomName, config.account, config.roomId) }}
+                  </span>
+                  <span
+                    v-if="config.approved !== true"
+                    class="text-11px font-500 px-8px py-2px rounded-4px bg-#d0305015 text-#d03050"
+                    data-testid="aiclaw-group-card-inactive-badge">
+                    {{ t('aiclaw.group_settings.inactive') }}
+                  </span>
+                </div>
+                <n-button
+                  v-if="config.approved !== true"
+                  size="small"
+                  type="primary"
+                  :loading="savingGroupConfig === config.roomId"
+                  data-testid="aiclaw-group-card-approve-button"
+                  @click="handleApproveGroupConfig(config)">
+                  {{ t('aiclaw.group_settings.approve') }}
+                </n-button>
               </div>
               <AiclawGroupConfigForm
                 :config="config"
@@ -407,7 +425,7 @@ import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue
 import { ImUrlEnum } from '@/enums'
 import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
 import { isDesktop, isWeb } from '@/utils/PlatformConstants'
-import { buildDefaultWorkspaceDir, buildGroupCardLabel } from '@/utils/aiclawGroupConfig'
+import { buildDefaultWorkspaceDir, buildGroupCardLabel, sortAiclawGroupConfigs } from '@/utils/aiclawGroupConfig'
 import { useChatStore } from '@/stores/chat'
 import { useAiclawStore } from '@/stores/aiclaw'
 
@@ -533,6 +551,9 @@ const getAuthKey = (authStatus?: number): 'inactive' | 'activated' | 'deactivate
   authStatusMap[authStatus ?? 0] || 'inactive'
 
 const selectedItem = computed(() => aiclawList.value.find((item) => item.uid === selectedUid.value) || null)
+
+// REQ-012 #114：未激活群卡排前，让主人优先处理待批准群
+const sortedGroupConfigList = computed(() => sortAiclawGroupConfigs(groupConfigList.value))
 
 const personaDirty = computed(() => personaText.value !== originalPersona.value)
 
@@ -788,10 +809,40 @@ const handleSaveGroupConfig = async (
       approved: config.approved,
       workspaceDir: config.workspaceDir
     })
+    await chatStore.loadAiclawGroupConfig(Number(selectedUid.value), config.roomId)
+    // 同步本地列表，让排序/徽章立即刷新（P2：表单 toggle 关闭批准也要即时生效）
+    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(selectedUid.value))
     window.$message?.success?.(t('aiclaw.group_settings.save_success'))
   } catch (error) {
     console.error('[AiAssistant] Failed to save group config:', error)
     window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
+  } finally {
+    savingGroupConfig.value = null
+  }
+}
+
+// REQ-012 #114：一键批准（approved=true）并立即重载该群配置
+const handleApproveGroupConfig = async (
+  config: import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string }
+) => {
+  if (!selectedUid.value) return
+  savingGroupConfig.value = config.roomId
+  try {
+    await chatStore.saveAiclawGroupConfig(Number(selectedUid.value), config.roomId, {
+      rateLimitPerMinute: config.rateLimitPerMinute,
+      dailyLimit: config.dailyLimit,
+      respondToAi: config.respondToAi,
+      mentionRequired: config.mentionRequired,
+      approved: true,
+      workspaceDir: config.workspaceDir
+    })
+    await chatStore.loadAiclawGroupConfig(Number(selectedUid.value), config.roomId)
+    // 同步本地列表，让排序/徽章立即刷新
+    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(selectedUid.value))
+    window.$message?.success?.(t('aiclaw.group_settings.approve_success'))
+  } catch (error) {
+    console.error('[AiAssistant] Failed to approve group config:', error)
+    window.$message?.error?.(t('aiclaw.group_settings.approve_failed'))
   } finally {
     savingGroupConfig.value = null
   }
