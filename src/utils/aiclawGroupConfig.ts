@@ -25,21 +25,39 @@ export const normalizeAiclawGroupConfig = (raw: Record<string, unknown>): Aiclaw
  * Integer 失败 → "参数类型解析异常"、保存不落库（加载转 boolean、保存没转回 = 不对称）。
  * 故这里把开关转回 0/1（Integer）；rateLimitPerMinute / dailyLimit 是 number 直传；
  * workspaceDir 有值时原样下发；aiclawUid / roomId 是 Long（JSON number，< 2^53 安全）。
+ *
+ * #134：支持部分字段更新。批准操作只传 { approved: true }，其它字段 undefined 时不写入 body，
+ * 依赖 server 侧 fillConfigFields 的非空条件更新保持原库值不变。
  */
 export const buildAiclawGroupConfigUpdateBody = (
   aiclawUid: number,
   roomId: string | number,
-  config: AiclawGroupConfig
-) => ({
-  aiclawUid,
-  roomId: Number(roomId),
-  rateLimitPerMinute: config.rateLimitPerMinute,
-  dailyLimit: config.dailyLimit,
-  respondToAi: config.respondToAi ? 1 : 0,
-  mentionRequired: config.mentionRequired ? 1 : 0,
-  approved: config.approved === true ? 1 : 0,
-  workspaceDir: config.workspaceDir
-})
+  config: Partial<AiclawGroupConfig>
+) => {
+  const body: Record<string, unknown> = {
+    aiclawUid,
+    roomId: Number(roomId)
+  }
+  if (config.rateLimitPerMinute !== undefined) {
+    body.rateLimitPerMinute = config.rateLimitPerMinute
+  }
+  if (config.dailyLimit !== undefined) {
+    body.dailyLimit = config.dailyLimit
+  }
+  if (config.respondToAi !== undefined) {
+    body.respondToAi = config.respondToAi ? 1 : 0
+  }
+  if (config.mentionRequired !== undefined) {
+    body.mentionRequired = config.mentionRequired ? 1 : 0
+  }
+  if (config.approved !== undefined) {
+    body.approved = config.approved ? 1 : 0
+  }
+  if (config.workspaceDir !== undefined) {
+    body.workspaceDir = config.workspaceDir
+  }
+  return body
+}
 
 /**
  * #56 群卡片标题：把内部数字 room_id 显示替换成「群名称(群号)」，

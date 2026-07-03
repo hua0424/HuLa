@@ -39,10 +39,14 @@ describe('#53 buildAiclawGroupConfigUpdateBody：boolean 开关转 Integer 0/1',
     expect(body.mentionRequired).toBe(0)
   })
 
-  it('mentionRequired 缺省（undefined）→ 0', () => {
-    const cfg = { rateLimitPerMinute: 5, dailyLimit: 100, respondToAi: false } as AiclawGroupConfig
-    const body = buildAiclawGroupConfigUpdateBody(1001, '2002', cfg)
-    expect(body.mentionRequired).toBe(0)
+  it('#134：批准操作时未提供的字段不写入 body，避免覆盖服务端原值', () => {
+    const body = buildAiclawGroupConfigUpdateBody(1001, '2002', { approved: true })
+    expect(body.approved).toBe(1)
+    expect(body.rateLimitPerMinute).toBeUndefined()
+    expect(body.dailyLimit).toBeUndefined()
+    expect(body.respondToAi).toBeUndefined()
+    expect(body.mentionRequired).toBeUndefined()
+    expect(body.workspaceDir).toBeUndefined()
   })
 
   it('两个开关在 body 里是 number 类型（非 boolean）——这是 bug 的判别点', () => {

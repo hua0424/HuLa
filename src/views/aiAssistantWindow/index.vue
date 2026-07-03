@@ -821,20 +821,14 @@ const handleSaveGroupConfig = async (
 }
 
 // REQ-012 #114：一键批准（approved=true）并立即重载该群配置
+// #134：批准只提交 approved 位，不携带其它表单字段，避免覆盖未保存的编辑值。
 const handleApproveGroupConfig = async (
   config: import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string }
 ) => {
   if (!selectedUid.value) return
   savingGroupConfig.value = config.roomId
   try {
-    await chatStore.saveAiclawGroupConfig(Number(selectedUid.value), config.roomId, {
-      rateLimitPerMinute: config.rateLimitPerMinute,
-      dailyLimit: config.dailyLimit,
-      respondToAi: config.respondToAi,
-      mentionRequired: config.mentionRequired,
-      approved: true,
-      workspaceDir: config.workspaceDir
-    })
+    await chatStore.saveAiclawGroupConfig(Number(selectedUid.value), config.roomId, { approved: true })
     await chatStore.loadAiclawGroupConfig(Number(selectedUid.value), config.roomId)
     // 同步本地列表，让排序/徽章立即刷新
     groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(selectedUid.value))
