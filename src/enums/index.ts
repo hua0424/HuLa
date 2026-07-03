@@ -857,6 +857,8 @@ export enum ImUrlEnum {
   AICLAW_GROUP_CONFIG_LIST = 'aiclawGroupConfigList',
   /** 更新 aiclaw 群聊配置 */
   AICLAW_GROUP_CONFIG_UPDATE = 'aiclawGroupConfigUpdate',
+  /** 按房间查询 aiclaw thinking 归档列表（元数据 only，#136） */
+  AICLAW_THINKING_LIST = 'aiclawThinkingList',
   /** 获取 aiclaw 思考完整内容（S7：思考全文不再走 WS，改为按需 REST 拉取） */
   AICLAW_THINKING_DETAIL = 'aiclawThinkingDetail'
 }

@@ -8,7 +8,12 @@ import { useRoute } from 'vue-router'
 import { ErrorType } from '@/common/exception'
 import { MittEnum, MessageStatusEnum, MsgEnum, RoomTypeEnum, StoresEnum, TauriCommand } from '@/enums'
 import type { MarkItemType, MessageType, RevokedMsgType, SessionItem } from '@/services/types'
-import type { ThinkingState } from '@/types/thinking'
+import {
+  mapServerThinkingStatus,
+  parseThinkingCreateTime,
+  type ThinkingArchiveItem,
+  type ThinkingState
+} from '@/types/thinking'
 import { useGlobalStore } from '@/stores/global.ts'
 import { useFeedStore } from '@/stores/feed.ts'
 import { useGroupStore } from '@/stores/group.ts'
@@ -2008,6 +2013,88 @@ export const useChatStore = defineStore(
       }
     }
 
+    /** 已加载过历史归档的房间 ID 集合（#136：重启后按需回填，避免重复请求） */
+    const thinkingArchiveLoaded = reactive(new Set<string>())
+
+    /** 正在加载历史归档的房间 ID 集合 */
+    const thinkingArchiveLoading = reactive(new Set<string>())
+
+    /**
+     * 将服务端 thinking 归档列表项合并到房间归档（去重 + 按结束时间倒序）
+     */
+    const mergeServerThinkingArchive = (roomId: string, items: ThinkingArchiveItem[]) => {
+      if (!items?.length) return
+
+      const merged = new Map<string, ThinkingState>()
+      const existing = thinkingArchive.get(roomId) || []
+      for (const state of existing) {
+        merged.set(state.thinkingId, state)
+      }
+
+      for (const item of items) {
+        const thinkingId = String(item.id)
+        if (merged.has(thinkingId)) continue
+
+        const aiclawId = Number(item.aiclawUid)
+        const userInfo = groupStore.getUserInfo(String(aiclawId))
+        const endTime = parseThinkingCreateTime(item.createTime)
+        const durationMs = item.durationMs ?? 0
+        const startTime = durationMs > 0 ? endTime - durationMs : endTime
+
+        merged.set(thinkingId, {
+          thinkingId,
+          aiclawId,
+          aiclawName: userInfo?.name || 'AI',
+          aiclawAvatar: userInfo?.avatar || '',
+          roomId,
+          status: mapServerThinkingStatus(item.status),
+          startTime,
+          endTime,
+          durationMs: item.durationMs,
+          triggerMsgId: item.triggerMsgId ? String(item.triggerMsgId) : undefined,
+          collapsed: true
+        })
+      }
+
+      const sorted = Array.from(merged.values()).sort((a, b) => {
+        const aTime = a.endTime ?? a.startTime
+        const bTime = b.endTime ?? b.startTime
+        return bTime - aTime
+      })
+      thinkingArchive.set(roomId, sorted)
+    }
+
+    /**
+     * 从服务端按房间加载历史 thinking 归档（#136）
+     *
+     * 契约：GET /im/aiclaw/thinking/list?roomId=&cursor=&pageSize=
+     * 返回 CursorPageBaseResp<ThinkingArchiveItem>（元数据 only），展开时走现有单条 detail 接口。
+     */
+    const loadThinkingArchive = async (roomId: string): Promise<boolean> => {
+      if (!roomId || thinkingArchiveLoading.has(roomId) || thinkingArchiveLoaded.has(roomId)) {
+        return true
+      }
+      thinkingArchiveLoading.add(roomId)
+      try {
+        const { imRequest } = await import('@/utils/ImRequestUtils')
+        const { ImUrlEnum } = await import('@/enums')
+        type CursorPageBaseResp<T> = { list: T[]; cursor?: string; isLast?: boolean }
+        const resp = await imRequest<CursorPageBaseResp<ThinkingArchiveItem>>({
+          url: ImUrlEnum.AICLAW_THINKING_LIST,
+          // #136 spec: 懒加载不做全量回填/分页历史流，固定取最近 10 条
+          params: { roomId: Number(roomId), pageSize: 10 }
+        })
+        mergeServerThinkingArchive(roomId, resp?.list || [])
+        thinkingArchiveLoaded.add(roomId)
+        return true
+      } catch (error) {
+        console.error('[ChatStore] Failed to load thinking archive:', error)
+        return false
+      } finally {
+        thinkingArchiveLoading.delete(roomId)
+      }
+    }
+
     /** 清理思考状态（切换房间或手动关闭时） */
     const clearThinking = (roomId?: string, aiclawId?: number) => {
       if (roomId && aiclawId) {
@@ -2097,6 +2184,8 @@ export const useChatStore = defineStore(
       // REQ-004 thinking
       thinkingStreams,
       thinkingArchive,
+      thinkingArchiveLoaded,
+      thinkingArchiveLoading,
       isCurrentRoomThinking,
       currentRoomThinkings,
       autoReplyMessages,
@@ -2104,6 +2193,7 @@ export const useChatStore = defineStore(
       finalizeThinking,
       clearThinking,
       toggleThinkingCollapse,
+      loadThinkingArchive,
       markMessageAsAutoReply,
       isAutoReplyMessage,
 

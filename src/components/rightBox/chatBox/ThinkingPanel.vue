@@ -11,7 +11,12 @@
       </div>
     </div>
     <!-- 所有思考已归档，显示回顾入口 -->
-    <div v-else-if="hasArchivedThinkings" class="flex-shrink-0 px-12px pt-6px" @click="showArchiveDrawer = true">
+    <div
+      v-else-if="hasArchivedThinkings"
+      class="flex-shrink-0 px-12px pt-6px"
+      data-testid="thinking-archive-entry"
+      :aria-label="t('aiclaw.thinking.archive_title')"
+      @click="showArchiveDrawer = true">
       <div
         class="flex items-center gap-6px px-12px py-6px rounded-6px bg-#7c5cfc08 text-(12px #7c5cfc) cursor-pointer hover:bg-#7c5cfc15 transition-colors">
         <svg class="size-14px flex-shrink-0"><use href="#robot" /></svg>
@@ -21,7 +26,7 @@
   </Transition>
 
   <!-- 归档抽屉 -->
-  <n-drawer v-model:show="showArchiveDrawer" :width="360" placement="right">
+  <n-drawer v-model:show="showArchiveDrawer" data-testid="thinking-archive-drawer" :width="360" placement="right">
     <n-drawer-content>
       <template #header>
         <div class="flex items-center justify-between w-full">
@@ -35,18 +40,23 @@
           </n-button>
         </div>
       </template>
+      <div v-if="isArchiveLoading" class="flex justify-center py-20px">
+        <n-spin size="small" />
+      </div>
       <ThinkingCard
         v-for="thinking in archivedThinkings"
         :key="thinking.thinkingId"
         :thinking="thinking"
         :readonly="true" />
-      <n-empty v-if="archivedThinkings.length === 0" :description="t('aiclaw.thinking.archive_empty')" />
+      <n-empty
+        v-if="!isArchiveLoading && archivedThinkings.length === 0"
+        :description="t('aiclaw.thinking.archive_empty')" />
     </n-drawer-content>
   </n-drawer>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useGlobalStore } from '@/stores/global'
@@ -73,6 +83,31 @@ const archivedThinkings = computed(() => {
 })
 
 const archivedCount = computed(() => archivedThinkings.value.length)
+
+const isArchiveLoading = computed(() => {
+  const roomId = globalStore.currentSessionRoomId
+  return roomId ? chatStore.thinkingArchiveLoading.has(roomId) : false
+})
+
+// #136：进入房间时即按需加载历史 thinking，让归档入口在重启后也能出现
+watch(
+  () => globalStore.currentSessionRoomId,
+  (roomId) => {
+    if (roomId) {
+      chatStore.loadThinkingArchive(roomId)
+    }
+  },
+  { immediate: true }
+)
+
+// #136：打开归档抽屉时按需加载历史 thinking（兜底）
+watch(showArchiveDrawer, (visible) => {
+  if (!visible) return
+  const roomId = globalStore.currentSessionRoomId
+  if (roomId) {
+    chatStore.loadThinkingArchive(roomId)
+  }
+})
 
 const handleToggleCollapse = (thinking: ThinkingState) => {
   chatStore.toggleThinkingCollapse(thinking.roomId, thinking.aiclawId)

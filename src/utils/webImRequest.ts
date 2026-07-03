@@ -146,6 +146,7 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   aiclawSetRelation: { method: 'PUT', path: 'im/aiclaw/{uid}/friends/{friendUid}/relation' },
   aiclawGroupConfigList: { method: 'GET', path: 'im/aiclaw/group/config' },
   aiclawGroupConfigUpdate: { method: 'PUT', path: 'im/aiclaw/group/config' },
+  aiclawThinkingList: { method: 'GET', path: 'im/aiclaw/thinking/list' },
   aiclawThinkingDetail: { method: 'GET', path: 'im/aiclaw/thinking/{thinkingId}' }
 }
 
