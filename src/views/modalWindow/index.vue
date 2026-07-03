@@ -41,12 +41,14 @@ import { useMitt } from '@/hooks/useMitt'
 import { useWindow } from '@/hooks/useWindow'
 import { getDisabledOptions, getFilteredOptions, renderLabel, renderSourceList } from '@/layout/center/model.tsx'
 import { useGroupStore } from '@/stores/group'
+import { useContactStore } from '@/stores/contacts'
 import { inviteGroupMember } from '@/utils/ImRequestUtils'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const { getWindowPayload } = useWindow()
 const groupStore = useGroupStore()
+const contactStore = useContactStore()
 const windowTitle = ref('')
 const selectedValue = ref([])
 // 从父窗口传递过来的 roomId
@@ -99,6 +101,9 @@ onMounted(async () => {
   if (payload?.roomId) {
     roomId.value = payload.roomId
   }
+
+  // 主动水合最新联系人，避免独立 webview 读到旧持久化快照
+  await contactStore.getContactList(true)
 
   // 初始化群成员数据
   await initGroupMembers()
