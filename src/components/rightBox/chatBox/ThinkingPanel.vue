@@ -11,7 +11,12 @@
       </div>
     </div>
     <!-- 所有思考已归档，显示回顾入口 -->
-    <div v-else-if="hasArchivedThinkings" class="flex-shrink-0 px-12px pt-6px" @click="showArchiveDrawer = true">
+    <div
+      v-else-if="hasArchivedThinkings"
+      class="flex-shrink-0 px-12px pt-6px"
+      data-testid="thinking-archive-entry"
+      :aria-label="t('aiclaw.thinking.archive_title')"
+      @click="showArchiveDrawer = true">
       <div
         class="flex items-center gap-6px px-12px py-6px rounded-6px bg-#7c5cfc08 text-(12px #7c5cfc) cursor-pointer hover:bg-#7c5cfc15 transition-colors">
         <svg class="size-14px flex-shrink-0"><use href="#robot" /></svg>
@@ -21,7 +26,7 @@
   </Transition>
 
   <!-- 归档抽屉 -->
-  <n-drawer v-model:show="showArchiveDrawer" :width="360" placement="right">
+  <n-drawer v-model:show="showArchiveDrawer" data-testid="thinking-archive-drawer" :width="360" placement="right">
     <n-drawer-content>
       <template #header>
         <div class="flex items-center justify-between w-full">
