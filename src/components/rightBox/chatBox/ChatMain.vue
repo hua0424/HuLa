@@ -228,7 +228,6 @@
             :config="modalContext.config"
             :saving="modalSaving"
             :adapter-type="modalContext.adapterType"
-            :aiclaw-uid="modalContext.aiclawUid"
             :default-workspace-dir="buildDefaultWorkspaceDir(modalContext.aiclawUid, modalContext.config.account)"
             @save="saveModal" />
         </n-spin>

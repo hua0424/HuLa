@@ -26,17 +26,6 @@
     "activated": "已激活",
     "deactivated": "已停用"
   },
-  "cc_launch": {
-    "title": "Claude Code 启动命令",
-    "hint": "请在运行该 AI 助理的主机上执行以下命令",
-    "workspace_dir": "工作目录",
-    "copy": "复制命令",
-    "copied": "已复制",
-    "copy_failed": "复制失败",
-    "open": "查看启动命令",
-    "load_failed": "获取启动命令失败",
-    "retry": "重试"
-  },
   "badge": "AI",
   "status": {
     "inactive": "未激活",

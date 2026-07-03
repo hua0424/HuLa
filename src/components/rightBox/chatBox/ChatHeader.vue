@@ -175,15 +175,6 @@
               <p class="color-#7c5cfc">{{ t('aiclaw.token.refresh') }}</p>
             </div>
 
-            <!-- S9: AI 助理 CC 启动命令入口 -->
-            <div
-              v-if="isAiclawSession && isCcAiclawSession"
-              class="box-item cursor-pointer"
-              data-testid="aiclaw-cc-launch-entry"
-              @click="showCcLaunchDialog = true">
-              <p class="color-#7c5cfc">{{ t('aiclaw.cc_launch.open') }}</p>
-            </div>
-
             <div
               v-if="!isBotUser"
               class="box-item flex-x-center cursor-pointer"
@@ -606,12 +597,6 @@
 
   <!-- AI 助理激活码展示 -->
   <AiclawTokenDialog v-model:visible="showAiclawTokenDialog" :uid="activeItem?.detailId" />
-
-  <!-- S9: AI 助理 CC 启动命令弹窗 -->
-  <AiclawCcLaunchDialog
-    v-model:visible="showCcLaunchDialog"
-    :room-id="currentSessionRoomId || ''"
-    :aiclaw-uid="activeItem?.detailId" />
 </template>
 
 <script setup lang="ts">
@@ -641,9 +626,6 @@ import {
 import { useAiclawSession } from '@/hooks/useAiclawSession'
 import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
 import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
-import AiclawCcLaunchDialog from '@/components/aiclaw/AiclawCcLaunchDialog.vue'
-import { useAiclawStore } from '@/stores/aiclaw'
-import { isCcAdapter } from '@/utils/aiclawAdapter'
 import { useAvatarUpload } from '@/hooks/useAvatarUpload'
 import { useMyRoomInfoUpdater } from '@/hooks/useMyRoomInfoUpdater'
 import { useMitt } from '@/hooks/useMitt.ts'
@@ -657,6 +639,7 @@ import { useGlobalStore } from '@/stores/global'
 import { useGroupStore } from '@/stores/group.ts'
 import { useSettingStore } from '@/stores/setting'
 import { useUserStore } from '@/stores/user.ts'
+import { useAiclawStore } from '@/stores/aiclaw'
 import { AvatarUtils } from '@/utils/AvatarUtils'
 import { isSilentAiclaw } from '@/utils/AiclawUtils'
 import { notification, setSessionTop, shield, updateRoomInfo } from '@/utils/ImRequestUtils'
@@ -680,6 +663,7 @@ const globalStore = useGlobalStore()
 const contactStore = useContactStore()
 const userStore = useUserStore()
 const settingStore = useSettingStore()
+const aiclawStore = useAiclawStore()
 const { themes } = storeToRefs(settingStore)
 /** 提醒框标题 */
 const tips = ref()
@@ -833,15 +817,6 @@ const showAiclawTokenDialog = ref(false)
 const handleAiclawRefreshActivation = () => {
   showAiclawTokenDialog.value = true
 }
-
-// S9: AI 助理 CC 启动命令入口
-const aiclawStore = useAiclawStore()
-const showCcLaunchDialog = ref(false)
-const ccAdapterType = computed(() => {
-  const detailId = activeItem.value?.detailId
-  return detailId ? aiclawStore.getAdapterType(detailId) : undefined
-})
-const isCcAiclawSession = computed(() => isCcAdapter(ccAdapterType.value))
 
 // 是否为群主
 const isGroupOwner = computed(() => {
@@ -1701,7 +1676,7 @@ onMounted(() => {
   window.addEventListener('click', closeMenu, true)
   // 初始化本地变量
   initLocalValues()
-  // S9: 预取我的 aiclaw 列表，以便 sidebar 判断 adapterType
+  // 预取 aiclaw 列表，供 sidebar 相关判断使用
   void aiclawStore.ensureLoaded()
 })
 
