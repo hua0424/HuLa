@@ -35,18 +35,23 @@
           </n-button>
         </div>
       </template>
+      <div v-if="isArchiveLoading" class="flex justify-center py-20px">
+        <n-spin size="small" />
+      </div>
       <ThinkingCard
         v-for="thinking in archivedThinkings"
         :key="thinking.thinkingId"
         :thinking="thinking"
         :readonly="true" />
-      <n-empty v-if="archivedThinkings.length === 0" :description="t('aiclaw.thinking.archive_empty')" />
+      <n-empty
+        v-if="!isArchiveLoading && archivedThinkings.length === 0"
+        :description="t('aiclaw.thinking.archive_empty')" />
     </n-drawer-content>
   </n-drawer>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useGlobalStore } from '@/stores/global'
@@ -73,6 +78,20 @@ const archivedThinkings = computed(() => {
 })
 
 const archivedCount = computed(() => archivedThinkings.value.length)
+
+const isArchiveLoading = computed(() => {
+  const roomId = globalStore.currentSessionRoomId
+  return roomId ? chatStore.thinkingArchiveLoading.has(roomId) : false
+})
+
+// #136：打开归档抽屉时按需加载历史 thinking（契约落地后生效）
+watch(showArchiveDrawer, (visible) => {
+  if (!visible) return
+  const roomId = globalStore.currentSessionRoomId
+  if (roomId) {
+    chatStore.loadThinkingArchive(roomId)
+  }
+})
 
 const handleToggleCollapse = (thinking: ThinkingState) => {
   chatStore.toggleThinkingCollapse(thinking.roomId, thinking.aiclawId)

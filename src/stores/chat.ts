@@ -2008,6 +2008,43 @@ export const useChatStore = defineStore(
       }
     }
 
+    /** 已加载过历史归档的房间 ID 集合（#136：重启后按需回填，避免重复请求） */
+    const thinkingArchiveLoaded = reactive(new Set<string>())
+
+    /** 正在加载历史归档的房间 ID 集合 */
+    const thinkingArchiveLoading = reactive(new Set<string>())
+
+    /**
+     * 从服务端按房间加载历史 thinking 归档（#136 方案 A）
+     *
+     * 契约待定：GET /im/aiclaw/thinking/list?roomId=&cursor=&pageSize=
+     * 返回 CursorPageBaseResp<ThinkingArchiveItem>（元数据 only），展开时走现有单条 detail 接口。
+     * 当前为骨架实现，接口契约确定后补实际请求。
+     */
+    const loadThinkingArchive = async (roomId: string): Promise<boolean> => {
+      if (!roomId || thinkingArchiveLoading.has(roomId) || thinkingArchiveLoaded.has(roomId)) {
+        return true
+      }
+      thinkingArchiveLoading.add(roomId)
+      try {
+        // TODO(#136): 等 #138 契约落地后接入真实接口
+        // const { imRequest } = await import('@/utils/ImRequestUtils')
+        // const { ImUrlEnum } = await import('@/enums')
+        // const resp = await imRequest<CursorPageBaseResp<ThinkingArchiveItem>>({
+        //   url: ImUrlEnum.AICLAW_THINKING_LIST,
+        //   params: { roomId: Number(roomId), pageSize: 10 }
+        // })
+        // mergeServerThinkingArchive(roomId, resp.list)
+        thinkingArchiveLoaded.add(roomId)
+        return true
+      } catch (error) {
+        console.error('[ChatStore] Failed to load thinking archive:', error)
+        return false
+      } finally {
+        thinkingArchiveLoading.delete(roomId)
+      }
+    }
+
     /** 清理思考状态（切换房间或手动关闭时） */
     const clearThinking = (roomId?: string, aiclawId?: number) => {
       if (roomId && aiclawId) {
@@ -2097,6 +2134,8 @@ export const useChatStore = defineStore(
       // REQ-004 thinking
       thinkingStreams,
       thinkingArchive,
+      thinkingArchiveLoaded,
+      thinkingArchiveLoading,
       isCurrentRoomThinking,
       currentRoomThinkings,
       autoReplyMessages,
@@ -2104,6 +2143,7 @@ export const useChatStore = defineStore(
       finalizeThinking,
       clearThinking,
       toggleThinkingCollapse,
+      loadThinkingArchive,
       markMessageAsAutoReply,
       isAutoReplyMessage,
 
