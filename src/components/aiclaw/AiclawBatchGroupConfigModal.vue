@@ -1,5 +1,5 @@
 <template>
-  <n-modal v-model:show="visible" :mask-closable="false" class="rounded-8px" transform-origin="center">
+  <n-modal v-model:show="modelVisible" :mask-closable="false" class="rounded-8px" transform-origin="center">
     <div class="bg-[--bg-edit] w-540px max-w-[90vw] h-fit max-h-[80vh] box-border flex flex-col">
       <div class="text-(14px [--text-color]) select-none pt-6px text-center">
         {{ t('aiclaw.group_settings.batch_title') }}
@@ -19,7 +19,7 @@
         </div>
       </div>
       <n-flex justify="end" class="p-16px" :size="12">
-        <n-button secondary @click="visible = false">{{ t('home.chat_main.cancel') }}</n-button>
+        <n-button secondary @click="modelVisible = false">{{ t('home.chat_main.cancel') }}</n-button>
       </n-flex>
     </div>
   </n-modal>
@@ -53,7 +53,7 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const groupStore = useGroupStore()
 
-const visible = computed({
+const modelVisible = computed({
   get: () => props.visible,
   set: (value) => emit('update:visible', value)
 })

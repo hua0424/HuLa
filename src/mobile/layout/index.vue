@@ -10,7 +10,7 @@
       </div>
 
       <div class="flex-shrink-0">
-        <TabBar ref="tabBarElement" />
+        <TabBar />
       </div>
     </div>
   </MobileLayout>
@@ -18,11 +18,9 @@
 
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
-import type { default as TabBarType } from '#/layout/tabBar/index.vue'
 import TabBar from '#/layout/tabBar/index.vue'
 
 const route = useRoute()
-const tabBarElement = ref<InstanceType<typeof TabBarType>>()
 
 // 根据路由动态控制顶部安全区域
 // 当在社区页面时，关闭顶部安全区域
