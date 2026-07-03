@@ -74,6 +74,7 @@ The Windows tester drives the desktop client via playwright-cli over CDP and **l
 | `aiclaw-group-settings-menu` | 群聊成员右键「群设置」菜单项 | `hooks/useChatMain.ts` |
 | `aiclaw-group-config-modal` | 群内 aiclaw 配置弹窗根 | `components/rightBox/chatBox/ChatMain.vue` |
 | `aiclaw-group-config-rate-limit` / `aiclaw-group-config-daily-limit` / `aiclaw-group-config-respond-ai` / `aiclaw-group-config-mention` / `aiclaw-group-config-save` | aiclaw 群配置表单字段与保存按钮 | `components/aiclaw/AiclawGroupConfigForm.vue` |
+| `thinking-archive-drawer-close` | thinking 归档抽屉关闭按钮 | `components/rightBox/chatBox/ThinkingPanel.vue` |
 
 ## Architecture: platform abstraction is the central design
 

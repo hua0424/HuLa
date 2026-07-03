@@ -7,15 +7,11 @@
           v-for="thinking in activeThinkings"
           :key="thinking.thinkingId"
           :thinking="thinking"
-          @toggle-collapse="handleToggleCollapse(thinking)"
-        />
+          @toggle-collapse="handleToggleCollapse(thinking)" />
       </div>
     </div>
     <!-- 所有思考已归档，显示回顾入口 -->
-    <div
-      v-else-if="hasArchivedThinkings"
-      class="flex-shrink-0 px-12px pt-6px"
-      @click="showArchiveDrawer = true">
+    <div v-else-if="hasArchivedThinkings" class="flex-shrink-0 px-12px pt-6px" @click="showArchiveDrawer = true">
       <div
         class="flex items-center gap-6px px-12px py-6px rounded-6px bg-#7c5cfc08 text-(12px #7c5cfc) cursor-pointer hover:bg-#7c5cfc15 transition-colors">
         <svg class="size-14px flex-shrink-0"><use href="#robot" /></svg>
@@ -26,13 +22,24 @@
 
   <!-- 归档抽屉 -->
   <n-drawer v-model:show="showArchiveDrawer" :width="360" placement="right">
-    <n-drawer-content :title="t('aiclaw.thinking.archive_title')">
+    <n-drawer-content>
+      <template #header>
+        <div class="flex items-center justify-between w-full">
+          <span class="text-(16px font-500)">{{ t('aiclaw.thinking.archive_title') }}</span>
+          <n-button
+            text
+            data-testid="thinking-archive-drawer-close"
+            :aria-label="t('components.common.close')"
+            @click="showArchiveDrawer = false">
+            <svg class="size-18px"><use href="#close" /></svg>
+          </n-button>
+        </div>
+      </template>
       <ThinkingCard
         v-for="thinking in archivedThinkings"
         :key="thinking.thinkingId"
         :thinking="thinking"
-        :readonly="true"
-      />
+        :readonly="true" />
       <n-empty v-if="archivedThinkings.length === 0" :description="t('aiclaw.thinking.archive_empty')" />
     </n-drawer-content>
   </n-drawer>
