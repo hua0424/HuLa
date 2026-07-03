@@ -176,7 +176,7 @@ describe('P2：表单保存 approved=false 后同步本地列表立即刷新徽�
           AiclawGroupConfigForm: {
             name: 'AiclawGroupConfigFormStub',
             template: '<div data-testid="aiclaw-group-config-form" />',
-            props: ['config', 'saving', 'adapterType', 'aiclawUid', 'defaultWorkspaceDir'],
+            props: ['config', 'saving', 'adapterType', 'defaultWorkspaceDir'],
             emits: ['save']
           }
         }

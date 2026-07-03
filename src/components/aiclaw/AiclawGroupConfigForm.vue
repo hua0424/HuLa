@@ -50,15 +50,6 @@
         data-testid="aiclaw-group-config-workspace-dir"
         :aria-label="t('aiclaw.group_settings.workspace_dir')" />
     </n-form-item>
-
-    <!-- S9: CC 启动命令入口（仅 Claude Code adapter） -->
-    <n-form-item v-if="showCcLaunch" :label="t('aiclaw.cc_launch.title')" class="mb-12px">
-      <AiclawCcLaunchCommand
-        :room-id="localConfig.roomId"
-        :aiclaw-uid="props.aiclawUid"
-        data-testid="aiclaw-cc-launch"
-        :aria-label="t('aiclaw.cc_launch.title')" />
-    </n-form-item>
   </n-form>
   <n-button
     size="small"
@@ -76,8 +67,6 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiclawGroupConfig } from '@/services/wsType'
 import { isDirBasedAdapter } from '@/utils/aiclawGroupConfig'
-import { isCcAdapter as isCcAdapterType } from '@/utils/aiclawAdapter'
-import AiclawCcLaunchCommand from '@/components/aiclaw/AiclawCcLaunchCommand.vue'
 
 type ConfigItem = AiclawGroupConfig & { roomId: string }
 
@@ -87,7 +76,6 @@ const props = withDefaults(
     saving?: boolean
     adapterType?: string
     defaultWorkspaceDir?: string
-    aiclawUid?: string
   }>(),
   {
     saving: false
@@ -99,7 +87,6 @@ const emit = defineEmits<(e: 'save', payload: ConfigItem) => void>()
 const { t } = useI18n()
 
 const showWorkspaceDir = computed(() => isDirBasedAdapter(props.adapterType))
-const showCcLaunch = computed(() => isCcAdapterType(props.adapterType))
 
 const ensureDefaults = (cfg: ConfigItem): ConfigItem => ({
   ...cfg,

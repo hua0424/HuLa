@@ -88,7 +88,7 @@ const mountWindow = () =>
         AiclawGroupConfigForm: {
           name: 'AiclawGroupConfigFormStub',
           template: '<div data-testid="aiclaw-group-config-form" />',
-          props: ['config', 'saving', 'adapterType', 'aiclawUid', 'defaultWorkspaceDir'],
+          props: ['config', 'saving', 'adapterType', 'defaultWorkspaceDir'],
           emits: ['save']
         }
       }
