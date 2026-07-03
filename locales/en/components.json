@@ -1,7 +1,8 @@
 {
   "common": {
     "confirm": "Confirm",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "close": "Close"
   },
   "actionBar": {
     "always_on_top": {
