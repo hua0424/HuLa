@@ -61,11 +61,11 @@
                 cx="12"
                 cy="12"
                 :stroke-dasharray="`${2 * Math.PI * 10}`"
-                :stroke-dashoffset="`${2 * Math.PI * 10 * (1 - (isUploading ? uploadProgress : downloadProgress) / 100)}`" />
+                :stroke-dashoffset="`${2 * Math.PI * 10 * (1 - (isUploading ? displayUploadProgress : downloadProgress) / 100)}`" />
             </svg>
           </div>
           <!-- 上传进度 -->
-          <!-- <div class="progress-text">{{ isUploading ? uploadProgress : downloadProgress }}%</div> -->
+          <!-- <div class="progress-text">{{ isUploading ? displayUploadProgress : downloadProgress }}%</div> -->
         </div>
         <!-- 下载中显示进度 -->
         <div v-else-if="isDownloading" class="download-progress">
@@ -144,7 +144,7 @@ const iconDimensions = ref({ width: 40, height: 40 })
 
 // 上传状态
 const isUploading = computed(() => props.messageStatus === MessageStatusEnum.SENDING)
-const uploadProgress = computed(() => props.uploadProgress || 0)
+const displayUploadProgress = computed(() => props.uploadProgress || 0)
 
 // 文件下载状态
 const fileStatus = computed(() => {

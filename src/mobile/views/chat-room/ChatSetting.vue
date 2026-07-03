@@ -327,10 +327,8 @@ const initialNicknameValue = ref('')
 const initialNameValue = ref('')
 
 const {
-  fileInput,
   localImageUrl,
   showCropper,
-  cropperRef,
   openAvatarCropper,
   handleFileChange,
   handleCrop: onCrop

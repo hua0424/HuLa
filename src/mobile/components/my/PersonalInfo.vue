@@ -124,7 +124,7 @@
           secondary
           @click="handleDelete"
           :color="'#d5304f'"
-          v-if="!props.isMyPage && isMyFriend && !isBotUser(uid)"
+          v-if="!props.isMyPage && isFriend && !isBotUser(uid)"
           class="px-5 py-10px font-bold text-center rounded-full text-12px">
           {{ t('mobile_personal_info.remove_user') }}
         </n-button>
@@ -135,7 +135,7 @@
           strong
           secondary
           @click="handleAddFriend"
-          v-if="!props.isMyPage && !isMyFriend && !isBotUser(uid)"
+          v-if="!props.isMyPage && !isFriend && !isBotUser(uid)"
           class="px-5 py-10px font-bold text-center rounded-full text-12px">
           +&nbsp;
           {{ t('mobile_personal_info.add_friend') }}
@@ -146,7 +146,7 @@
           secondary
           @click="toChatRoom"
           :disabled="loading"
-          v-if="!props.isMyPage && isMyFriend"
+          v-if="!props.isMyPage && isFriend"
           class="px-5 py-10px text-center font-bold rounded-full text-12px">
           {{ isBotUser(uid) ? t('mobile_personal_info.open_bot') : t('mobile_personal_info.chat') }}
         </n-button>
@@ -203,7 +203,7 @@ const chatStore = useChatStore()
 
 const { preloadChatRoom } = useMessage()
 const uid = route.params.uid as string
-const isMyFriend = ref(props.isMyFriend)
+const isFriend = ref(props.isMyFriend)
 
 const isBotUser = (uid: string) => groupStore.getUserInfo(uid)?.account === UserType.BOT
 
@@ -300,7 +300,7 @@ onMounted(() => {
   const foundedFriend = contactStore.contactsList.find((item) => item.uid === uid)
 
   if (foundedFriend) {
-    isMyFriend.value = true
+    isFriend.value = true
   }
 })
 
@@ -321,7 +321,7 @@ const handleDelete = () => {
         try {
           loading.value = true
           await contactStore.onDeleteFriend(userDetailInfo.value.uid)
-          isMyFriend.value = false
+          isFriend.value = false
           chatStore.getSessionList(true)
           window.$message.success(t('mobile_personal_info.delete_user.success'))
           router.back()
@@ -390,8 +390,6 @@ function leave(el: Element, done: () => void) {
 
   box.addEventListener('transitionend', done, { once: true })
 }
-
-const medalBox = ref<HTMLElement | null>(null)
 
 const avatarBox = ref<HTMLElement | null>(null)
 
