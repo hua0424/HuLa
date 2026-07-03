@@ -1911,8 +1911,8 @@ export const useChatStore = defineStore(
       })
     }
 
-    /** 保存 aiclaw 群配置到 server */
-    const saveAiclawGroupConfig = async (aiclawUid: number, roomId: string, config: AiclawGroupConfig) => {
+    /** 保存 aiclaw 群配置到 server（#134：支持部分字段更新，批准时只传 approved） */
+    const saveAiclawGroupConfig = async (aiclawUid: number, roomId: string, config: Partial<AiclawGroupConfig>) => {
       const { imRequest } = await import('@/utils/ImRequestUtils')
       const { ImUrlEnum } = await import('@/enums')
       const { buildAiclawGroupConfigUpdateBody } = await import('@/utils/aiclawGroupConfig')

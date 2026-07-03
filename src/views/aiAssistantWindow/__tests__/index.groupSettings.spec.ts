@@ -184,7 +184,8 @@ describe('REQ-012 #114：AI 助理群设置未激活群卡显眼化 + 一键批�
     expect(chatStoreMocks.saveAiclawGroupConfig).toHaveBeenCalledWith(
       1001,
       'room-2',
-      expect.objectContaining({ approved: true })
+      // #134：批准只提交 approved 位，禁止携带其它字段覆盖未保存的表单值
+      { approved: true }
     )
     expect(chatStoreMocks.loadAiclawGroupConfig).toHaveBeenCalledWith(1001, 'room-2')
   })

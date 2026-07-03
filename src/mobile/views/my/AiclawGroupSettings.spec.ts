@@ -136,7 +136,12 @@ describe('REQ-012 #114：未激活群卡显眼化 + 一键批准', () => {
     await approveBtn.trigger('click')
     await flushPromises()
 
-    expect(saveAiclawGroupConfigMock).toHaveBeenCalledWith(1001, 'room-2', expect.objectContaining({ approved: true }))
+    expect(saveAiclawGroupConfigMock).toHaveBeenCalledWith(
+      1001,
+      'room-2',
+      // #134：批准只提交 approved 位，禁止携带其它字段覆盖未保存的表单值
+      { approved: true }
+    )
     expect(loadAiclawGroupConfigMock).toHaveBeenCalledWith(1001, 'room-2')
   })
 })
