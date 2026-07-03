@@ -84,7 +84,18 @@ const isArchiveLoading = computed(() => {
   return roomId ? chatStore.thinkingArchiveLoading.has(roomId) : false
 })
 
-// #136：打开归档抽屉时按需加载历史 thinking（契约落地后生效）
+// #136：进入房间时即按需加载历史 thinking，让归档入口在重启后也能出现
+watch(
+  () => globalStore.currentSessionRoomId,
+  (roomId) => {
+    if (roomId) {
+      chatStore.loadThinkingArchive(roomId)
+    }
+  },
+  { immediate: true }
+)
+
+// #136：打开归档抽屉时按需加载历史 thinking（兜底）
 watch(showArchiveDrawer, (visible) => {
   if (!visible) return
   const roomId = globalStore.currentSessionRoomId

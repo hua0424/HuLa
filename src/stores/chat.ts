@@ -8,7 +8,12 @@ import { useRoute } from 'vue-router'
 import { ErrorType } from '@/common/exception'
 import { MittEnum, MessageStatusEnum, MsgEnum, RoomTypeEnum, StoresEnum, TauriCommand } from '@/enums'
 import type { MarkItemType, MessageType, RevokedMsgType, SessionItem } from '@/services/types'
-import type { ThinkingState } from '@/types/thinking'
+import {
+  mapServerThinkingStatus,
+  parseThinkingCreateTime,
+  type ThinkingArchiveItem,
+  type ThinkingState
+} from '@/types/thinking'
 import { useGlobalStore } from '@/stores/global.ts'
 import { useFeedStore } from '@/stores/feed.ts'
 import { useGroupStore } from '@/stores/group.ts'
@@ -2015,11 +2020,55 @@ export const useChatStore = defineStore(
     const thinkingArchiveLoading = reactive(new Set<string>())
 
     /**
-     * 从服务端按房间加载历史 thinking 归档（#136 方案 A）
+     * 将服务端 thinking 归档列表项合并到房间归档（去重 + 按结束时间倒序）
+     */
+    const mergeServerThinkingArchive = (roomId: string, items: ThinkingArchiveItem[]) => {
+      if (!items?.length) return
+
+      const merged = new Map<string, ThinkingState>()
+      const existing = thinkingArchive.get(roomId) || []
+      for (const state of existing) {
+        merged.set(state.thinkingId, state)
+      }
+
+      for (const item of items) {
+        const thinkingId = String(item.id)
+        if (merged.has(thinkingId)) continue
+
+        const aiclawId = Number(item.aiclawUid)
+        const userInfo = groupStore.getUserInfo(String(aiclawId))
+        const endTime = parseThinkingCreateTime(item.createTime)
+        const durationMs = item.durationMs ?? 0
+        const startTime = durationMs > 0 ? endTime - durationMs : endTime
+
+        merged.set(thinkingId, {
+          thinkingId,
+          aiclawId,
+          aiclawName: userInfo?.name || 'AI',
+          aiclawAvatar: userInfo?.avatar || '',
+          roomId,
+          status: mapServerThinkingStatus(item.status),
+          startTime,
+          endTime,
+          durationMs: item.durationMs,
+          triggerMsgId: item.triggerMsgId ? String(item.triggerMsgId) : undefined,
+          collapsed: true
+        })
+      }
+
+      const sorted = Array.from(merged.values()).sort((a, b) => {
+        const aTime = a.endTime ?? a.startTime
+        const bTime = b.endTime ?? b.startTime
+        return bTime - aTime
+      })
+      thinkingArchive.set(roomId, sorted)
+    }
+
+    /**
+     * 从服务端按房间加载历史 thinking 归档（#136）
      *
-     * 契约待定：GET /im/aiclaw/thinking/list?roomId=&cursor=&pageSize=
+     * 契约：GET /im/aiclaw/thinking/list?roomId=&cursor=&pageSize=
      * 返回 CursorPageBaseResp<ThinkingArchiveItem>（元数据 only），展开时走现有单条 detail 接口。
-     * 当前为骨架实现，接口契约确定后补实际请求。
      */
     const loadThinkingArchive = async (roomId: string): Promise<boolean> => {
       if (!roomId || thinkingArchiveLoading.has(roomId) || thinkingArchiveLoaded.has(roomId)) {
@@ -2027,14 +2076,14 @@ export const useChatStore = defineStore(
       }
       thinkingArchiveLoading.add(roomId)
       try {
-        // TODO(#136): 等 #138 契约落地后接入真实接口
-        // const { imRequest } = await import('@/utils/ImRequestUtils')
-        // const { ImUrlEnum } = await import('@/enums')
-        // const resp = await imRequest<CursorPageBaseResp<ThinkingArchiveItem>>({
-        //   url: ImUrlEnum.AICLAW_THINKING_LIST,
-        //   params: { roomId: Number(roomId), pageSize: 10 }
-        // })
-        // mergeServerThinkingArchive(roomId, resp.list)
+        const { imRequest } = await import('@/utils/ImRequestUtils')
+        const { ImUrlEnum } = await import('@/enums')
+        type CursorPageBaseResp<T> = { list: T[]; cursor?: string; isLast?: boolean }
+        const resp = await imRequest<CursorPageBaseResp<ThinkingArchiveItem>>({
+          url: ImUrlEnum.AICLAW_THINKING_LIST,
+          params: { roomId: Number(roomId), pageSize: 10 }
+        })
+        mergeServerThinkingArchive(roomId, resp?.list || [])
         thinkingArchiveLoaded.add(roomId)
         return true
       } catch (error) {
