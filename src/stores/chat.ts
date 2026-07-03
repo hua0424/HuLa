@@ -2081,6 +2081,7 @@ export const useChatStore = defineStore(
         type CursorPageBaseResp<T> = { list: T[]; cursor?: string; isLast?: boolean }
         const resp = await imRequest<CursorPageBaseResp<ThinkingArchiveItem>>({
           url: ImUrlEnum.AICLAW_THINKING_LIST,
+          // #136 spec: 懒加载不做全量回填/分页历史流，固定取最近 10 条
           params: { roomId: Number(roomId), pageSize: 10 }
         })
         mergeServerThinkingArchive(roomId, resp?.list || [])
