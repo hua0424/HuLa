@@ -200,6 +200,7 @@ const fileContextMenu = computed<OPT.RightMenu[]>(() => [
       const isVideo = targetFile.fileType === 'video'
       const saveParams = {
         url: downloadUrl,
+        objectKey: targetFile.objectKey,
         downloadFile,
         defaultFileName: defaultName,
         msgId: targetFile.id,
@@ -341,7 +342,8 @@ const convertToFileBody = (file: any): FileBody => {
   return {
     fileName: file.fileName || '',
     size: file.fileSize || 0,
-    url: file.url || file.downloadUrl || ''
+    url: file.url || file.downloadUrl || '',
+    objectKey: file.objectKey
   }
 }
 </script>

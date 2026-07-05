@@ -488,7 +488,7 @@ const handleOpenVideoViewer = async () => {
         return
       }
 
-      await openVideoViewer(resolvedVideoUrl.value, [MsgEnum.VIDEO])
+      await openVideoViewer(videoWorkKey.value, [MsgEnum.VIDEO])
     } catch (error) {
       console.error('打开视频失败:', error)
     } finally {

@@ -1,7 +1,7 @@
 <template>
   <div v-bind="$attrs">
     <n-image
-      v-if="body?.url"
+      v-if="body?.url || body?.objectKey"
       class="select-none cursor-pointer"
       :img-props="{
         style: {
@@ -57,6 +57,7 @@ import { useThumbnailCacheStore } from '@/stores/thumbnailCache'
 import type { EmojiBody, MsgType } from '@/services/types'
 import { getRemoteFileSize } from '@/utils/PathUtil'
 import { isMobile } from '@/utils/PlatformConstants'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 
 const props = defineProps<{
   body: EmojiBody
@@ -69,13 +70,26 @@ defineOptions({
 })
 const isError = ref(false)
 const localEmojiSrc = ref<string | null>(null)
+const resolvedEmojiUrl = ref('')
 const showImagePreviewRef = ref(false)
 const thumbnailStore = useThumbnailCacheStore()
 const { openImageViewer } = useImageViewer()
 const EMOJI_AUTO_DOWNLOAD_LIMIT = 1024 * 1024 // 1MB
 const ImagePreview = isMobile() ? defineAsyncComponent(() => import('@/mobile/components/ImagePreview.vue')) : void 0
 
-const displayEmojiSrc = computed(() => localEmojiSrc.value || props.body?.url || '')
+const displayEmojiSrc = computed(() => localEmojiSrc.value || resolvedEmojiUrl.value || props.body?.url || '')
+
+const resolveEmojiUrl = async () => {
+  if (props.body?.url) {
+    resolvedEmojiUrl.value = props.body.url
+    return
+  }
+  if (props.body?.objectKey && props.message?.id) {
+    resolvedEmojiUrl.value = await resolveSignedFileUrl('', props.message.id, props.body.objectKey)
+  } else {
+    resolvedEmojiUrl.value = ''
+  }
+}
 
 const handleImageError = () => {
   isError.value = true
@@ -84,7 +98,7 @@ const handleImageError = () => {
 
 const handleOpenImage = () => {
   if (!isMobile()) return
-  if (props.body?.url) {
+  if (displayEmojiSrc.value) {
     showImagePreviewRef.value = true
   }
 }
@@ -93,11 +107,14 @@ const handleOpenImageViewer = () => {
   if (isMobile()) {
     return
   }
-  if (!props.body?.url) return
+  const workKey = props.body?.url || props.body?.objectKey || ''
+  if (!workKey) return
   if (props.onImageClick) {
-    props.onImageClick(displayEmojiSrc.value)
+    props.onImageClick(workKey)
   } else {
-    openImageViewer(props.body.url, [MsgEnum.IMAGE, MsgEnum.EMOJI])
+    const msgId = props.message?.id
+    const msgIdMap = msgId ? { [workKey]: msgId } : undefined
+    openImageViewer(workKey, [MsgEnum.IMAGE, MsgEnum.EMOJI], undefined, msgIdMap)
   }
 }
 
@@ -122,14 +139,16 @@ const ensureLocalEmoji = async () => {
 }
 
 const maybeDownloadEmoji = async () => {
-  if (!props.body?.url || !props.message) return
+  if ((!props.body?.url && !props.body?.objectKey) || !props.message) return
   try {
-    const size = await getRemoteFileSize(props.body.url)
+    const workUrl = resolvedEmojiUrl.value || props.body?.url || ''
+    const size = workUrl ? await getRemoteFileSize(workUrl) : 0
     if (size === null || size > EMOJI_AUTO_DOWNLOAD_LIMIT) {
       return
     }
     const path = await thumbnailStore.enqueueThumbnail({
-      url: props.body.url,
+      url: props.body?.url || '',
+      objectKey: props.body?.objectKey,
       msgId: props.message.id,
       roomId: props.message.roomId,
       kind: 'emoji'
@@ -141,6 +160,14 @@ const maybeDownloadEmoji = async () => {
     console.warn('[Emoji] 自动下载失败:', error)
   }
 }
+
+watch(
+  () => [props.body?.url, props.body?.objectKey],
+  () => {
+    void resolveEmojiUrl()
+  },
+  { immediate: true }
+)
 
 watch(
   () => props.body?.localPath,

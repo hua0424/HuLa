@@ -117,7 +117,7 @@ const addFileToStore = (data: MessageType) => {
   }
 
   // 提取文件信息
-  const fileUrl = body.url
+  const fileUrl = body.url || body.objectKey
   if (!fileUrl) {
     return
   }

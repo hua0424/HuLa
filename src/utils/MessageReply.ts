@@ -40,8 +40,8 @@ export const getReplyContent = (message: MsgType): string => {
     }
 
     case MsgEnum.IMAGE: {
-      // 图片消息：使用图片URL
-      content = message.body.url || '[图片]'
+      // 图片消息：使用图片URL或objectKey
+      content = message.body.url || message.body.objectKey || '[图片]'
       break
     }
 
