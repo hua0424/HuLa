@@ -134,7 +134,7 @@ const handleSave = async () => {
   if (!props.videoUrl) return
   try {
     const fileName = extractFileName(props.videoUrl) || 'video.mp4'
-    const result = await fileDownloadStore.downloadFile(props.videoUrl, fileName)
+    const result = await fileDownloadStore.downloadFile(props.videoUrl, fileName, props.message?.id)
     if (result && props.message) {
       const roomId = getCurrentRoomId()
       if (roomId) {

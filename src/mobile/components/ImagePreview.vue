@@ -170,7 +170,7 @@ const handleSave = async () => {
   }
   try {
     const fileName = extractFileName(imageUrl) || 'image.png'
-    const result = await fileDownloadStore.downloadFile(imageUrl, fileName)
+    const result = await fileDownloadStore.downloadFile(imageUrl, fileName, props.message?.id)
     if (result && window.$message) {
       console.log('图片保存路径:', result)
       window.$message.success('图片已保存')

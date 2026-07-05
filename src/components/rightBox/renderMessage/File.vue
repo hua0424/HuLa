@@ -137,10 +137,15 @@ const props = defineProps<{
   uploadProgress?: number
   searchKeyword?: string
   message?: MsgType
+  /** 消息 ID（用于文件管理器等无法直接拿到 message 的场景） */
+  msgId?: string
 }>()
 
 // 图标尺寸状态
 const iconDimensions = ref({ width: 40, height: 40 })
+
+// 优先从 message 取 id，否则使用显式传入的 msgId
+const messageId = computed(() => props.message?.id || props.msgId)
 
 // 上传状态
 const isUploading = computed(() => props.messageStatus === MessageStatusEnum.SENDING)
@@ -163,13 +168,14 @@ const downloadProgress = computed(() => {
 })
 
 const persistFileLocalPath = async (absolutePath: string) => {
-  if (!props.message?.id || !absolutePath) return
-  const target = chatStore.getMessage(props.message.id)
+  const id = messageId.value
+  if (!id || !absolutePath) return
+  const target = chatStore.getMessage(id)
   if (!target) return
   if (target.message.body?.localPath === absolutePath) return
 
   const nextBody = { ...(target.message.body || {}), localPath: absolutePath }
-  chatStore.updateMsg({ msgId: target.message.id, status: target.message.status, body: nextBody })
+  chatStore.updateMsg({ msgId: id, status: target.message.status, body: nextBody })
   const updated = { ...target, message: { ...target.message, body: nextBody } }
   await invokeSilently(TauriCommand.SAVE_MSG, { data: updated as any })
 }
@@ -351,7 +357,7 @@ const downloadAndOpenFile = async () => {
 
   try {
     const fileName = props.body.fileName
-    const absolutePath = await fileDownloadStore.downloadFile(props.body.url, fileName)
+    const absolutePath = await fileDownloadStore.downloadFile(props.body.url, fileName, messageId.value)
 
     if (absolutePath) {
       void persistFileLocalPath(absolutePath)
@@ -380,7 +386,7 @@ const downloadFileOnly = async () => {
 
   try {
     const fileName = props.body.fileName
-    const absolutePath = await fileDownloadStore.downloadFile(props.body.url, fileName)
+    const absolutePath = await fileDownloadStore.downloadFile(props.body.url, fileName, messageId.value)
     if (absolutePath) {
       void persistFileLocalPath(absolutePath)
     }

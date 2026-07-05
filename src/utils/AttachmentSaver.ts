@@ -10,6 +10,8 @@ type SaveAttachmentOptions = {
   url?: string
   downloadFile: DownloadFileFn
   defaultFileName?: string
+  /** 消息 ID（可选），用于换取签名下载 URL */
+  msgId?: string
   filters?: Array<{ name: string; extensions: string[] }>
   successMessage?: string
   errorMessage?: string
@@ -21,6 +23,7 @@ const saveAttachmentAs = async ({
   url,
   downloadFile,
   defaultFileName,
+  msgId,
   filters,
   successMessage,
   errorMessage
@@ -41,7 +44,7 @@ const saveAttachmentAs = async ({
     if (!savePath) return
 
     const normalizedPath = normalizeSavePath(savePath)
-    await downloadFile(url, normalizedPath)
+    await downloadFile(url, normalizedPath, undefined, msgId)
 
     if (successMessage) {
       window.$message.success(successMessage)
