@@ -134,8 +134,6 @@ describe('BL-003 FileContent convertToFileBody objectKey', () => {
     ])
     await flushPromises()
 
-    // 找到 ContextMenu 的 select 事件并触发
-    const _contextMenu = document.querySelector('[data-testid="context-menu"]')
     // FileContent 内部把菜单挂在 ContextMenu 组件上，这里通过组件测试触发 click 比较困难，
     // 直接验证 AttachmentSaver 的调用参数需要模拟菜单 click；下面调用保存函数本身验证参数传递。
     const { downloadFile } = await import('@/hooks/useDownload').then((m) => m.useDownload())
