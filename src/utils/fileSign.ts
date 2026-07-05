@@ -24,12 +24,13 @@ export async function signFileDownloadUrl(msgId: string): Promise<string | null>
 /**
  * 解析最终用于 fetch 的文件 URL。
  *
- * 有 msgId 且原 URL 为 http(s) 时，先调用 /im/file/sign-download 换取签名 URL；
- * 无 msgId、本地 URL 或签名失败时，原样返回原始 URL 作为兼容兜底。
+ * 有 msgId 且原 URL 为 http(s)，或提供了 objectKey 时，先调用 /im/file/sign-download 换取签名 URL；
+ * 无 msgId、本地 URL 且无 objectKey、或签名失败时，原样返回原始 URL 作为兼容兜底。
  */
-export async function resolveSignedFileUrl(url: string, msgId?: string): Promise<string> {
+export async function resolveSignedFileUrl(url: string, msgId?: string, objectKey?: string): Promise<string> {
   if (!msgId) return url
-  if (!url || !(url.startsWith('http://') || url.startsWith('https://'))) return url
+  if (!url && !objectKey) return url
+  if (url && !(url.startsWith('http://') || url.startsWith('https://')) && !objectKey) return url
 
   const signedUrl = await signFileDownloadUrl(msgId)
   return signedUrl || url

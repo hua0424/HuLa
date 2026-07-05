@@ -23,7 +23,8 @@
     :onVideoClick="onVideoClick"
     :search-keyword="searchKeyword"
     :history-mode="historyMode"
-    :is-streaming="chatStore.isMessageStreaming(message.message.id)" />
+    :is-streaming="chatStore.isMessageStreaming(message.message.id)"
+    :msg-id="message.message.id" />
 
   <!-- 好友或者群聊的信息 -->
   <div v-else class="flex flex-col w-full" :class="{ 'justify-end': isMe }">
@@ -207,7 +208,8 @@
               :onVideoClick="onVideoClick"
               :search-keyword="searchKeyword"
               :history-mode="historyMode"
-              :is-streaming="chatStore.isMessageStreaming(message.message.id)" />
+              :is-streaming="chatStore.isMessageStreaming(message.message.id)"
+              :msg-id="message.message.id" />
 
             <!-- 显示翻译文本 -->
             <Transition name="fade-translate" appear mode="out-in">

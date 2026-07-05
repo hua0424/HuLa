@@ -126,7 +126,7 @@
       :is="VideoPreview"
       v-if="VideoPreview"
       v-model:visible="showVideoPreviewRef"
-      :video-url="mobileVideoUrl"
+      :video-url="mobileVideoUrl || resolvedVideoUrl || ''"
       :message="message" />
   </div>
 </template>
@@ -150,6 +150,7 @@ import { formatBytes } from '@/utils/Formatting.ts'
 import { isMobile } from '@/utils/PlatformConstants'
 import { invokeSilently } from '@/utils/TauriInvokeHandler'
 import { useI18n } from 'vue-i18n'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 
 const { openVideoViewer, getLocalVideoPath, checkVideoDownloaded } = useVideoViewer()
 const VideoPreview = isMobile() ? defineAsyncComponent(() => import('@/mobile/components/VideoPreview.vue')) : void 0
@@ -164,6 +165,12 @@ const props = defineProps<{
   onVideoClick?: (url: string) => void
   message?: MsgType
 }>()
+
+// 是否存在远端视频（url 或 objectKey 任一存在即可）
+const hasRemoteVideo = computed(() => !!props.body?.url || !!props.body?.objectKey)
+// 用于本地路径/下载状态 key：优先 url，objectKey 兜底
+const videoWorkKey = computed(() => props.body?.url || props.body?.objectKey || '')
+const resolvedVideoUrl = ref('')
 
 // 视频容器引用
 const videoContainerRef = ref<HTMLElement | null>(null)
@@ -207,6 +214,18 @@ const persistVideoLocalPath = async (absolutePath: string) => {
   await invokeSilently(TauriCommand.SAVE_MSG, { data: updated as any })
 }
 const localVideoThumbSrc = ref<string | null>(null)
+
+const resolveVideoUrl = async () => {
+  if (props.body?.url) {
+    resolvedVideoUrl.value = props.body.url
+    return
+  }
+  if (props.body?.objectKey && props.message?.id) {
+    resolvedVideoUrl.value = await resolveSignedFileUrl('', props.message.id, props.body.objectKey)
+  } else {
+    resolvedVideoUrl.value = ''
+  }
+}
 
 // 视频缩略图实际加载的尺寸（用于 props 中没有宽高的情况）
 const loadedThumbWidth = ref(0)
@@ -267,7 +286,13 @@ const displayThumbSrc = computed(() => localVideoThumbSrc.value || remoteThumbSr
 const requestVideoThumbnailDownload = () => {
   if (!downloadKey.value || !props.message) return
   void thumbnailStore
-    .enqueueThumbnail({ url: downloadKey.value, msgId: props.message.id, roomId: props.message.roomId, kind: 'video' })
+    .enqueueThumbnail({
+      url: props.body?.thumbUrl || '',
+      objectKey: props.body?.thumbUrl ? undefined : props.body?.objectKey,
+      msgId: props.message.id,
+      roomId: props.message.roomId,
+      kind: 'video'
+    })
     .then((path) => {
       if (!path) return
       localVideoThumbSrc.value = convertFileSrc(path)
@@ -292,7 +317,7 @@ const ensureLocalVideoThumbnail = async () => {
   }
 
   localVideoThumbSrc.value = null
-  thumbnailStore.invalidate(downloadKey.value)
+  thumbnailStore.invalidate(props.body?.thumbUrl, props.body?.objectKey, props.message?.id)
   requestVideoThumbnailDownload()
 }
 
@@ -300,6 +325,14 @@ watch(
   () => props.body?.thumbnailPath,
   () => {
     void ensureLocalVideoThumbnail()
+  },
+  { immediate: true }
+)
+
+watch(
+  () => [props.body?.url, props.body?.objectKey],
+  () => {
+    void resolveVideoUrl()
   },
   { immediate: true }
 )
@@ -334,9 +367,9 @@ watch(
 
 // 检查视频下载状态（延迟加载）
 const checkDownloadStatusLazy = async () => {
-  if (!props.body?.url || hasCheckedDownloadStatus.value) return
+  if (!hasRemoteVideo.value || hasCheckedDownloadStatus.value) return
   hasCheckedDownloadStatus.value = true
-  isVideoDownloaded.value = await checkVideoDownloaded(props.body.url)
+  isVideoDownloaded.value = await checkVideoDownloaded(props.body.url, props.body.filename)
 }
 
 // 使用 IntersectionObserver 在视频进入视口时检查下载状态
@@ -355,20 +388,21 @@ const handleImageError = () => {
 
 // 下载视频
 const downloadVideo = async () => {
-  if (!props.body?.url || isDownloading.value) return
+  if (!hasRemoteVideo.value || isDownloading.value) return
 
   try {
-    const localPath = await getLocalVideoPath(props.body?.url)
+    const url = videoWorkKey.value
+    const localPath = await getLocalVideoPath(url, props.body.filename)
     if (localPath) {
       const baseDir = isMobile() ? BaseDirectory.AppData : BaseDirectory.Resource
-      await downloadFile(props.body.url, localPath, baseDir, props.message?.id)
-      isVideoDownloaded.value = await checkVideoDownloaded(props.body.url)
+      await downloadFile(url, localPath, baseDir, props.message?.id, props.body.objectKey)
+      isVideoDownloaded.value = await checkVideoDownloaded(url, props.body.filename)
 
       // 下载完成后，更新videoViewer store中的视频路径
       if (isVideoDownloaded.value) {
         const baseDirPath = isMobile() ? await appDataDir() : await resourceDir()
         const path = await join(baseDirPath, localPath)
-        videoViewerStore.updateVideoPath(props.body.url, path)
+        videoViewerStore.updateVideoPath(resolvedVideoUrl.value, path)
         void persistVideoLocalPath(path)
       }
     }
@@ -378,14 +412,14 @@ const downloadVideo = async () => {
 }
 
 const resolveMobilePlayableUrl = async () => {
-  if (!props.body?.url) return ''
+  if (!hasRemoteVideo.value) return ''
   const url = props.body.localPath || ''
   if (url) {
     return convertFileSrc(url)
   }
-  const downloaded = await checkVideoDownloaded(props.body.url)
+  const downloaded = await checkVideoDownloaded(props.body.url, props.body.filename)
   if (!downloaded) return ''
-  const relative = await getLocalVideoPath(props.body.url)
+  const relative = await getLocalVideoPath(props.body.url, props.body.filename)
   const baseDirPath = await appDataDir()
   const absolute = await join(baseDirPath, relative)
   return convertFileSrc(absolute)
@@ -393,7 +427,7 @@ const resolveMobilePlayableUrl = async () => {
 
 // 处理播放按钮点击
 const handlePlayButtonClick = async () => {
-  if (!props.body?.url) return
+  if (!hasRemoteVideo.value) return
 
   // 如果正在上传，不允许点击
   if (isUploading.value) return
@@ -406,7 +440,7 @@ const handlePlayButtonClick = async () => {
   // 如果视频未下载，先下载
   if (!isVideoDownloaded.value) {
     await downloadVideo()
-    isVideoDownloaded.value = await checkVideoDownloaded(props.body.url)
+    isVideoDownloaded.value = await checkVideoDownloaded(videoWorkKey.value, props.body.filename)
     if (!isVideoDownloaded.value) return
   }
 
@@ -416,10 +450,10 @@ const handlePlayButtonClick = async () => {
 
 // 处理打开视频查看器
 const handleOpenVideoViewer = async () => {
-  if (props.body?.url && !isOpening.value) {
+  if (resolvedVideoUrl.value && !isOpening.value) {
     // 如果有自定义视频点击处理函数，使用它
     if (props.onVideoClick) {
-      props.onVideoClick(props.body.url)
+      props.onVideoClick(resolvedVideoUrl.value)
       return
     }
 
@@ -427,14 +461,14 @@ const handleOpenVideoViewer = async () => {
       isOpening.value = true
 
       // 检查视频是否已下载
-      const isDownloaded = await checkVideoDownloaded(props.body.url)
+      const isDownloaded = await checkVideoDownloaded(videoWorkKey.value, props.body.filename)
       isVideoDownloaded.value = isDownloaded
 
       // 如果视频未下载，先下载
       if (!isDownloaded) {
         await downloadVideo()
         // 下载完成后重新检查状态
-        isVideoDownloaded.value = await checkVideoDownloaded(props.body.url)
+        isVideoDownloaded.value = await checkVideoDownloaded(videoWorkKey.value, props.body.filename)
 
         // 如果下载失败，不继续打开视频
         if (!isVideoDownloaded.value) {
@@ -454,7 +488,7 @@ const handleOpenVideoViewer = async () => {
         return
       }
 
-      await openVideoViewer(props.body.url, [MsgEnum.VIDEO])
+      await openVideoViewer(resolvedVideoUrl.value, [MsgEnum.VIDEO])
     } catch (error) {
       console.error('打开视频失败:', error)
     } finally {
@@ -465,7 +499,7 @@ const handleOpenVideoViewer = async () => {
 
 // 监听视频下载状态更新事件
 const handleVideoDownloadStatusUpdate = (data: { url: string; downloaded: boolean }) => {
-  if (data.url === props.body?.url) {
+  if (data.url === props.body?.url || data.url === props.body?.objectKey) {
     isVideoDownloaded.value = data.downloaded
   }
 }

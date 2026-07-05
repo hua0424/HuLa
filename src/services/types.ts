@@ -409,12 +409,16 @@ export type ImageBody = {
   /** REQ-007-71：服务端/ plugins 解析需要 mime + fileName */
   mime?: string
   fileName?: string
+  /** BL-003：服务端 objectKey-only 消息时用于换签 */
+  objectKey?: string
 }
 /** 语音消息体 */
 export type VoiceBody = {
   size: number
   second: number
   url: string
+  /** BL-003：服务端 objectKey-only 消息时用于换签 */
+  objectKey?: string
 }
 
 export type MergeBodyBody = {
@@ -437,6 +441,8 @@ export type VideoBody = {
   thumbUrl?: string
   thumbnailPath?: string
   localPath?: string
+  /** BL-003：服务端 objectKey-only 消息时用于换签 */
+  objectKey?: string
 }
 /** 文件消息体 */
 export type FileBody = {
@@ -446,6 +452,8 @@ export type FileBody = {
   localPath?: string
   /** REQ-007-71：服务端/ plugins 解析需要 mime */
   mime?: string
+  /** BL-003：服务端 objectKey-only 消息时用于换签 */
+  objectKey?: string
 }
 /** 文本消息体 */
 export type TextBody = {
@@ -480,6 +488,8 @@ export type AnnouncementBody = TextBody & {
 export type EmojiBody = {
   url: string
   localPath?: string
+  /** BL-003：服务端 objectKey-only 消息时用于换签 */
+  objectKey?: string
 }
 
 /** 位置消息体 */
