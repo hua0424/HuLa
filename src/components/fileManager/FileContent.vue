@@ -54,7 +54,7 @@
                 :content="file"
                 class="flex flex-col gap-8px"
                 @select="handleFileMenuSelect($event, file)">
-                <File :body="convertToFileBody(file)" :search-keyword="fileSearchKeyword" />
+                <File :body="convertToFileBody(file)" :search-keyword="fileSearchKeyword" :msg-id="file.id" />
                 <!-- 文件元信息 -->
                 <div class="file-meta-info">
                   <div class="flex-center gap-4px">
@@ -202,6 +202,7 @@ const fileContextMenu = computed<OPT.RightMenu[]>(() => [
         url: downloadUrl,
         downloadFile,
         defaultFileName: defaultName,
+        msgId: targetFile.id,
         successMessage: isVideo
           ? t('fileManager.notifications.saveVideoSuccess')
           : t('fileManager.notifications.saveFileSuccess'),

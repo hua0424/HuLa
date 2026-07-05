@@ -291,7 +291,9 @@ const saveImage = async () => {
   })
 
   if (savePath) {
-    await downloadFile(imageUrl, savePath)
+    const originalUrl = imageViewerStore.originalImageList[currentIndex.value] || imageUrl
+    const msgId = imageViewerStore.getMsgIdByUrl(originalUrl)
+    await downloadFile(imageUrl, savePath, undefined, msgId)
   }
 }
 

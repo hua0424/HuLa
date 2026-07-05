@@ -9,6 +9,7 @@ import { isMobile } from '@/utils/PlatformConstants'
 import { invokeSilently } from '@/utils/TauriInvokeHandler'
 import { TauriCommand } from '@/enums'
 import { md5FromString } from '@/utils/Md5Util'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 
 type TaskKind = 'image' | 'video' | 'emoji'
 
@@ -72,12 +73,12 @@ export const useThumbnailCacheStore = defineStore(
       return { relativeDir: target, baseDir }
     }
 
-    const decideExt = async (url: string) => {
+    const decideExt = async (url: string, msgId?: string) => {
       const match = url.match(/\\.([a-zA-Z0-9]+)(?:\\?|$)/)
       if (match?.[1]) {
         return match[1].toLowerCase()
       }
-      const info = await detectRemoteFileType({ url, fileSize: null })
+      const info = await detectRemoteFileType({ url, fileSize: null, msgId })
       return info?.ext ? info.ext : 'jpg'
     }
 
@@ -102,7 +103,7 @@ export const useThumbnailCacheStore = defineStore(
         statusMap.value[task.url] = task
         const { relativeDir, baseDir } = await ensureCacheDir(task.kind)
         const hash = await md5FromString(task.url)
-        const ext = await decideExt(task.url)
+        const ext = await decideExt(task.url, task.msgId)
         const fileName = `${hash}.${ext}`
         const relPath = await join(relativeDir, fileName)
         const existsFlag = await exists(relPath, { baseDir })
@@ -116,6 +117,8 @@ export const useThumbnailCacheStore = defineStore(
           return
         }
 
+        const fetchUrl = await resolveSignedFileUrl(task.url, task.msgId)
+
         const buffer: ArrayBuffer = await new Promise((resolve, reject) => {
           const handler = (e: MessageEvent<any>) => {
             const data = e.data
@@ -125,7 +128,7 @@ export const useThumbnailCacheStore = defineStore(
             else reject(new Error(data.error || 'download failed'))
           }
           worker.addEventListener('message', handler as any)
-          worker.postMessage({ url: task.url })
+          worker.postMessage({ url: fetchUrl, originalUrl: task.url })
         })
 
         const bytes = new Uint8Array(buffer)

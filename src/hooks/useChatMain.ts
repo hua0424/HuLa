@@ -324,7 +324,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
         await saveVideoAttachmentAs({
           url: item.message.body.url,
           downloadFile,
-          defaultFileName: item.message.body.fileName
+          defaultFileName: item.message.body.fileName,
+          msgId: item.message.id
         })
       }
     },
@@ -342,7 +343,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
           if (!isDownloaded) {
             // 如果未下载，先下载视频
             const baseDir = isMobile() ? BaseDirectory.AppData : BaseDirectory.Resource
-            await downloadFile(item.message.body.url, localPath, baseDir)
+            await downloadFile(item.message.body.url, localPath, baseDir, item.message.id)
             // 通知相关组件更新视频下载状态
             useMitt.emit(MittEnum.VIDEO_DOWNLOAD_STATUS_UPDATED, { url: item.message.body.url, downloaded: true })
           }
@@ -457,13 +458,15 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
                   await saveVideoAttachmentAs({
                     url: fileUrl,
                     downloadFile,
-                    defaultFileName: fileName
+                    defaultFileName: fileName,
+                    msgId: item.message.id
                   })
                 } else {
                   await saveFileAttachmentAs({
                     url: fileUrl,
                     downloadFile,
-                    defaultFileName: fileName
+                    defaultFileName: fileName,
+                    msgId: item.message.id
                   })
                 }
               }
@@ -494,7 +497,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
                 if (!fileMeta.exists) {
                   // 文件不存在本地
                   const downloadMessage = window.$message.info(t('home.chat_main.file.download_prompt'))
-                  const _absolutePath = await fileDownloadStore.downloadFile(fileUrl, fileName)
+                  const _absolutePath = await fileDownloadStore.downloadFile(fileUrl, fileName, item.message.id)
 
                   if (_absolutePath) {
                     absolutePath = _absolutePath
@@ -599,7 +602,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
           const fallbackToRemotePayload = async () => {
             const remoteType = await detectRemoteFileType({
               url: item.message.body.url,
-              fileSize: Number(item.message.body.size)
+              fileSize: Number(item.message.body.size),
+              msgId: item.message.id
             })
             const fallbackPayload = buildPayload(item, remoteType, false)
             await sendWindowPayload(LABEL, fallbackPayload)
@@ -664,7 +668,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
         await saveFileAttachmentAs({
           url: item.message.body.url,
           downloadFile,
-          defaultFileName: item.message.body.fileName
+          defaultFileName: item.message.body.fileName,
+          msgId: item.message.id
         })
       }
     },
@@ -694,7 +699,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
         if (!fileMeta.exists) {
           // 文件不存在本地
           const downloadMessage = window.$message.info(t('home.chat_main.file.download_prompt'))
-          const _absolutePath = await fileDownloadStore.downloadFile(fileUrl, fileName)
+          const _absolutePath = await fileDownloadStore.downloadFile(fileUrl, fileName, item.message.id)
 
           if (_absolutePath) {
             absolutePath = _absolutePath
@@ -756,7 +761,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
           })
 
           if (savePath) {
-            await downloadFile(imageUrl, savePath)
+            await downloadFile(imageUrl, savePath, undefined, item.message.id)
           }
         } catch (error) {
           console.error('保存图片失败:', error)
@@ -786,7 +791,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
 
         if (!fileMeta.exists) {
           const downloadMessage = window.$message.info(t('home.chat_main.image.download_prompt'))
-          const _absolutePath = await fileDownloadStore.downloadFile(fileUrl, fileName)
+          const _absolutePath = await fileDownloadStore.downloadFile(fileUrl, fileName, item.message.id)
 
           if (_absolutePath) {
             absolutePath = _absolutePath

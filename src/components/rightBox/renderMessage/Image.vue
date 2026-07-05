@@ -111,7 +111,8 @@ const handleOpenImageViewer = () => {
     if (props.onImageClick) {
       props.onImageClick(props.body.url)
     } else {
-      openImageViewer(props.body.url, [MsgEnum.IMAGE, MsgEnum.EMOJI])
+      const msgIdMap = props.message?.id ? { [props.body.url]: props.message.id } : undefined
+      openImageViewer(props.body.url, [MsgEnum.IMAGE, MsgEnum.EMOJI], undefined, msgIdMap)
     }
   }
 }

@@ -4,6 +4,7 @@ import { BaseDirectory, exists, mkdir, readFile, writeFile } from '@tauri-apps/p
 import { type FileTypeResult, fileTypeFromBuffer } from 'file-type'
 import type { FilesMeta } from '@/services/types'
 import { isMobile } from './PlatformConstants'
+import { resolveSignedFileUrl } from './fileSign'
 
 // Tauri 资源目录下存放用户数据的根目录名
 const USER_DATA = 'userData'
@@ -238,8 +239,9 @@ export async function detectRemoteFileType(options: {
   url: string
   fileSize?: number | null
   byteLength?: number
+  msgId?: string
 }): Promise<FileTypeResult | undefined> {
-  const { url } = options
+  const { url, msgId } = options
   if (!/^https?:\/\//i.test(url)) {
     return void 0
   }
@@ -253,10 +255,11 @@ export async function detectRemoteFileType(options: {
 
   const task = (async () => {
     try {
-      const { url, byteLength = 4100 } = options
+      const { url: originalUrl, byteLength = 4100 } = options
+      const fetchUrl = await resolveSignedFileUrl(originalUrl, msgId)
 
       // 1. 先发送 HEAD 请求，检查文件是否存在及大小
-      const headResponse = await fetch(url, { method: 'HEAD' })
+      const headResponse = await fetch(fetchUrl, { method: 'HEAD' })
 
       if (!headResponse.ok) {
         window.$message?.error('找不到文件')
@@ -270,7 +273,7 @@ export async function detectRemoteFileType(options: {
       if (resolvedFileSize === 0) {
         console.log('文件大小为 0 字节，尝试使用后缀名检测')
         try {
-          const result = await invoke<FilesMeta>('get_files_meta', { filesPath: [url] })
+          const result = await invoke<FilesMeta>('get_files_meta', { filesPath: [originalUrl] })
           const meta = result[0]
 
           return {
@@ -278,7 +281,7 @@ export async function detectRemoteFileType(options: {
             mime: meta.mime_type
           }
         } catch (_error) {
-          console.warn(`该资源无法识别类型：${url}`)
+          console.warn(`该资源无法识别类型：${originalUrl}`)
           return void 0
         }
       }
@@ -287,7 +290,7 @@ export async function detectRemoteFileType(options: {
       const shouldUseRange = resolvedFileSize === null || resolvedFileSize >= byteLength
       const rangeEnd = shouldUseRange ? byteLength - 1 : void 0
 
-      const response = await fetch(url, shouldUseRange ? { headers: { Range: `bytes=0-${rangeEnd}` } } : void 0)
+      const response = await fetch(fetchUrl, shouldUseRange ? { headers: { Range: `bytes=0-${rangeEnd}` } } : void 0)
 
       if (!response.ok) {
         throw new Error(`获取文件数据失败, 状态: ${response.status}`)

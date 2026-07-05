@@ -128,6 +128,9 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   feedCommentAll: { method: 'GET', path: 'im/feed/comment/all' },
   feedCommentCount: { method: 'GET', path: 'im/feed/comment/count' },
 
+  // 文件下载签名（BL-003 sign-on-access）
+  fileSignDownload: { method: 'POST', path: 'im/file/sign-download' },
+
   // AIclaw AI 助理（固定路径）
   aiclawCreate: { method: 'POST', path: 'im/aiclaw/create' },
   aiclawList: { method: 'GET', path: 'im/aiclaw/list' },

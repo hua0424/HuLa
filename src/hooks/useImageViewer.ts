@@ -8,6 +8,7 @@ import { useImageViewer as useImageViewerStore } from '@/stores/imageViewer'
 import type { FilesMeta } from '@/services/types'
 import { extractFileName } from '@/utils/Formatting'
 import { getFilesMeta } from '@/utils/PathUtil'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 
 type WorkerResponse = {
   success: boolean
@@ -20,6 +21,7 @@ type WorkerRequest = {
   resolve: (value: string | null) => void
   reject: (reason?: unknown) => void
   fileName: string
+  msgId?: string
 }
 
 const workerRequests = new Map<string, WorkerRequest>()
@@ -52,7 +54,7 @@ const ensureWorker = () => {
   }
 }
 
-const downloadImageWithWorker = (url: string, fileName: string) => {
+const downloadImageWithWorker = async (url: string, fileName: string, msgId?: string) => {
   ensureWorker()
   if (!imageDownloadWorker) {
     return Promise.reject(new Error('Web Worker 不可用'))
@@ -74,9 +76,11 @@ const downloadImageWithWorker = (url: string, fileName: string) => {
     })
   }
 
+  const fetchUrl = await resolveSignedFileUrl(url, msgId)
+
   const promise = new Promise<string | null>((resolve, reject) => {
-    workerRequests.set(url, { resolve, reject, fileName })
-    imageDownloadWorker!.postMessage({ url })
+    workerRequests.set(url, { resolve, reject, fileName, msgId })
+    imageDownloadWorker!.postMessage({ url: fetchUrl, originalUrl: url })
   })
 
   return promise
@@ -208,9 +212,9 @@ export const useImageViewer = () => {
     }
   }
 
-  const scheduleDownload = (originalUrl: string) => {
+  const scheduleDownload = (originalUrl: string, msgId?: string) => {
     const fileName = extractFileName(originalUrl) || `image-${Date.now()}.png`
-    downloadImageWithWorker(originalUrl, fileName)
+    downloadImageWithWorker(originalUrl, fileName, msgId)
       .then((absolutePath) => {
         if (absolutePath) {
           replaceImageWithLocalPath(originalUrl, absolutePath)
@@ -233,7 +237,8 @@ export const useImageViewer = () => {
     if (!displayUrl || displayUrl !== originalUrl) {
       return
     }
-    scheduleDownload(originalUrl)
+    const msgId = imageViewerStore.getMsgIdByUrl(originalUrl)
+    scheduleDownload(originalUrl, msgId)
   }
 
   /**
@@ -244,14 +249,19 @@ export const useImageViewer = () => {
   const getAllMediaFromChat = (currentUrl: string, includeTypes: MsgEnum[] = [MsgEnum.IMAGE, MsgEnum.EMOJI]) => {
     const messages = [...Object.values(chatStore.currentMessageMap || {})]
     const mediaUrls: string[] = []
+    const msgIdMap: Record<string, string> = {}
     let currentIndex = 0
 
     messages.forEach((msg) => {
       // 收集指定类型的媒体URL
       if (includeTypes.includes(msg.message?.type) && msg.message.body?.url) {
-        mediaUrls.push(msg.message.body.url)
+        const url = msg.message.body.url
+        mediaUrls.push(url)
+        if (msg.message?.id) {
+          msgIdMap[url] = msg.message.id
+        }
         // 找到当前媒体的索引
-        if (msg.message.body.url === currentUrl) {
+        if (url === currentUrl) {
           currentIndex = mediaUrls.length - 1
         }
       }
@@ -259,7 +269,8 @@ export const useImageViewer = () => {
 
     return {
       list: mediaUrls,
-      index: currentIndex
+      index: currentIndex,
+      msgIdMap
     }
   }
 
@@ -268,17 +279,20 @@ export const useImageViewer = () => {
    * @param url 要查看的URL
    * @param includeTypes 要包含在查看器中的消息类型
    * @param customImageList 自定义图片列表，用于聊天历史等场景
+   * @param msgIdMap 自定义 URL -> 消息 ID 映射（用于无法从 current chat 推导的场景）
    */
   const openImageViewer = async (
     url: string,
     includeTypes: MsgEnum[] = [MsgEnum.IMAGE, MsgEnum.EMOJI],
-    customImageList?: string[]
+    customImageList?: string[],
+    msgIdMap?: Record<string, string>
   ) => {
     if (!url) return
 
     try {
       let list: string[]
       let index: number
+      let mergedMsgIdMap: Record<string, string> = msgIdMap ? { ...msgIdMap } : {}
 
       if (customImageList && customImageList.length > 0) {
         // 使用自定义图片列表
@@ -294,6 +308,7 @@ export const useImageViewer = () => {
         const result = getAllMediaFromChat(url, includeTypes)
         list = result.list
         index = result.index
+        mergedMsgIdMap = { ...mergedMsgIdMap, ...result.msgIdMap }
       }
 
       const dedupedList = deduplicateList(list)
@@ -302,7 +317,7 @@ export const useImageViewer = () => {
       const targetIndex = dedupedList.indexOf(url)
       const resolvedIndex = targetIndex === -1 ? (index >= 0 ? index : 0) : targetIndex
 
-      imageViewerStore.resetImageList(resolvedList, resolvedIndex, dedupedList)
+      imageViewerStore.resetImageList(resolvedList, resolvedIndex, dedupedList, mergedMsgIdMap)
 
       // 检查图片查看器窗口是否已存在
       const existingWindow = await WebviewWindow.getByLabel('imageViewer')

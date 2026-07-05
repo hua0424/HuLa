@@ -6,6 +6,7 @@ import { StoresEnum } from '@/enums'
 import type { FilesMeta } from '@/services/types'
 import { useUserStore } from '@/stores/user'
 import { getFilesMeta } from '@/utils/PathUtil'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 import { isMobile } from '../utils/PlatformConstants'
 
 export interface FileDownloadStatus {
@@ -203,8 +204,9 @@ export const useFileDownloadStore = defineStore(
      * 下载文件
      * @param fileUrl 文件URL
      * @param fileName 文件名
+     * @param msgId 消息ID（可选），用于换取签名下载 URL
      */
-    const downloadFile = async (fileUrl: string, fileName: string): Promise<string | null> => {
+    const downloadFile = async (fileUrl: string, fileName: string, msgId?: string): Promise<string | null> => {
       try {
         // 检查文件是否已存在
         const isExists = await checkFileExists(fileUrl, fileName)
@@ -223,8 +225,11 @@ export const useFileDownloadStore = defineStore(
         const downloadsDir = await userStore.getUserRoomDir()
         const filePath = await join(downloadsDir, fileName)
 
+        // 有 msgId 时先换取签名 URL（无 msgId 或失败时返回原 URL）
+        const fetchUrl = await resolveSignedFileUrl(fileUrl, msgId)
+
         // 下载文件
-        const response = await fetch(fileUrl)
+        const response = await fetch(fetchUrl)
         if (!response.ok) {
           throw new Error(`下载失败: ${response.status} ${response.statusText}`)
         }

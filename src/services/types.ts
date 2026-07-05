@@ -857,6 +857,12 @@ export type FilesMeta = {
   exists: boolean
 }[]
 
+/** 文件下载签名响应（BL-003 sign-on-access） */
+export type SignDownloadUrlResp = {
+  /** 服务端返回的带签名临时下载 URL */
+  url: string
+}
+
 export type RightMouseMessageItem = {
   createId: string | null
   updateId: string | null

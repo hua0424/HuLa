@@ -361,7 +361,7 @@ const downloadVideo = async () => {
     const localPath = await getLocalVideoPath(props.body?.url)
     if (localPath) {
       const baseDir = isMobile() ? BaseDirectory.AppData : BaseDirectory.Resource
-      await downloadFile(props.body.url, localPath, baseDir)
+      await downloadFile(props.body.url, localPath, baseDir, props.message?.id)
       isVideoDownloaded.value = await checkVideoDownloaded(props.body.url)
 
       // 下载完成后，更新videoViewer store中的视频路径

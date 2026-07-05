@@ -1,6 +1,7 @@
 import { BaseDirectory, exists, mkdir, writeFile } from '@tauri-apps/plugin-fs'
 import { createEventHook } from '@vueuse/core'
 import { isMobile } from '@/utils/PlatformConstants'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 
 export const useDownload = () => {
   const process = ref(0)
@@ -10,11 +11,15 @@ export const useDownload = () => {
   const downloadFile = async (
     url: string,
     savePath: string,
-    baseDir: BaseDirectory = isMobile() ? BaseDirectory.AppData : BaseDirectory.AppCache
+    baseDir: BaseDirectory = isMobile() ? BaseDirectory.AppData : BaseDirectory.AppCache,
+    msgId?: string
   ) => {
     try {
       isDownloading.value = true
       process.value = 0
+
+      // 有 msgId 时先换取签名 URL（无 msgId 或失败时返回原 URL）
+      const fetchUrl = await resolveSignedFileUrl(url, msgId)
 
       // 确保目录存在
       const dirPath = savePath.substring(0, savePath.lastIndexOf('/'))
@@ -25,7 +30,7 @@ export const useDownload = () => {
         }
       }
 
-      const response = await fetch(url)
+      const response = await fetch(fetchUrl)
       if (!response.ok) {
         return window.$message.error('下载失败')
       }

@@ -10,9 +10,21 @@ export const useImageViewer = defineStore(
     // 单图模式相关变量
     const singleImage = ref('')
     const isSingleMode = ref(false)
+    // 原图 URL -> 消息 ID 映射（BL-003 sign-on-access）
+    const urlToMsgIdMap = ref<Record<string, string>>({})
+
+    // 根据图片 URL 获取消息 ID
+    const getMsgIdByUrl = (url: string): string | undefined => {
+      return urlToMsgIdMap.value[url]
+    }
 
     // 添加一个重置方法,用于设置新的图片列表
-    const resetImageList = (list: string[], originalIndex: number, originalList?: string[]) => {
+    const resetImageList = (
+      list: string[],
+      originalIndex: number,
+      originalList?: string[],
+      msgIdMap?: Record<string, string>
+    ) => {
       isSingleMode.value = false
       // 创建一个去重后的新数组，同时保持原有顺序
       const uniqueList: string[] = []
@@ -31,6 +43,7 @@ export const useImageViewer = defineStore(
       imageList.value = uniqueList
       currentIndex.value = newIndex !== -1 ? newIndex : 0
       originalImageList.value = (originalList && originalList.length > 0 ? originalList : uniqueList).slice()
+      urlToMsgIdMap.value = msgIdMap ? { ...msgIdMap } : {}
     }
 
     // 设置单图的方法
@@ -41,6 +54,7 @@ export const useImageViewer = defineStore(
       originalImageList.value = singleList.slice()
       imageList.value = singleList.slice()
       currentIndex.value = 0
+      urlToMsgIdMap.value = {}
     }
 
     const updateImageAt = (index: number, newUrl: string) => {
@@ -65,7 +79,9 @@ export const useImageViewer = defineStore(
       isSingleMode,
       setSingleImage,
       updateImageAt,
-      updateSingleImageSource
+      updateSingleImageSource,
+      urlToMsgIdMap,
+      getMsgIdByUrl
     }
   },
   {

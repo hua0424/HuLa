@@ -672,6 +672,8 @@ pub enum ImUrl {
     AiclawGroupConfigUpdate,
     AiclawThinkingList,
     AiclawThinkingDetail,
+
+    FileSignDownload,
 }
 
 impl ImUrl {
@@ -1011,6 +1013,8 @@ impl ImUrl {
             ImUrl::AiclawGroupConfigUpdate => (http::Method::PUT, "im/aiclaw/group/config"),
             ImUrl::AiclawThinkingList => (http::Method::GET, "im/aiclaw/thinking/list"),
             ImUrl::AiclawThinkingDetail => (http::Method::GET, "im/aiclaw/thinking/{thinkingId}"),
+
+            ImUrl::FileSignDownload => (http::Method::POST, "im/file/sign-download"),
         }
     }
 
@@ -1311,6 +1315,8 @@ impl ImUrl {
             "aiclawGroupConfigUpdate" => Ok(ImUrl::AiclawGroupConfigUpdate),
             "aiclawThinkingList" => Ok(ImUrl::AiclawThinkingList),
             "aiclawThinkingDetail" => Ok(ImUrl::AiclawThinkingDetail),
+
+            "fileSignDownload" => Ok(ImUrl::FileSignDownload),
 
             // 未匹配的字符串
             _ => Err(anyhow::anyhow!("未知的URL类型: {}", s)),
