@@ -12,14 +12,15 @@ export const useDownload = () => {
     url: string,
     savePath: string,
     baseDir: BaseDirectory = isMobile() ? BaseDirectory.AppData : BaseDirectory.AppCache,
-    msgId?: string
+    msgId?: string,
+    objectKey?: string
   ) => {
     try {
       isDownloading.value = true
       process.value = 0
 
       // 有 msgId 时先换取签名 URL（无 msgId 或失败时返回原 URL）
-      const fetchUrl = await resolveSignedFileUrl(url, msgId)
+      const fetchUrl = await resolveSignedFileUrl(url, msgId, objectKey)
 
       // 确保目录存在
       const dirPath = savePath.substring(0, savePath.lastIndexOf('/'))

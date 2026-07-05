@@ -15,13 +15,14 @@ export const useVideoViewer = () => {
   const userStore = useUserStore()
 
   // 获取视频文件名
-  const getVideoFilename = (url: string) => {
+  const getVideoFilename = (url: string, filename?: string) => {
+    if (filename) return filename
     if (!url) return 'video.mp4'
     // 从URL中提取文件名
     const urlParts = url.split('/')
-    const filename = urlParts[urlParts.length - 1]
-    if (filename && filename.includes('.')) {
-      return filename
+    const extractedFilename = urlParts[urlParts.length - 1]
+    if (extractedFilename && extractedFilename.includes('.')) {
+      return extractedFilename
     }
     return 'video.mp4'
   }
@@ -55,18 +56,18 @@ export const useVideoViewer = () => {
   // }
 
   // 获取本地视频路径
-  const getLocalVideoPath = async (url: string) => {
-    if (!url) return ''
-    const filename = getVideoFilename(url)
+  const getLocalVideoPath = async (url: string, filename?: string) => {
+    if (!url && !filename) return ''
+    const name = getVideoFilename(url, filename)
     const videosDir = await userStore.getUserRoomDir()
-    return await join(videosDir, filename)
+    return await join(videosDir, name)
   }
 
   // 检查视频是否已下载到本地
-  const checkVideoDownloaded = async (url: string) => {
-    if (!url) return false
+  const checkVideoDownloaded = async (url: string, filename?: string) => {
+    if (!url && !filename) return false
     try {
-      const localPath = await getLocalVideoPath(url)
+      const localPath = await getLocalVideoPath(url, filename)
       if (localPath) {
         const baseDir = isMobile() ? BaseDirectory.AppData : BaseDirectory.Resource
         return await exists(localPath, { baseDir })
@@ -78,10 +79,10 @@ export const useVideoViewer = () => {
   }
 
   // 获取视频的实际播放路径（本地路径优先）
-  const getVideoPlayPath = async (url: string) => {
-    const isDownloaded = await checkVideoDownloaded(url)
+  const getVideoPlayPath = async (url: string, filename?: string) => {
+    const isDownloaded = await checkVideoDownloaded(url, filename)
     if (isDownloaded) {
-      const localPath = await getLocalVideoPath(url)
+      const localPath = await getLocalVideoPath(url, filename)
       // 使用与下载时一致的基础目录
       const baseDirPath = isMobile() ? await appDataDir() : await resourceDir()
       return await join(baseDirPath, localPath)

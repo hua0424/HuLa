@@ -15,6 +15,7 @@ type TaskKind = 'image' | 'video' | 'emoji'
 
 type Task = {
   url: string
+  objectKey?: string
   msgId: string
   roomId: string
   kind: TaskKind
@@ -37,11 +38,16 @@ export const useThumbnailCacheStore = defineStore(
     const worker = new Worker(new URL('../workers/imageDownloader.ts', import.meta.url))
     const waiterMap = new Map<string, Array<(path: string | null) => void>>()
 
-    const notifyWaiters = (url: string, path: string | null) => {
-      const waiters = waiterMap.get(url)
+    const getTaskKey = (task: Task) => {
+      return task.url || task.objectKey || (task.msgId ? `msgId:${task.msgId}` : '')
+    }
+
+    const notifyWaiters = (task: Task, path: string | null) => {
+      const key = getTaskKey(task)
+      const waiters = waiterMap.get(key)
       if (waiters?.length) {
         waiters.forEach((resolve) => resolve(path))
-        waiterMap.delete(url)
+        waiterMap.delete(key)
       }
     }
 
@@ -98,12 +104,13 @@ export const useThumbnailCacheStore = defineStore(
     }
 
     const processTask = async (task: Task) => {
+      const taskKey = getTaskKey(task)
       try {
         task.status = 'downloading'
-        statusMap.value[task.url] = task
+        statusMap.value[taskKey] = task
         const { relativeDir, baseDir } = await ensureCacheDir(task.kind)
-        const hash = await md5FromString(task.url)
-        const ext = await decideExt(task.url, task.msgId)
+        const hash = await md5FromString(taskKey)
+        const ext = await decideExt(task.url || task.objectKey || '', task.msgId)
         const fileName = `${hash}.${ext}`
         const relPath = await join(relativeDir, fileName)
         const existsFlag = await exists(relPath, { baseDir })
@@ -111,24 +118,24 @@ export const useThumbnailCacheStore = defineStore(
           const abs = await getAbsolute(relPath)
           task.status = 'completed'
           task.path = abs
-          statusMap.value[task.url] = task
-          notifyWaiters(task.url, abs)
+          statusMap.value[taskKey] = task
+          notifyWaiters(task, abs)
           await persistMessage(task, abs)
           return
         }
 
-        const fetchUrl = await resolveSignedFileUrl(task.url, task.msgId)
+        const fetchUrl = await resolveSignedFileUrl(task.url, task.msgId, task.objectKey)
 
         const buffer: ArrayBuffer = await new Promise((resolve, reject) => {
           const handler = (e: MessageEvent<any>) => {
             const data = e.data
-            if (data?.url !== task.url) return
+            if (data?.url !== taskKey) return
             worker.removeEventListener('message', handler as any)
             if (data.success) resolve(data.buffer as ArrayBuffer)
             else reject(new Error(data.error || 'download failed'))
           }
           worker.addEventListener('message', handler as any)
-          worker.postMessage({ url: fetchUrl, originalUrl: task.url })
+          worker.postMessage({ url: fetchUrl, originalUrl: taskKey })
         })
 
         const bytes = new Uint8Array(buffer)
@@ -136,41 +143,48 @@ export const useThumbnailCacheStore = defineStore(
         const abs = await getAbsolute(relPath)
         task.status = 'completed'
         task.path = abs
-        statusMap.value[task.url] = task
-        notifyWaiters(task.url, abs)
+        statusMap.value[taskKey] = task
+        notifyWaiters(task, abs)
         await persistMessage(task, abs)
       } catch (err: any) {
         task.retries += 1
         task.error = String(err?.message || err)
-        statusMap.value[task.url] = task
+        statusMap.value[taskKey] = task
         if (task.retries < 3) {
           await new Promise((r) => setTimeout(r, 500 * 2 ** (task.retries - 1)))
           queue.unshift(task)
         } else {
           task.status = 'failed'
-          notifyWaiters(task.url, null)
+          notifyWaiters(task, null)
         }
       }
     }
 
-    const enqueueThumbnail = async (options: { url: string; msgId: string; roomId: string; kind: TaskKind }) => {
-      const existsTask = statusMap.value[options.url]
+    const enqueueThumbnail = async (options: {
+      url: string
+      objectKey?: string
+      msgId: string
+      roomId: string
+      kind: TaskKind
+    }) => {
+      const t: Task = { ...options, status: 'pending', retries: 0 }
+      const taskKey = getTaskKey(t)
+      const existsTask = statusMap.value[taskKey]
       if (existsTask?.status === 'completed') {
         return Promise.resolve(existsTask.path ?? null)
       }
 
       const promise = new Promise<string | null>((resolve) => {
-        const waiters = waiterMap.get(options.url)
+        const waiters = waiterMap.get(taskKey)
         if (waiters) {
           waiters.push(resolve)
         } else {
-          waiterMap.set(options.url, [resolve])
+          waiterMap.set(taskKey, [resolve])
         }
       })
 
       if (!existsTask || existsTask.status === 'failed') {
-        const t: Task = { ...options, status: 'pending', retries: 0 }
-        statusMap.value[options.url] = t
+        statusMap.value[taskKey] = t
         queue.push(t)
         void dispatchNext()
       }
@@ -178,17 +192,25 @@ export const useThumbnailCacheStore = defineStore(
       return promise
     }
 
-    const invalidate = (url: string) => {
-      if (!url) return
-      if (statusMap.value[url]) {
-        delete statusMap.value[url]
+    const invalidate = (url?: string, objectKey?: string, msgId?: string) => {
+      if (!url && !objectKey && !msgId) return
+      const key = url || objectKey || (msgId ? `msgId:${msgId}` : '')
+      if (statusMap.value[key]) {
+        delete statusMap.value[key]
       }
-      waiterMap.delete(url)
+      waiterMap.delete(key)
     }
 
-    const getStatus = (url: string) => statusMap.value[url]
+    const getStatus = (url?: string, objectKey?: string, msgId?: string) => {
+      const key = url || objectKey || (msgId ? `msgId:${msgId}` : '')
+      return statusMap.value[key]
+    }
 
-    return { enqueueThumbnail, getStatus, invalidate }
+    return {
+      enqueueThumbnail,
+      invalidate,
+      getStatus
+    }
   },
   {
     share: { enable: true, initialize: true }

@@ -74,18 +74,35 @@ import { useWaveformRenderer } from '@/hooks/useWaveformRenderer'
 import type { VoiceBody } from '@/services/types'
 import { useSettingStore } from '@/stores/setting'
 import { useUserStore } from '@/stores/user'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 
 const props = defineProps<{
   body: VoiceBody
   fromUserUid: string
+  /** 消息 ID，objectKey-only 语音需要用来换签 */
+  msgId?: string
 }>()
 
 const settingStore = useSettingStore()
 const userStore = useUserStore()
 const { themes } = storeToRefs(settingStore)
 
-// 使用messageId作为音频ID，确保唯一性
-const audioId = props.body.url
+// 使用 msgId 作为音频 ID 兜底，确保 objectKey-only 消息也能唯一标识播放器
+const audioId = props.msgId || props.body.url
+const resolvedAudioUrl = ref('')
+
+const resolveAudioUrl = async () => {
+  if (props.body?.url) {
+    resolvedAudioUrl.value = props.body.url
+    return
+  }
+  if (props.body?.objectKey && props.msgId) {
+    resolvedAudioUrl.value = await resolveSignedFileUrl('', props.msgId, props.body.objectKey)
+  } else {
+    resolvedAudioUrl.value = ''
+  }
+}
+
 const waveformCanvas = ref<HTMLCanvasElement | null>(null)
 
 // 判断是否为深色模式
@@ -199,18 +216,28 @@ watch(audioPlayback.isPlaying, () => {
   waveformRenderer.drawWaveform()
 })
 
+watch(
+  () => [props.body?.url, props.body?.objectKey, props.msgId],
+  () => {
+    void resolveAudioUrl()
+  },
+  { immediate: true }
+)
+
 // 组件挂载
 onMounted(async () => {
   try {
     // 设置Canvas引用
     waveformRenderer.waveformCanvas.value = waveformCanvas.value
 
+    await resolveAudioUrl()
+
     // 加载音频波形数据
-    const audioBuffer = await fileManager.loadAudioWaveform(props.body.url)
+    const audioBuffer = await fileManager.loadAudioWaveform(resolvedAudioUrl.value)
     await waveformRenderer.generateWaveformData(audioBuffer)
 
     // 创建音频元素
-    const audioUrl = await fileManager.getAudioUrl(props.body.url)
+    const audioUrl = await fileManager.getAudioUrl(resolvedAudioUrl.value)
     await audioPlayback.createAudioElement(audioUrl, audioId, second.value)
   } catch (error) {
     console.error('组件初始化失败:', error)

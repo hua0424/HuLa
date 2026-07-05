@@ -33,16 +33,27 @@ export const useFileDownloadStore = defineStore(
   () => {
     const userStore = useUserStore()
 
-    // 存储文件下载状态的Map，key为文件URL，value为下载状态
+    // 存储文件下载状态的Map，key为文件URL/objectKey/msgId，value为下载状态
     const downloadStatusMap = ref<Record<string, FileDownloadStatus>>({})
+
+    /**
+     * 计算稳定的状态 key。signed URL 会过期，不能作为 key；优先用原始 url/objectKey，
+     * 都没有时才用 msgId 兜底。
+     */
+    const getStatusKey = (fileUrl: string, objectKey?: string, msgId?: string): string => {
+      return fileUrl || objectKey || (msgId ? `msgId:${msgId}` : '')
+    }
 
     /**
      * 获取文件下载状态
      * @param fileUrl 文件URL
+     * @param objectKey 服务端 objectKey（objectKey-only 消息时使用）
+     * @param msgId 消息ID（objectKey 为空时的兜底 key）
      */
-    const getFileStatus = (fileUrl: string): FileDownloadStatus => {
+    const getFileStatus = (fileUrl: string, objectKey?: string, msgId?: string): FileDownloadStatus => {
+      const key = getStatusKey(fileUrl, objectKey, msgId)
       return (
-        downloadStatusMap.value[fileUrl] || {
+        downloadStatusMap.value[key] || {
           isDownloaded: false,
           status: 'pending'
         }
@@ -53,11 +64,19 @@ export const useFileDownloadStore = defineStore(
      * 更新文件下载状态
      * @param fileUrl 文件URL
      * @param status 状态更新
+     * @param objectKey 服务端 objectKey
+     * @param msgId 消息ID
      */
-    const updateFileStatus = (fileUrl: string, status: Partial<FileDownloadStatus>) => {
-      const currentStatus = getFileStatus(fileUrl)
+    const updateFileStatus = (
+      fileUrl: string,
+      status: Partial<FileDownloadStatus>,
+      objectKey?: string,
+      msgId?: string
+    ) => {
+      const key = getStatusKey(fileUrl, objectKey, msgId)
+      const currentStatus = getFileStatus(fileUrl, objectKey, msgId)
       const newStatus = { ...currentStatus, ...status }
-      downloadStatusMap.value[fileUrl] = newStatus
+      downloadStatusMap.value[key] = newStatus
     }
 
     /**
@@ -69,9 +88,12 @@ export const useFileDownloadStore = defineStore(
       roomId: string
       fileName: string
       exists?: boolean
+      objectKey?: string
+      msgId?: string
     }) => {
       console.log('触发状态刷新：', options)
-      const fileStatus = downloadStatusMap.value[options.fileUrl]
+      const key = getStatusKey(options.fileUrl, options.objectKey, options.msgId)
+      const fileStatus = downloadStatusMap.value[key]
 
       const resetStatus = () => {
         if (fileStatus) {
@@ -154,7 +176,12 @@ export const useFileDownloadStore = defineStore(
      * @param fileUrl 文件URL
      * @param fileName 文件名
      */
-    const checkFileExists = async (fileUrl: string, fileName: string): Promise<boolean> => {
+    const checkFileExists = async (
+      fileUrl: string,
+      fileName: string,
+      objectKey?: string,
+      msgId?: string
+    ): Promise<boolean> => {
       try {
         const downloadsDir = await userStore.getUserRoomDir()
         const filePath = await join(downloadsDir, fileName)
@@ -170,14 +197,19 @@ export const useFileDownloadStore = defineStore(
           // 保持原生路径格式用于文件操作，规范化路径用于显示
           const normalizedPath = absolutePath.replace(/\\/g, '/')
 
-          updateFileStatus(fileUrl, {
-            isDownloaded: true,
-            localPath: filePath,
-            absolutePath: absolutePath, // 使用原生路径格式
-            nativePath: absolutePath, // 保存原生路径
-            displayPath: normalizedPath, // 保存显示路径
-            status: 'completed'
-          })
+          updateFileStatus(
+            fileUrl,
+            {
+              isDownloaded: true,
+              localPath: filePath,
+              absolutePath: absolutePath, // 使用原生路径格式
+              nativePath: absolutePath, // 保存原生路径
+              displayPath: normalizedPath, // 保存显示路径
+              status: 'completed'
+            },
+            objectKey,
+            msgId
+          )
         }
 
         return fileExists
@@ -187,17 +219,29 @@ export const useFileDownloadStore = defineStore(
       }
     }
 
-    const finalizeSuccessfulWrite = (fileUrl: string, _fileName: string, absolutePath: string, localPath: string) => {
+    const finalizeSuccessfulWrite = (
+      fileUrl: string,
+      _fileName: string,
+      absolutePath: string,
+      localPath: string,
+      objectKey?: string,
+      msgId?: string
+    ) => {
       const normalizedPath = absolutePath.replace(/\\/g, '/')
-      updateFileStatus(fileUrl, {
-        isDownloaded: true,
-        localPath,
-        absolutePath,
-        nativePath: absolutePath,
-        displayPath: normalizedPath,
-        status: 'completed',
-        progress: 100
-      })
+      updateFileStatus(
+        fileUrl,
+        {
+          isDownloaded: true,
+          localPath,
+          absolutePath,
+          nativePath: absolutePath,
+          displayPath: normalizedPath,
+          status: 'completed',
+          progress: 100
+        },
+        objectKey,
+        msgId
+      )
     }
 
     /**
@@ -206,27 +250,29 @@ export const useFileDownloadStore = defineStore(
      * @param fileName 文件名
      * @param msgId 消息ID（可选），用于换取签名下载 URL
      */
-    const downloadFile = async (fileUrl: string, fileName: string, msgId?: string): Promise<string | null> => {
+    const downloadFile = async (
+      fileUrl: string,
+      fileName: string,
+      msgId?: string,
+      objectKey?: string
+    ): Promise<string | null> => {
       try {
         // 检查文件是否已存在
-        const isExists = await checkFileExists(fileUrl, fileName)
+        const isExists = await checkFileExists(fileUrl, fileName, objectKey, msgId)
         if (isExists) {
-          const existingStatus = getFileStatus(fileUrl)
+          const existingStatus = getFileStatus(fileUrl, objectKey, msgId)
           return existingStatus.localPath || null
         }
 
         // 更新状态为下载中
-        updateFileStatus(fileUrl, {
-          status: 'downloading',
-          progress: 0
-        })
+        updateFileStatus(fileUrl, { status: 'downloading', progress: 0 }, objectKey, msgId)
 
         // 获取下载目录
         const downloadsDir = await userStore.getUserRoomDir()
         const filePath = await join(downloadsDir, fileName)
 
         // 有 msgId 时先换取签名 URL（无 msgId 或失败时返回原 URL）
-        const fetchUrl = await resolveSignedFileUrl(fileUrl, msgId)
+        const fetchUrl = await resolveSignedFileUrl(fileUrl, msgId, objectKey)
 
         // 下载文件
         const response = await fetch(fetchUrl)
@@ -255,10 +301,7 @@ export const useFileDownloadStore = defineStore(
           // 更新下载进度
           if (total > 0) {
             const progress = Math.round((downloaded / total) * 100)
-            updateFileStatus(fileUrl, {
-              status: 'downloading',
-              progress
-            })
+            updateFileStatus(fileUrl, { status: 'downloading', progress }, objectKey, msgId)
           }
         }
 
@@ -280,16 +323,21 @@ export const useFileDownloadStore = defineStore(
         const baseDirPath = isMobile() ? await appDataDir() : await resourceDir()
         const absolutePath = await join(baseDirPath, filePath)
 
-        finalizeSuccessfulWrite(fileUrl, fileName, absolutePath, filePath)
+        finalizeSuccessfulWrite(fileUrl, fileName, absolutePath, filePath, objectKey, msgId)
         return absolutePath // 返回原生路径格式
       } catch (error) {
         console.error('文件下载失败:', error)
 
         // 更新状态为失败
-        updateFileStatus(fileUrl, {
-          status: 'failed',
-          error: error instanceof Error ? error.message : '下载失败'
-        })
+        updateFileStatus(
+          fileUrl,
+          {
+            status: 'failed',
+            error: error instanceof Error ? error.message : '下载失败'
+          },
+          objectKey,
+          msgId
+        )
 
         window.$message?.error(`文件下载失败: ${error instanceof Error ? error.message : '未知错误'}`)
         return null
@@ -302,7 +350,13 @@ export const useFileDownloadStore = defineStore(
      * @param fileName 文件名
      * @param data 文件数据
      */
-    const saveFileFromBytes = async (fileUrl: string, fileName: string, data: Uint8Array): Promise<string | null> => {
+    const saveFileFromBytes = async (
+      fileUrl: string,
+      fileName: string,
+      data: Uint8Array,
+      objectKey?: string,
+      msgId?: string
+    ): Promise<string | null> => {
       try {
         const downloadsDir = await userStore.getUserRoomDir()
         const filePath = await join(downloadsDir, fileName)
@@ -313,14 +367,19 @@ export const useFileDownloadStore = defineStore(
         const baseDirPath = isMobile() ? await appDataDir() : await resourceDir()
         const absolutePath = await join(baseDirPath, filePath)
 
-        finalizeSuccessfulWrite(fileUrl, fileName, absolutePath, filePath)
+        finalizeSuccessfulWrite(fileUrl, fileName, absolutePath, filePath, objectKey, msgId)
         return absolutePath
       } catch (error) {
         console.error('保存文件失败:', error)
-        updateFileStatus(fileUrl, {
-          status: 'failed',
-          error: error instanceof Error ? error.message : '保存失败'
-        })
+        updateFileStatus(
+          fileUrl,
+          {
+            status: 'failed',
+            error: error instanceof Error ? error.message : '保存失败'
+          },
+          objectKey,
+          msgId
+        )
         return null
       }
     }
@@ -329,9 +388,16 @@ export const useFileDownloadStore = defineStore(
      * 获取本地文件路径
      * @param fileUrl 文件URL
      * @param absolute 是否返回绝对路径，默认为 true
+     * @param objectKey 服务端 objectKey
+     * @param msgId 消息ID
      */
-    const getLocalPath = (fileUrl: string, absolute: boolean = true): string | null => {
-      const status = getFileStatus(fileUrl)
+    const getLocalPath = (
+      fileUrl: string,
+      absolute: boolean = true,
+      objectKey?: string,
+      msgId?: string
+    ): string | null => {
+      const status = getFileStatus(fileUrl, objectKey, msgId)
       if (!status.isDownloaded) return null
 
       return absolute ? status.absolutePath || null : status.localPath || null
@@ -347,17 +413,24 @@ export const useFileDownloadStore = defineStore(
     /**
      * 移除特定文件的下载状态
      * @param fileUrl 文件URL
+     * @param objectKey 服务端 objectKey
+     * @param msgId 消息ID
      */
-    const removeFileStatus = (fileUrl: string) => {
-      delete downloadStatusMap.value[fileUrl]
+    const removeFileStatus = (fileUrl: string, objectKey?: string, msgId?: string) => {
+      const key = getStatusKey(fileUrl, objectKey, msgId)
+      delete downloadStatusMap.value[key]
     }
 
     /**
      * 批量检查文件状态
      * @param fileInfos 文件信息数组
      */
-    const batchCheckFileStatus = async (fileInfos: Array<{ url: string; fileName: string }>) => {
-      const promises = fileInfos.map(({ url, fileName }) => checkFileExists(url, fileName))
+    const batchCheckFileStatus = async (
+      fileInfos: Array<{ url: string; fileName: string; objectKey?: string; msgId?: string }>
+    ) => {
+      const promises = fileInfos.map(({ url, fileName, objectKey, msgId }) =>
+        checkFileExists(url, fileName, objectKey, msgId)
+      )
 
       await Promise.all(promises)
     }

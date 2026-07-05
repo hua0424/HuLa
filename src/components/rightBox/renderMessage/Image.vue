@@ -1,7 +1,7 @@
 <template>
   <div>
     <n-image
-      v-if="body?.url"
+      v-if="body?.url || body?.objectKey"
       data-testid="image-content"
       aria-label="图片"
       class="select-none cursor-pointer"
@@ -46,7 +46,7 @@
       :is="ImagePreview"
       v-if="ImagePreview"
       v-model:visible="showImagePreviewRef"
-      :image-url="body?.url || ''"
+      :image-url="resolvedImageUrl || ''"
       :message="message" />
   </div>
 </template>
@@ -60,6 +60,7 @@ import type { ImageBody, MsgType } from '@/services/types'
 import { isMobile } from '@/utils/PlatformConstants'
 import { useThumbnailCacheStore } from '@/stores/thumbnailCache'
 import { buildQiniuThumbnailUrl, getPreferredQiniuFormat } from '@/utils/QiniuImageUtils'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 
 const ImagePreview = isMobile() ? defineAsyncComponent(() => import('@/mobile/components/ImagePreview.vue')) : void 0
 
@@ -85,17 +86,30 @@ const showImagePreviewRef = ref(false)
 const imagesRef = ref<string[]>([])
 const thumbnailStore = useThumbnailCacheStore()
 const localThumbnailSrc = ref<string | null>(null)
+const resolvedImageUrl = ref('')
 
 // 处理图片加载错误
 const handleImageError = () => {
   isError.value = true
 }
 
+const resolveImageUrl = async () => {
+  if (props.body?.url) {
+    resolvedImageUrl.value = props.body.url
+    return
+  }
+  if (props.body?.objectKey && props.message?.id) {
+    resolvedImageUrl.value = await resolveSignedFileUrl('', props.message.id, props.body.objectKey)
+  } else {
+    resolvedImageUrl.value = ''
+  }
+}
+
 const handleOpenImage = () => {
   if (!isMobile()) return // 非移动端直接返回
 
-  if (props.body?.url) {
-    imagesRef.value = [props.body.url]
+  if (resolvedImageUrl.value) {
+    imagesRef.value = [resolvedImageUrl.value]
     showImagePreviewRef.value = true
   }
 }
@@ -106,13 +120,13 @@ const handleOpenImageViewer = () => {
     return
   }
 
-  if (props.body?.url) {
+  if (resolvedImageUrl.value) {
     // 如果有自定义点击处理函数，使用它；否则使用默认逻辑
     if (props.onImageClick) {
-      props.onImageClick(props.body.url)
+      props.onImageClick(resolvedImageUrl.value)
     } else {
-      const msgIdMap = props.message?.id ? { [props.body.url]: props.message.id } : undefined
-      openImageViewer(props.body.url, [MsgEnum.IMAGE, MsgEnum.EMOJI], undefined, msgIdMap)
+      const msgIdMap = props.message?.id ? { [resolvedImageUrl.value]: props.message.id } : undefined
+      openImageViewer(resolvedImageUrl.value, [MsgEnum.IMAGE, MsgEnum.EMOJI], undefined, msgIdMap)
     }
   }
 }
@@ -121,7 +135,7 @@ const handleOpenImageViewer = () => {
  * 计算图片样式
  */
 const remoteThumbnailSrc = computed(() => {
-  const originalUrl = props.body?.url
+  const originalUrl = resolvedImageUrl.value
   if (!originalUrl) return ''
   const deviceRatio = typeof window !== 'undefined' ? Math.max(window.devicePixelRatio || 1, 1) : 1
   const thumbnailWidth = Math.ceil(MAX_WIDTH * Math.min(deviceRatio, 2))
@@ -136,14 +150,20 @@ const remoteThumbnailSrc = computed(() => {
   )
 })
 
-const downloadKey = computed(() => remoteThumbnailSrc.value || props.body?.url || '')
+const downloadKey = computed(() => props.body?.url || props.body?.objectKey || '')
 
 const displayImageSrc = computed(() => localThumbnailSrc.value || remoteThumbnailSrc.value)
 
 const requestThumbnailDownload = () => {
   if (!downloadKey.value || !props.message) return
   void thumbnailStore
-    .enqueueThumbnail({ url: downloadKey.value, msgId: props.message.id, roomId: props.message.roomId, kind: 'image' })
+    .enqueueThumbnail({
+      url: props.body?.url || '',
+      objectKey: props.body?.objectKey,
+      msgId: props.message.id,
+      roomId: props.message.roomId,
+      kind: 'image'
+    })
     .then((path) => {
       if (!path) return
       localThumbnailSrc.value = convertFileSrc(path)
@@ -166,9 +186,17 @@ const ensureLocalThumbnail = async () => {
     console.warn('[Image] 检查缩略图文件失败:', error)
   }
   localThumbnailSrc.value = null
-  thumbnailStore.invalidate(downloadKey.value)
+  thumbnailStore.invalidate(props.body?.url, props.body?.objectKey, props.message?.id)
   requestThumbnailDownload()
 }
+
+watch(
+  () => [props.body?.url, props.body?.objectKey],
+  () => {
+    void resolveImageUrl()
+  },
+  { immediate: true }
+)
 
 watch(
   () => props.body?.thumbnailPath,
@@ -227,7 +255,7 @@ const imageStyle = computed(() => {
 })
 
 onMounted(() => {
-  if (props.body?.url && !props.body?.thumbnailPath) {
+  if ((props.body?.url || props.body?.objectKey) && !props.body?.thumbnailPath) {
     requestThumbnailDownload()
   }
 })

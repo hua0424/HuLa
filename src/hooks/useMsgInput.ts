@@ -501,6 +501,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
         // 更新消息体中的URL为服务器URL(判断使用的是七牛云还是默认上传方式),如果没有provider就默认赋值downloadUrl
         messageBody.url =
           config?.provider && config?.provider === UploadProviderEnum.QINIU ? doUploadResult?.qiniuUrl : downloadUrl
+        messageBody.objectKey = config?.objectKey
         delete messageBody.path // 删除临时路径
 
         // 更新临时消息的URL
@@ -545,6 +546,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
         const doUploadResult = await messageStrategy.doUpload(msg.path, uploadUrl, config)
         messageBody.url =
           config?.provider && config?.provider === UploadProviderEnum.QINIU ? doUploadResult?.qiniuUrl : downloadUrl
+        messageBody.objectKey = config?.objectKey
         delete messageBody.path // 删除临时路径
         messageBody.thumbUrl = uploadResult
         messageBody.thumbSize = msg.thumbnail.size
@@ -830,6 +832,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
       cleanup()
 
       messageBody.url = config?.provider === UploadProviderEnum.QINIU ? doUploadResult?.qiniuUrl : downloadUrl
+      messageBody.objectKey = config?.objectKey
       delete messageBody.path
 
       chatStore.updateMsg({
@@ -906,6 +909,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
       cleanup()
 
       messageBody.url = config?.provider === UploadProviderEnum.QINIU ? doUploadResult?.qiniuUrl : downloadUrl
+      messageBody.objectKey = config?.objectKey
       delete messageBody.path
 
       chatStore.updateMsg({
@@ -1164,7 +1168,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
       const tempMsgId = 'T' + Date.now().toString()
 
       // 创建消息体（初始使用本地路径）
-      const messageBody = {
+      const messageBody: any = {
         url: msg.url,
         path: msg.path,
         size: msg.size,
@@ -1215,6 +1219,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
         const finalUrl =
           config?.provider && config?.provider === UploadProviderEnum.QINIU ? doUploadResult?.qiniuUrl : downloadUrl
         messageBody.url = finalUrl || ''
+        messageBody.objectKey = config?.objectKey
         delete messageBody.path // 删除临时路径
 
         // 更新临时消息的URL

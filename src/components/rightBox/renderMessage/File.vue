@@ -147,14 +147,17 @@ const iconDimensions = ref({ width: 40, height: 40 })
 // 优先从 message 取 id，否则使用显式传入的 msgId
 const messageId = computed(() => props.message?.id || props.msgId)
 
+// 是否存在远端文件标识（url 或 objectKey 任一存在即可）
+const hasRemoteFile = computed(() => !!props.body?.url || !!props.body?.objectKey)
+
 // 上传状态
 const isUploading = computed(() => props.messageStatus === MessageStatusEnum.SENDING)
 const displayUploadProgress = computed(() => props.uploadProgress || 0)
 
 // 文件下载状态
 const fileStatus = computed(() => {
-  if (!props.body?.url) return null
-  return fileDownloadStore.getFileStatus(props.body.url)
+  if (!hasRemoteFile.value) return null
+  return fileDownloadStore.getFileStatus(props.body.url, props.body.objectKey, messageId.value)
 })
 
 // 是否正在下载
@@ -196,11 +199,11 @@ const revealInDirSafely = async (targetPath?: string | null) => {
 // 是否需要下载（文件未下载到本地且不是上传/下载状态）
 const needsDownload = computed(() => {
   if (isUploading.value || isDownloading.value) return false
-  if (!props.body?.url) return false
+  if (!hasRemoteFile.value) return false
   if (props.body.localPath) return false
 
   // 如果是本地文件路径，不需要下载
-  if (props.body.url.startsWith('file://') || props.body.url.startsWith('/')) return false
+  if (props.body.url?.startsWith('file://') || props.body.url?.startsWith('/')) return false
 
   // 检查文件是否已下载
   const status = fileStatus.value
@@ -224,11 +227,16 @@ const overlayStyle = computed(() => {
 
 // 监听 props 变化，重新检查文件状态
 watch(
-  () => [props.body?.url, props.body?.fileName],
-  async ([newUrl, newFileName]) => {
-    if (newUrl && newFileName) {
+  () => [props.body?.url, props.body?.objectKey, props.body?.fileName],
+  async ([newUrl, newObjectKey, newFileName]) => {
+    if ((newUrl || newObjectKey) && newFileName) {
       try {
-        await fileDownloadStore.checkFileExists(newUrl, newFileName)
+        await fileDownloadStore.checkFileExists(
+          newUrl as string,
+          newFileName as string,
+          newObjectKey as string,
+          messageId.value
+        )
       } catch (error) {
         console.error('检查文件状态失败:', error)
       }
@@ -299,7 +307,7 @@ const handleIconError = (event: Event) => {
 
 // 处理文件点击
 const handleFileClick = async () => {
-  if (!props.body?.url || !props.body?.fileName || isUploading.value) return
+  if (!hasRemoteFile.value || !props.body?.fileName || isUploading.value) return
 
   try {
     // 检查文件是否已下载
@@ -343,6 +351,8 @@ const handleFileClick = async () => {
 
     await fileDownloadStore.refreshFileDownloadStatus({
       fileUrl: props.body.url,
+      objectKey: props.body.objectKey,
+      msgId: messageId.value,
       roomId: currentChatRoomId,
       userId: currentUserUid,
       fileName: props.body.fileName,
@@ -353,11 +363,16 @@ const handleFileClick = async () => {
 
 // 下载并打开文件
 const downloadAndOpenFile = async () => {
-  if (!props.body?.url || !props.body?.fileName) return
+  if (!hasRemoteFile.value || !props.body?.fileName) return
 
   try {
     const fileName = props.body.fileName
-    const absolutePath = await fileDownloadStore.downloadFile(props.body.url, fileName, messageId.value)
+    const absolutePath = await fileDownloadStore.downloadFile(
+      props.body.url,
+      fileName,
+      messageId.value,
+      props.body.objectKey
+    )
 
     if (absolutePath) {
       void persistFileLocalPath(absolutePath)
@@ -382,11 +397,16 @@ const downloadAndOpenFile = async () => {
 
 // 下载文件但不打开
 const downloadFileOnly = async () => {
-  if (!props.body?.url || !props.body?.fileName) return
+  if (!hasRemoteFile.value || !props.body?.fileName) return
 
   try {
     const fileName = props.body.fileName
-    const absolutePath = await fileDownloadStore.downloadFile(props.body.url, fileName, messageId.value)
+    const absolutePath = await fileDownloadStore.downloadFile(
+      props.body.url,
+      fileName,
+      messageId.value,
+      props.body.objectKey
+    )
     if (absolutePath) {
       void persistFileLocalPath(absolutePath)
     }
@@ -404,6 +424,8 @@ const downloadFileOnly = async () => {
 
     await fileDownloadStore.refreshFileDownloadStatus({
       fileUrl: props.body.url,
+      objectKey: props.body.objectKey,
+      msgId: messageId.value,
       roomId: currentChatRoomId,
       userId: currentUserUid,
       fileName: props.body.fileName,
@@ -416,7 +438,7 @@ const downloadFileOnly = async () => {
 const handleIconClick = async (event: Event) => {
   event.stopPropagation() // 阻止事件冒泡，防止触发双击事件
 
-  if (!props.body?.url || !props.body?.fileName || isUploading.value || isDownloading.value) return
+  if (!hasRemoteFile.value || !props.body?.fileName || isUploading.value || isDownloading.value) return
 
   const status = fileStatus.value
 
@@ -433,10 +455,15 @@ const handleIconClick = async (event: Event) => {
 
 // 组件挂载时检查文件状态
 onMounted(async () => {
-  if (props.body?.url && props.body?.fileName) {
+  if ((props.body?.url || props.body?.objectKey) && props.body?.fileName) {
     try {
       // 检查文件是否已存在于本地
-      await fileDownloadStore.checkFileExists(props.body.url, props.body.fileName)
+      await fileDownloadStore.checkFileExists(
+        props.body.url,
+        props.body.fileName,
+        props.body.objectKey,
+        messageId.value
+      )
     } catch (error) {
       console.error('检查文件状态失败:', error)
     }
