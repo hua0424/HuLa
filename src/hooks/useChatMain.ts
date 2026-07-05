@@ -40,6 +40,7 @@ import { detectImageFormat, imageUrlToUint8Array, isImageUrl } from '@/utils/Ima
 import { recallMsg, removeGroupMember, updateMyRoomInfo } from '@/utils/ImRequestUtils'
 import { detectRemoteFileType, getFilesMeta } from '@/utils/PathUtil'
 import { isMac, isMobile } from '@/utils/PlatformConstants'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useWindow } from './useWindow'
 import { useI18n } from 'vue-i18n'
@@ -196,6 +197,16 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
     }
   }
 
+  /** 统一解析消息体中的可用 URL（objectKey-only 消息会换签） */
+  const resolveMediaUrl = async (item: MessageType): Promise<string> => {
+    const body = item.message?.body || {}
+    if (body.url) return body.url
+    if (body.objectKey && item.message?.id) {
+      return (await resolveSignedFileUrl('', item.message.id, body.objectKey)) || ''
+    }
+    return body.content || ''
+  }
+
   const commonMenuList = ref<OPT.RightMenu[]>([
     {
       label: () => t('menu.select'),
@@ -209,7 +220,12 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
       label: () => t('menu.add_sticker'),
       icon: 'add-expression',
       click: async (item: MessageType) => {
-        const imageUrl = item.message.body.url || item.message.body.content
+        const imageUrl =
+          item.message.body.url ||
+          item.message.body.content ||
+          (item.message.body.objectKey && item.message.id
+            ? await resolveSignedFileUrl('', item.message.id, item.message.body.objectKey)
+            : '')
         if (!imageUrl) {
           window.$message.error(t('home.chat_main.image.fetch_failed'))
           return
@@ -304,12 +320,13 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
     {
       label: () => t('menu.copy'),
       icon: 'copy',
-      click: (item: MessageType) => {
+      click: async (item: MessageType) => {
         if (isMobile()) {
           window.$message.warning(t('home.chat_main.feature.coming_soon'))
           return
         }
-        handleCopy(item.message.body.url, true, item.message.id)
+        const url = await resolveMediaUrl(item)
+        handleCopy(url, true, item.message.id)
       }
     },
     ...commonMenuList.value,
@@ -323,8 +340,9 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
         }
         await saveVideoAttachmentAs({
           url: item.message.body.url,
+          objectKey: item.message.body.objectKey,
           downloadFile,
-          defaultFileName: item.message.body.fileName,
+          defaultFileName: item.message.body.filename,
           msgId: item.message.id
         })
       }
@@ -335,17 +353,22 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
       icon: 'file2',
       click: async (item: MessageType) => {
         try {
-          const localPath = await getLocalVideoPath(item.message.body.url)
+          const workUrl = item.message.body.url || item.message.body.objectKey || ''
+          const fileName = item.message.body.filename
+          const localPath = await getLocalVideoPath(workUrl, fileName)
 
           // 检查视频是否已下载
-          const isDownloaded = await checkVideoDownloaded(item.message.body.url)
+          const isDownloaded = await checkVideoDownloaded(workUrl, fileName)
 
           if (!isDownloaded) {
             // 如果未下载，先下载视频
             const baseDir = isMobile() ? BaseDirectory.AppData : BaseDirectory.Resource
-            await downloadFile(item.message.body.url, localPath, baseDir, item.message.id)
+            await downloadFile(workUrl, localPath, baseDir, item.message.id, item.message.body.objectKey)
             // 通知相关组件更新视频下载状态
-            useMitt.emit(MittEnum.VIDEO_DOWNLOAD_STATUS_UPDATED, { url: item.message.body.url, downloaded: true })
+            useMitt.emit(MittEnum.VIDEO_DOWNLOAD_STATUS_UPDATED, {
+              url: workUrl,
+              downloaded: true
+            })
           }
 
           // 获取视频的绝对路径
@@ -403,8 +426,13 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
           {
             label: () => t('menu.copy'),
             icon: 'copy',
-            click: (item: MessageType) => {
-              const content = item.message.body.url || item.message.body.content
+            click: async (item: MessageType) => {
+              const content =
+                item.message.body.url ||
+                item.message.body.content ||
+                (item.message.body.objectKey && item.message.id
+                  ? await resolveSignedFileUrl('', item.message.id, item.message.body.objectKey)
+                  : '')
               handleCopy(content, true, item.message.id)
             }
           }
@@ -452,11 +480,12 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
                   window.$message.warning(t('home.chat_main.feature.coming_soon'))
                   return
                 }
-                const fileUrl = item.message.body.url
+                const fileUrl = item.message.body.url || item.message.body.objectKey || ''
                 const fileName = item.message.body.fileName
                 if (item.message.type === MsgEnum.VIDEO) {
                   await saveVideoAttachmentAs({
                     url: fileUrl,
+                    objectKey: item.message.body.objectKey,
                     downloadFile,
                     defaultFileName: fileName,
                     msgId: item.message.id
@@ -464,6 +493,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
                 } else {
                   await saveFileAttachmentAs({
                     url: fileUrl,
+                    objectKey: item.message.body.objectKey,
                     downloadFile,
                     defaultFileName: fileName,
                     msgId: item.message.id
@@ -478,11 +508,15 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
               click: async (item: RightMouseMessageItem) => {
                 console.log('打开文件夹的item项：', item)
 
-                const fileUrl = item.message.body.url
+                const fileUrl = item.message.body.url || item.message.body.objectKey || ''
                 const fileName = item.message.body.fileName || extractFileName(fileUrl)
 
                 // 检查文件是否已下载
-                const fileStatus = fileDownloadStore.getFileStatus(fileUrl)
+                const fileStatus = fileDownloadStore.getFileStatus(
+                  fileUrl,
+                  item.message.body.objectKey,
+                  item.message.id
+                )
 
                 console.log('找到的文件状态：', fileStatus)
                 const currentChatRoomId = globalStore.currentSessionRoomId // 这个id可能为群id可能为用户uid，所以不能只用用户uid
@@ -497,7 +531,12 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
                 if (!fileMeta.exists) {
                   // 文件不存在本地
                   const downloadMessage = window.$message.info(t('home.chat_main.file.download_prompt'))
-                  const _absolutePath = await fileDownloadStore.downloadFile(fileUrl, fileName, item.message.id)
+                  const _absolutePath = await fileDownloadStore.downloadFile(
+                    fileUrl,
+                    fileName,
+                    item.message.id,
+                    item.message.body.objectKey
+                  )
 
                   if (_absolutePath) {
                     absolutePath = _absolutePath
@@ -506,6 +545,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
                     await revealInDirSafely(_absolutePath)
                     await fileDownloadStore.refreshFileDownloadStatus({
                       fileUrl: item.message.body.url,
+                      objectKey: item.message.body.objectKey,
+                      msgId: item.message.id,
                       roomId: currentChatRoomId,
                       userId: currentUserUid,
                       fileName: item.message.body.fileName,
@@ -555,10 +596,21 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
           const path = 'previewFile'
           const LABEL = 'previewFile'
 
-          const fileStatus: FileDownloadStatus = fileDownloadStore.getFileStatus(item.message.body.url)
+          const fileStatus: FileDownloadStatus = fileDownloadStore.getFileStatus(
+            item.message.body.url,
+            item.message.body.objectKey,
+            item.message.id
+          )
 
           const currentChatRoomId = globalStore.currentSessionRoomId // 这个id可能为群id可能为用户uid，所以不能只用用户uid
           const currentUserUid = userStore.userInfo!.uid as string
+
+          // objectKey-only 消息先换签，作为预览/检测的可用 URL
+          const signedUrl =
+            item.message.body.url ||
+            (item.message.body.objectKey && item.message.id
+              ? await resolveSignedFileUrl('', item.message.id, item.message.body.objectKey)
+              : '')
 
           /**
            * 构建窗口所需的 payload 数据，用于传递文件预览相关的信息。
@@ -584,7 +636,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
                 fileName: item.message.body.fileName,
                 absolutePath: fileStatus?.absolutePath,
                 nativePath: fileStatus?.nativePath,
-                url: item.message.body.url,
+                url: signedUrl,
                 type,
                 localExists
               }
@@ -601,7 +653,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
            */
           const fallbackToRemotePayload = async () => {
             const remoteType = await detectRemoteFileType({
-              url: item.message.body.url,
+              url: signedUrl,
               fileSize: Number(item.message.body.size),
               msgId: item.message.id
             })
@@ -614,9 +666,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
           const absolutePath = await join(resourceDirPath, item.message.body.fileName)
 
           // 获取文件元信息（判断文件是否已下载/存在）
-          const result = await getFilesMeta<FilesMeta>([
-            fileStatus?.absolutePath || absolutePath || item.message.body.url
-          ])
+          const result = await getFilesMeta<FilesMeta>([fileStatus?.absolutePath || absolutePath || signedUrl])
           const fileMeta = result[0]
 
           try {
@@ -645,6 +695,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
           console.log('预览时刷新下载状态')
           await fileDownloadStore.refreshFileDownloadStatus({
             fileUrl: item.message.body.url,
+            objectKey: item.message.body.objectKey,
+            msgId: item.message.id,
             roomId: currentChatRoomId,
             userId: currentUserUid,
             fileName: item.message.body.fileName,
@@ -666,7 +718,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
           return
         }
         await saveFileAttachmentAs({
-          url: item.message.body.url,
+          url: item.message.body.url || item.message.body.objectKey || '',
+          objectKey: item.message.body.objectKey,
           downloadFile,
           defaultFileName: item.message.body.fileName,
           msgId: item.message.id
@@ -680,11 +733,11 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
       click: async (item: RightMouseMessageItem) => {
         console.log('打开文件夹的item项：', item)
 
-        const fileUrl = item.message.body.url
+        const fileUrl = item.message.body.url || item.message.body.objectKey || ''
         const fileName = item.message.body.fileName || extractFileName(fileUrl)
 
         // 检查文件是否已下载
-        const fileStatus = fileDownloadStore.getFileStatus(fileUrl)
+        const fileStatus = fileDownloadStore.getFileStatus(fileUrl, item.message.body.objectKey, item.message.id)
 
         console.log('找到的文件状态：', fileStatus)
         const currentChatRoomId = globalStore.currentSessionRoomId // 这个id可能为群id可能为用户uid，所以不能只用用户uid
@@ -699,7 +752,12 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
         if (!fileMeta.exists) {
           // 文件不存在本地
           const downloadMessage = window.$message.info(t('home.chat_main.file.download_prompt'))
-          const _absolutePath = await fileDownloadStore.downloadFile(fileUrl, fileName, item.message.id)
+          const _absolutePath = await fileDownloadStore.downloadFile(
+            fileUrl,
+            fileName,
+            item.message.id,
+            item.message.body.objectKey
+          )
 
           if (_absolutePath) {
             absolutePath = _absolutePath
@@ -708,6 +766,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
             await revealInDirSafely(_absolutePath)
             await fileDownloadStore.refreshFileDownloadStatus({
               fileUrl: item.message.body.url,
+              objectKey: item.message.body.objectKey,
+              msgId: item.message.id,
               roomId: currentChatRoomId,
               userId: currentUserUid,
               fileName: item.message.body.fileName,
@@ -731,8 +791,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
       label: () => t('menu.copy'),
       icon: 'copy',
       click: async (item: MessageType) => {
-        // 对于图片消息，优先使用 url 字段，回退到 content 字段
-        const imageUrl = item.message.body.url || item.message.body.content
+        // 对于图片消息，优先使用 url 字段，回退到 content 字段，objectKey-only 时换签
+        const imageUrl = await resolveMediaUrl(item)
         await handleCopy(imageUrl, true, item.message.id)
       }
     },
@@ -746,8 +806,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
           return
         }
         try {
-          const imageUrl = item.message.body.url
-          const suggestedName = imageUrl || 'image.png'
+          const imageUrl = await resolveMediaUrl(item)
+          const suggestedName = imageUrl.split('/').pop() || 'image.png'
 
           // 这里会自动截取url后的文件名，可以尝试打印一下
           const savePath = await save({
@@ -761,7 +821,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
           })
 
           if (savePath) {
-            await downloadFile(imageUrl, savePath, undefined, item.message.id)
+            await downloadFile(imageUrl, savePath, undefined, item.message.id, item.message.body.objectKey)
           }
         } catch (error) {
           console.error('保存图片失败:', error)
@@ -773,14 +833,14 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
       label: () => (isMac() ? t('menu.show_in_finder') : t('menu.show_in_folder')),
       icon: 'file2',
       click: async (item: MessageType) => {
-        const fileUrl = item.message.body.url || item.message.body.content
+        const fileUrl = await resolveMediaUrl(item)
         const fileName = item.message.body.fileName || extractFileName(fileUrl)
         if (!fileUrl || !fileName) {
           window.$message.warning(t('home.chat_main.image.locate_failed'))
           return
         }
 
-        const fileStatus = fileDownloadStore.getFileStatus(fileUrl)
+        const fileStatus = fileDownloadStore.getFileStatus(fileUrl, item.message.body.objectKey, item.message.id)
         const currentChatRoomId = globalStore.currentSessionRoomId
         const currentUserUid = userStore.userInfo!.uid as string
 
@@ -791,7 +851,12 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
 
         if (!fileMeta.exists) {
           const downloadMessage = window.$message.info(t('home.chat_main.image.download_prompt'))
-          const _absolutePath = await fileDownloadStore.downloadFile(fileUrl, fileName, item.message.id)
+          const _absolutePath = await fileDownloadStore.downloadFile(
+            fileUrl,
+            fileName,
+            item.message.id,
+            item.message.body.objectKey
+          )
 
           if (_absolutePath) {
             absolutePath = _absolutePath
@@ -800,6 +865,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
             await revealInDirSafely(_absolutePath)
             await fileDownloadStore.refreshFileDownloadStatus({
               fileUrl,
+              objectKey: item.message.body.objectKey,
+              msgId: item.message.id,
               roomId: currentChatRoomId,
               userId: currentUserUid,
               fileName,

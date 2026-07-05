@@ -889,6 +889,8 @@ export type RightMouseMessageItem = {
       size: string
       url: string
       fileName: string
+      /** BL-003：服务端 objectKey-only 消息时用于换签 */
+      objectKey?: string
       replyMsgId: string | null
       atUidList: string[] | null
       reply: any | null // 可进一步细化

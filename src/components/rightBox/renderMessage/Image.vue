@@ -120,14 +120,16 @@ const handleOpenImageViewer = () => {
     return
   }
 
-  if (resolvedImageUrl.value) {
-    // 如果有自定义点击处理函数，使用它；否则使用默认逻辑
-    if (props.onImageClick) {
-      props.onImageClick(resolvedImageUrl.value)
-    } else {
-      const msgIdMap = props.message?.id ? { [resolvedImageUrl.value]: props.message.id } : undefined
-      openImageViewer(resolvedImageUrl.value, [MsgEnum.IMAGE, MsgEnum.EMOJI], undefined, msgIdMap)
-    }
+  const workKey = props.body?.url || props.body?.objectKey || ''
+  if (!workKey) return
+
+  // 如果有自定义点击处理函数，使用它；否则使用默认逻辑
+  if (props.onImageClick) {
+    props.onImageClick(workKey)
+  } else {
+    const msgId = props.message?.id
+    const msgIdMap = msgId ? { [workKey]: msgId } : undefined
+    openImageViewer(workKey, [MsgEnum.IMAGE, MsgEnum.EMOJI], undefined, msgIdMap)
   }
 }
 

@@ -24,9 +24,11 @@ vi.mock('@/utils/QiniuImageUtils', () => ({
   getPreferredQiniuFormat: vi.fn().mockReturnValue('webp')
 }))
 
+const openImageViewerMock = vi.fn()
+
 vi.mock('@/hooks/useImageViewer', () => ({
   useImageViewer: () => ({
-    openImageViewer: vi.fn()
+    openImageViewer: openImageViewerMock
   })
 }))
 
@@ -47,14 +49,15 @@ describe('BL-003 Image.vue objectKey-only receive', () => {
     enqueueThumbnailMock.mockClear()
     invalidateMock.mockClear()
     getStatusMock.mockClear()
+    openImageViewerMock.mockClear()
   })
 
-  const mountImage = (body: any) =>
+  const mountImage = (body: any, onImageClick?: () => void) =>
     mount(Image, {
       props: {
         body,
         message: { id: 'msg-123', roomId: 'room-1', type: MsgEnum.IMAGE } as any,
-        onImageClick: vi.fn()
+        onImageClick
       },
       global: {
         stubs: {
@@ -85,6 +88,23 @@ describe('BL-003 Image.vue objectKey-only receive', () => {
         kind: 'image'
       })
     )
+  })
+
+  it('objectKey-only 图片双击打开查看器时传递 workKey 和 msgIdMap', async () => {
+    const wrapper = mountImage({
+      url: '',
+      objectKey: 'object-key-1',
+      width: 100,
+      height: 100
+    })
+    await flushPromises()
+
+    await wrapper.find('[data-testid="image-content"]').trigger('dblclick')
+    await flushPromises()
+
+    expect(openImageViewerMock).toHaveBeenCalledWith('object-key-1', [MsgEnum.IMAGE, MsgEnum.EMOJI], undefined, {
+      'object-key-1': 'msg-123'
+    })
   })
 
   it('旧消息（带 http url）直接以 url 作为缩略图源，不依赖 objectKey', async () => {

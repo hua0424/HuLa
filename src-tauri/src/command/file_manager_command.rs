@@ -17,6 +17,7 @@ pub struct FileInfo {
     pub upload_time: String,
     pub sender: UserInfo,
     pub download_url: Option<String>,
+    pub object_key: Option<String>,
     pub is_downloaded: Option<bool>,
     pub status: String, // "uploading", "completed", "expired", "downloading"
     pub thumbnail_url: Option<String>,
@@ -306,6 +307,7 @@ fn convert_message_to_file_info(record: MessageWithThumbnail) -> Option<FileInfo
                         .as_str()
                         .or_else(|| file_data["downloadUrl"].as_str())
                         .map(|s| s.to_string()),
+                    object_key: file_data["objectKey"].as_str().map(|s| s.to_string()),
                     is_downloaded: Some(false),
                     status: "completed".to_string(),
                     thumbnail_url: thumbnail_path

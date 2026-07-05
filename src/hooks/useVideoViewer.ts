@@ -7,6 +7,22 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useVideoViewer as useVideoViewerStore } from '@/stores/videoViewer'
 import { isMobile } from '@/utils/PlatformConstants'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
+
+const computeWorkKey = (msg: any): string => {
+  const body = msg.message?.body || {}
+  const msgId = msg.message?.id
+  return body.url || body.objectKey || (msgId ? `msgId:${msgId}` : '')
+}
+
+const findMessageByWorkKey = (key: string, includeTypes: MsgEnum[]) => {
+  const chatStore = useChatStore()
+  const messages = Object.values(chatStore.currentMessageMap || {})
+  return messages.find((msg: any) => {
+    if (!includeTypes.includes(msg.message?.type)) return false
+    return computeWorkKey(msg) === key
+  })
+}
 
 /** 视频处理 */
 export const useVideoViewer = () => {
@@ -26,34 +42,6 @@ export const useVideoViewer = () => {
     }
     return 'video.mp4'
   }
-
-  // // 获取省略显示的视频文件名
-  // const getVideoFilenameEllipsis = (url: string, maxLength: number = 20) => {
-  //   const filename = getVideoFilename(url)
-  //   if (filename.length <= maxLength) {
-  //     return filename
-  //   }
-
-  //   // 找到最后一个点的位置（文件扩展名）
-  //   const lastDotIndex = filename.lastIndexOf('.')
-  //   if (lastDotIndex === -1) {
-  //     // 没有扩展名，直接截断
-  //     return filename.substring(0, maxLength - 3) + '...'
-  //   }
-
-  //   const extension = filename.substring(lastDotIndex)
-  //   const nameWithoutExt = filename.substring(0, lastDotIndex)
-
-  //   // 计算可用于文件名主体的长度（减去扩展名和省略号的长度）
-  //   const availableLength = maxLength - extension.length - 3
-
-  //   if (availableLength <= 0) {
-  //     // 如果扩展名太长，只显示省略号和扩展名
-  //     return '...' + extension
-  //   }
-
-  //   return nameWithoutExt.substring(0, availableLength) + '...' + extension
-  // }
 
   // 获取本地视频路径
   const getLocalVideoPath = async (url: string, filename?: string) => {
@@ -78,53 +66,70 @@ export const useVideoViewer = () => {
     return false
   }
 
-  // 获取视频的实际播放路径（本地路径优先）
-  const getVideoPlayPath = async (url: string, filename?: string) => {
-    const isDownloaded = await checkVideoDownloaded(url, filename)
+  // 获取视频的实际播放路径（本地路径优先；objectKey-only 时换签）
+  const getVideoPlayPath = async (key: string, filename?: string, msgId?: string, objectKey?: string) => {
+    const isDownloaded = await checkVideoDownloaded(key, filename)
     if (isDownloaded) {
-      const localPath = await getLocalVideoPath(url, filename)
+      const localPath = await getLocalVideoPath(key, filename)
       // 使用与下载时一致的基础目录
       const baseDirPath = isMobile() ? await appDataDir() : await resourceDir()
       return await join(baseDirPath, localPath)
     }
-    return url
+    if (objectKey && msgId) {
+      return await resolveSignedFileUrl('', msgId, objectKey)
+    }
+    return key
   }
 
-  // 媒体获取（支持类型过滤和索引定位）
-  const getAllMediaFromChat = (url: string, includeTypes: MsgEnum[] = [MsgEnum.VIDEO]) => {
+  // 媒体获取（支持类型过滤和索引定位，以稳定 workKey 返回）
+  const getAllMediaFromChat = (currentKey: string, includeTypes: MsgEnum[] = [MsgEnum.VIDEO]) => {
     const chatStore = useChatStore()
     const messages = [...Object.values(chatStore.currentMessageMap || {})]
-    const mediaUrls: string[] = []
+    const mediaKeys: string[] = []
     let currentIndex = -1
-    messages.forEach((msg) => {
-      if (includeTypes.includes(msg.message?.type) && msg.message.body?.url) {
-        const isTarget = msg.message.body.url === url
-        mediaUrls.push(msg.message.body.url)
+    messages.forEach((msg: any) => {
+      if (includeTypes.includes(msg.message?.type)) {
+        const key = computeWorkKey(msg)
+        if (!key) return
+        mediaKeys.push(key)
         // 在添加元素后判断是否目标URL
-        if (isTarget) {
-          currentIndex = mediaUrls.length - 1 // 使用数组最后一位索引
+        if (key === currentKey) {
+          currentIndex = mediaKeys.length - 1 // 使用数组最后一位索引
         }
       }
     })
     return {
-      list: mediaUrls,
+      list: mediaKeys,
       index: Math.max(currentIndex, 0)
     }
   }
 
+  const resolveDisplayPath = async (key: string) => {
+    const msg = findMessageByWorkKey(key, [MsgEnum.VIDEO])
+    const body = msg?.message?.body || {}
+    const filename = body.filename
+    const msgId = msg?.message?.id
+    const objectKey = body.objectKey
+    if (body.localPath) {
+      const baseDirPath = isMobile() ? await appDataDir() : await resourceDir()
+      return await join(baseDirPath, body.localPath)
+    }
+    return await getVideoPlayPath(key, filename, msgId, objectKey)
+  }
+
   /**
    * 视频加载处理
-   * @param url 视频链接
+   * @param key 视频 workKey（url / objectKey / msgId:xxx）
    * @param includeTypes 支持类型
-   * @param customVideoList 自定义视频列表，用于聊天历史等场景
+   * @param customVideoList 自定义视频列表（元素为 workKey），用于聊天历史等场景
    */
   const openVideoViewer = async (
-    url: string,
+    key: string,
     includeTypes: MsgEnum[] = [MsgEnum.VIDEO],
     customVideoList?: string[]
   ) => {
     if (isMobile()) return
-    if (!url) return
+    if (!key) return
 
     let list: string[]
     let index: number
@@ -132,29 +137,25 @@ export const useVideoViewer = () => {
     if (customVideoList && customVideoList.length > 0) {
       // 使用自定义视频列表
       list = customVideoList
-      index = customVideoList.indexOf(url)
+      index = customVideoList.indexOf(key)
       if (index === -1) {
         // 如果当前视频不在列表中，将其添加到列表开头
-        list = [url, ...customVideoList]
+        list = [key, ...customVideoList]
         index = 0
       }
     } else {
       // 使用默认逻辑从聊天中获取
-      const result = getAllMediaFromChat(url, includeTypes)
+      const result = getAllMediaFromChat(key, includeTypes)
       list = result.list
       index = result.index
     }
 
-    // 为每个视频URL检查本地下载状态，优先使用本地路径
-    const processedList = await Promise.all(
-      list.map(async (videoUrl) => {
-        return await getVideoPlayPath(videoUrl)
-      })
-    )
+    // 为每个视频 workKey 检查本地下载状态或换签，优先使用本地路径
+    const processedList = await Promise.all(list.map((videoKey) => resolveDisplayPath(videoKey)))
 
     // 找到当前视频在处理后列表中的索引
-    const currentVideoPath = await getVideoPlayPath(url)
-    const processedIndex = processedList.findIndex((path) => path === currentVideoPath || path === url)
+    const currentVideoPath = await resolveDisplayPath(key)
+    const processedIndex = processedList.findIndex((path) => path === currentVideoPath || path === key)
     const finalIndex = processedIndex !== -1 ? processedIndex : index
 
     // 统一使用列表模式，不再区分单视频模式

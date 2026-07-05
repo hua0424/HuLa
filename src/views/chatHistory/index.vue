@@ -155,8 +155,8 @@ const getUserDisplayName = computed(() => (uid: string) => {
 const getAllVideoUrls = computed(() => {
   const videoUrls: string[] = []
   messages.value.forEach((message) => {
-    if (message.message.type === MsgEnum.VIDEO && message.message.body?.url) {
-      videoUrls.push(message.message.body.url)
+    if (message.message.type === MsgEnum.VIDEO && (message.message.body?.url || message.message.body?.objectKey)) {
+      videoUrls.push(message.message.body?.url || message.message.body?.objectKey)
     }
   })
   return videoUrls
@@ -260,9 +260,9 @@ const getAllImageUrls = computed(() => {
   messages.value.forEach((message) => {
     if (
       (message.message.type === MsgEnum.IMAGE || message.message.type === MsgEnum.EMOJI) &&
-      message.message.body?.url
+      (message.message.body?.url || message.message.body?.objectKey)
     ) {
-      imageUrls.push(message.message.body.url)
+      imageUrls.push(message.message.body?.url || message.message.body?.objectKey)
     }
   })
   return imageUrls

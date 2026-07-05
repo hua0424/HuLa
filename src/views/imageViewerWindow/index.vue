@@ -278,7 +278,10 @@ const resetImage = (immediate = false) => {
 
 const saveImage = async () => {
   const imageUrl = currentImage.value
-  const suggestedName = imageUrl.split('/').pop() || 'image.png'
+  const originalUrl = imageViewerStore.isSingleMode
+    ? imageViewerStore.originalImageList[0] || imageUrl
+    : imageViewerStore.originalImageList[currentIndex.value] || imageUrl
+  const suggestedName = originalUrl.split('/').pop() || 'image.png'
 
   const savePath = await save({
     filters: [
@@ -291,7 +294,6 @@ const saveImage = async () => {
   })
 
   if (savePath) {
-    const originalUrl = imageViewerStore.originalImageList[currentIndex.value] || imageUrl
     const msgId = imageViewerStore.getMsgIdByUrl(originalUrl)
     await downloadFile(imageUrl, savePath, undefined, msgId)
   }

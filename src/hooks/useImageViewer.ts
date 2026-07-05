@@ -22,6 +22,7 @@ type WorkerRequest = {
   reject: (reason?: unknown) => void
   fileName: string
   msgId?: string
+  objectKey?: string
 }
 
 const workerRequests = new Map<string, WorkerRequest>()
@@ -46,7 +47,13 @@ const ensureWorker = () => {
 
     try {
       const fileDownloadStore = useFileDownloadStore()
-      const absolutePath = await fileDownloadStore.saveFileFromBytes(url, request.fileName, new Uint8Array(buffer))
+      const absolutePath = await fileDownloadStore.saveFileFromBytes(
+        url,
+        request.fileName,
+        new Uint8Array(buffer),
+        request.objectKey,
+        request.msgId
+      )
       request.resolve(absolutePath)
     } catch (err) {
       request.reject(err)
@@ -54,7 +61,7 @@ const ensureWorker = () => {
   }
 }
 
-const downloadImageWithWorker = async (url: string, fileName: string, msgId?: string) => {
+const downloadImageWithWorker = async (url: string, fileName: string, msgId?: string, objectKey?: string) => {
   ensureWorker()
   if (!imageDownloadWorker) {
     return Promise.reject(new Error('Web Worker 不可用'))
@@ -76,10 +83,13 @@ const downloadImageWithWorker = async (url: string, fileName: string, msgId?: st
     })
   }
 
-  const fetchUrl = await resolveSignedFileUrl(url, msgId)
+  // objectKey-only 消息把 objectKey 同时作为工作 key 和 objectKey 传给换签 helper
+  const objectKeyForSign =
+    objectKey || (url && !url.startsWith('http://') && !url.startsWith('https://') ? url : undefined)
+  const fetchUrl = await resolveSignedFileUrl(url, msgId, objectKeyForSign)
 
   const promise = new Promise<string | null>((resolve, reject) => {
-    workerRequests.set(url, { resolve, reject, fileName, msgId })
+    workerRequests.set(url, { resolve, reject, fileName, msgId, objectKey })
     imageDownloadWorker!.postMessage({ url: fetchUrl, originalUrl: url })
   })
 
@@ -98,6 +108,25 @@ const deduplicateList = (list: string[]) => {
   return uniqueList
 }
 
+const computeWorkKey = (msg: any): string => {
+  const body = msg.message?.body || {}
+  const msgId = msg.message?.id
+  return body.url || body.objectKey || (msgId ? `msgId:${msgId}` : '')
+}
+
+const findMessageByWorkKey = (key: string, includeTypes: MsgEnum[]) => {
+  const chatStore = useChatStore()
+  const messages = Object.values(chatStore.currentMessageMap || {})
+  return messages.find((msg: any) => {
+    if (!includeTypes.includes(msg.message?.type)) return false
+    return computeWorkKey(msg) === key
+  })
+}
+
+const getBodyFileName = (body: any): string => {
+  return body?.fileName || extractFileName(body?.url || body?.objectKey || '') || ''
+}
+
 /**
  * 图片查看器Hook，用于处理图片和表情包的查看功能
  */
@@ -107,9 +136,14 @@ export const useImageViewer = () => {
   const imageViewerStore = useImageViewerStore()
   const fileDownloadStore = useFileDownloadStore()
 
-  const ensureLocalFileExists = async (url: string) => {
-    if (!url) return null
-    const status = fileDownloadStore.getFileStatus(url)
+  const ensureLocalFileExists = async (key: string, includeTypes: MsgEnum[]) => {
+    if (!key) return null
+    const msg = findMessageByWorkKey(key, includeTypes)
+    const body = msg?.message?.body || {}
+    const fileUrl = body.url || ''
+    const objectKey = body.objectKey
+    const msgId = msg?.message?.id
+
     const validatePath = async (absolutePath: string | undefined | null) => {
       if (!absolutePath) {
         return null
@@ -126,35 +160,42 @@ export const useImageViewer = () => {
       }
     }
 
+    const status = fileDownloadStore.getFileStatus(fileUrl, objectKey, msgId)
+
     if (status?.isDownloaded) {
       const validPath = await validatePath(status.absolutePath)
       if (validPath) {
         return validPath
       }
 
-      fileDownloadStore.updateFileStatus(url, {
-        isDownloaded: false,
-        absolutePath: '',
-        localPath: '',
-        nativePath: '',
-        displayPath: '',
-        status: 'pending',
-        progress: 0
-      })
+      fileDownloadStore.updateFileStatus(
+        fileUrl,
+        {
+          isDownloaded: false,
+          absolutePath: '',
+          localPath: '',
+          nativePath: '',
+          displayPath: '',
+          status: 'pending',
+          progress: 0
+        },
+        objectKey,
+        msgId
+      )
     }
 
-    const fileName = extractFileName(url)
+    const fileName = getBodyFileName(body)
     if (!fileName) {
       return null
     }
 
     try {
-      const exists = await fileDownloadStore.checkFileExists(url, fileName)
+      const exists = await fileDownloadStore.checkFileExists(fileUrl || objectKey || '', fileName, objectKey, msgId)
       if (!exists) {
         return null
       }
 
-      const refreshedStatus = fileDownloadStore.getFileStatus(url)
+      const refreshedStatus = fileDownloadStore.getFileStatus(fileUrl, objectKey, msgId)
       return await validatePath(refreshedStatus.absolutePath)
     } catch (error) {
       console.error('重新检查本地图片失败:', error)
@@ -162,8 +203,8 @@ export const useImageViewer = () => {
     }
   }
 
-  const getDisplayUrl = async (url: string) => {
-    const localPath = await ensureLocalFileExists(url)
+  const getDisplayUrl = async (key: string, includeTypes: MsgEnum[]) => {
+    const localPath = await ensureLocalFileExists(key, includeTypes)
     if (localPath) {
       try {
         return convertFileSrc(localPath)
@@ -171,23 +212,25 @@ export const useImageViewer = () => {
         console.error('转换本地图片路径失败:', error)
       }
     }
-    return url
-  }
 
-  const getLocalMediaPathFromChat = (url: string, includeTypes: MsgEnum[]) => {
-    const messages = Object.values(chatStore.currentMessageMap || {})
-    for (const msg of messages) {
-      if (!includeTypes.includes(msg.message?.type)) continue
-      if (msg.message.body?.url !== url) continue
-      if (msg.message.body?.localPath) {
-        return msg.message.body.localPath as string
-      }
+    const msg = findMessageByWorkKey(key, includeTypes)
+    const body = msg?.message?.body || {}
+    if (body.url) {
+      return body.url
     }
-    return null
+    if (body.objectKey && msg?.message?.id) {
+      return await resolveSignedFileUrl('', msg.message.id, body.objectKey)
+    }
+    return key
   }
 
-  const resolveDisplayUrl = async (url: string, includeTypes: MsgEnum[]) => {
-    const localPath = getLocalMediaPathFromChat(url, includeTypes)
+  const getLocalMediaPathFromChat = (key: string, includeTypes: MsgEnum[]) => {
+    const msg = findMessageByWorkKey(key, includeTypes)
+    return msg?.message?.body?.localPath || null
+  }
+
+  const resolveDisplayUrl = async (key: string, includeTypes: MsgEnum[]) => {
+    const localPath = getLocalMediaPathFromChat(key, includeTypes)
     if (localPath) {
       try {
         return convertFileSrc(localPath)
@@ -195,11 +238,11 @@ export const useImageViewer = () => {
         console.error('转换本地媒体路径失败:', error)
       }
     }
-    return await getDisplayUrl(url)
+    return await getDisplayUrl(key, includeTypes)
   }
 
-  const replaceImageWithLocalPath = (originalUrl: string, absolutePath: string) => {
-    const index = imageViewerStore.originalImageList.indexOf(originalUrl)
+  const replaceImageWithLocalPath = (originalKey: string, absolutePath: string) => {
+    const index = imageViewerStore.originalImageList.indexOf(originalKey)
     if (index === -1) {
       return
     }
@@ -212,12 +255,16 @@ export const useImageViewer = () => {
     }
   }
 
-  const scheduleDownload = (originalUrl: string, msgId?: string) => {
-    const fileName = extractFileName(originalUrl) || `image-${Date.now()}.png`
-    downloadImageWithWorker(originalUrl, fileName, msgId)
+  const scheduleDownload = (originalKey: string, msgId?: string) => {
+    const msg = findMessageByWorkKey(originalKey, [MsgEnum.IMAGE, MsgEnum.EMOJI])
+    const body = msg?.message?.body || {}
+    const objectKey = body.objectKey
+    const finalMsgId = msgId || msg?.message?.id
+    const fileName = getBodyFileName(body) || `image-${Date.now()}.png`
+    downloadImageWithWorker(originalKey, fileName, finalMsgId, objectKey)
       .then((absolutePath) => {
         if (absolutePath) {
-          replaceImageWithLocalPath(originalUrl, absolutePath)
+          replaceImageWithLocalPath(originalKey, absolutePath)
         }
       })
       .catch((error) => {
@@ -229,46 +276,45 @@ export const useImageViewer = () => {
     if (index < 0) {
       return
     }
-    const originalUrl = imageViewerStore.originalImageList[index]
-    if (!originalUrl) {
+    const originalKey = imageViewerStore.originalImageList[index]
+    if (!originalKey) {
       return
     }
     const displayUrl = imageViewerStore.imageList[index]
-    if (!displayUrl || displayUrl !== originalUrl) {
+    if (!displayUrl || displayUrl !== originalKey) {
       return
     }
-    const msgId = imageViewerStore.getMsgIdByUrl(originalUrl)
-    scheduleDownload(originalUrl, msgId)
+    const msgId = imageViewerStore.getMsgIdByUrl(originalKey)
+    scheduleDownload(originalKey, msgId)
   }
 
   /**
-   * 获取当前聊天中的所有图片和表情包URL
-   * @param currentUrl 当前查看的URL
+   * 获取当前聊天中的所有图片和表情包URL（以稳定 workKey 返回）
+   * @param currentKey 当前查看的 workKey（url / objectKey / msgId:xxx）
    * @param includeTypes 要包含的消息类型数组
    */
-  const getAllMediaFromChat = (currentUrl: string, includeTypes: MsgEnum[] = [MsgEnum.IMAGE, MsgEnum.EMOJI]) => {
+  const getAllMediaFromChat = (currentKey: string, includeTypes: MsgEnum[] = [MsgEnum.IMAGE, MsgEnum.EMOJI]) => {
     const messages = [...Object.values(chatStore.currentMessageMap || {})]
-    const mediaUrls: string[] = []
+    const mediaKeys: string[] = []
     const msgIdMap: Record<string, string> = {}
     let currentIndex = 0
 
-    messages.forEach((msg) => {
-      // 收集指定类型的媒体URL
-      if (includeTypes.includes(msg.message?.type) && msg.message.body?.url) {
-        const url = msg.message.body.url
-        mediaUrls.push(url)
+    messages.forEach((msg: any) => {
+      if (includeTypes.includes(msg.message?.type)) {
+        const key = computeWorkKey(msg)
+        if (!key) return
+        mediaKeys.push(key)
         if (msg.message?.id) {
-          msgIdMap[url] = msg.message.id
+          msgIdMap[key] = msg.message.id
         }
-        // 找到当前媒体的索引
-        if (url === currentUrl) {
-          currentIndex = mediaUrls.length - 1
+        if (key === currentKey) {
+          currentIndex = mediaKeys.length - 1
         }
       }
     })
 
     return {
-      list: mediaUrls,
+      list: mediaKeys,
       index: currentIndex,
       msgIdMap
     }
@@ -276,18 +322,18 @@ export const useImageViewer = () => {
 
   /**
    * 打开图片查看器
-   * @param url 要查看的URL
+   * @param key 要查看的 workKey（url / objectKey / msgId:xxx）
    * @param includeTypes 要包含在查看器中的消息类型
-   * @param customImageList 自定义图片列表，用于聊天历史等场景
-   * @param msgIdMap 自定义 URL -> 消息 ID 映射（用于无法从 current chat 推导的场景）
+   * @param customImageList 自定义图片列表（元素为 workKey），用于聊天历史等场景
+   * @param msgIdMap 自定义 workKey -> 消息 ID 映射（用于无法从 current chat 推导的场景）
    */
   const openImageViewer = async (
-    url: string,
+    key: string,
     includeTypes: MsgEnum[] = [MsgEnum.IMAGE, MsgEnum.EMOJI],
     customImageList?: string[],
     msgIdMap?: Record<string, string>
   ) => {
-    if (!url) return
+    if (!key) return
 
     try {
       let list: string[]
@@ -297,25 +343,23 @@ export const useImageViewer = () => {
       if (customImageList && customImageList.length > 0) {
         // 使用自定义图片列表
         list = customImageList
-        index = customImageList.indexOf(url)
+        index = customImageList.indexOf(key)
         if (index === -1) {
           // 如果当前图片不在列表中，将其添加到列表开头
-          list = [url, ...customImageList]
+          list = [key, ...customImageList]
           index = 0
         }
       } else {
         // 使用默认逻辑从聊天中获取
-        const result = getAllMediaFromChat(url, includeTypes)
+        const result = getAllMediaFromChat(key, includeTypes)
         list = result.list
         index = result.index
         mergedMsgIdMap = { ...mergedMsgIdMap, ...result.msgIdMap }
       }
 
       const dedupedList = deduplicateList(list)
+      const resolvedIndex = dedupedList.indexOf(key) !== -1 ? dedupedList.indexOf(key) : Math.max(index, 0)
       const resolvedList = await Promise.all(dedupedList.map((item) => resolveDisplayUrl(item, includeTypes)))
-
-      const targetIndex = dedupedList.indexOf(url)
-      const resolvedIndex = targetIndex === -1 ? (index >= 0 ? index : 0) : targetIndex
 
       imageViewerStore.resetImageList(resolvedList, resolvedIndex, dedupedList, mergedMsgIdMap)
 
@@ -331,7 +375,7 @@ export const useImageViewer = () => {
       }
 
       const img = new Image()
-      img.src = resolvedList[resolvedIndex] || url
+      img.src = resolvedList[resolvedIndex] || key
 
       await new Promise((resolve, reject) => {
         img.onload = resolve

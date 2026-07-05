@@ -47,14 +47,14 @@ export const useImageViewer = defineStore(
     }
 
     // 设置单图的方法
-    const setSingleImage = (url: string) => {
+    const setSingleImage = (url: string, msgId?: string) => {
       singleImage.value = url
       isSingleMode.value = true
       const singleList = url ? [url] : []
       originalImageList.value = singleList.slice()
       imageList.value = singleList.slice()
       currentIndex.value = 0
-      urlToMsgIdMap.value = {}
+      urlToMsgIdMap.value = msgId && url ? { [url]: msgId } : {}
     }
 
     const updateImageAt = (index: number, newUrl: string) => {

@@ -8,6 +8,7 @@ type DownloadFileFn = ReturnType<typeof useDownload>['downloadFile']
 
 type SaveAttachmentOptions = {
   url?: string
+  objectKey?: string
   downloadFile: DownloadFileFn
   defaultFileName?: string
   /** 消息 ID（可选），用于换取签名下载 URL */
@@ -21,6 +22,7 @@ const normalizeSavePath = (path: string) => path.replace(/\\/g, '/')
 
 const saveAttachmentAs = async ({
   url,
+  objectKey,
   downloadFile,
   defaultFileName,
   msgId,
@@ -28,12 +30,13 @@ const saveAttachmentAs = async ({
   successMessage,
   errorMessage
 }: SaveAttachmentOptions) => {
-  if (!url) {
+  const workUrl = url || objectKey
+  if (!workUrl) {
     window.$message.error('未找到下载链接')
     return
   }
 
-  const filename = defaultFileName || extractFileName(url)
+  const filename = defaultFileName || extractFileName(workUrl)
 
   try {
     const savePath = await save({
@@ -44,7 +47,7 @@ const saveAttachmentAs = async ({
     if (!savePath) return
 
     const normalizedPath = normalizeSavePath(savePath)
-    await downloadFile(url, normalizedPath, undefined, msgId)
+    await downloadFile(workUrl, normalizedPath, undefined, msgId, objectKey)
 
     if (successMessage) {
       window.$message.success(successMessage)
