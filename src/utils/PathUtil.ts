@@ -4,7 +4,7 @@ import { BaseDirectory, exists, mkdir, readFile, writeFile } from '@tauri-apps/p
 import { type FileTypeResult, fileTypeFromBuffer } from 'file-type'
 import type { FilesMeta } from '@/services/types'
 import { isMobile } from './PlatformConstants'
-import { resolveSignedFileUrl } from './ImRequestUtils'
+import { resolveSignedFileUrl } from './fileSign'
 
 // Tauri 资源目录下存放用户数据的根目录名
 const USER_DATA = 'userData'

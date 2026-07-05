@@ -6,7 +6,7 @@ import { StoresEnum } from '@/enums'
 import type { FilesMeta } from '@/services/types'
 import { useUserStore } from '@/stores/user'
 import { getFilesMeta } from '@/utils/PathUtil'
-import { resolveSignedFileUrl } from '@/utils/ImRequestUtils'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 import { isMobile } from '../utils/PlatformConstants'
 
 export interface FileDownloadStatus {

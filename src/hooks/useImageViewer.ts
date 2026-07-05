@@ -8,7 +8,7 @@ import { useImageViewer as useImageViewerStore } from '@/stores/imageViewer'
 import type { FilesMeta } from '@/services/types'
 import { extractFileName } from '@/utils/Formatting'
 import { getFilesMeta } from '@/utils/PathUtil'
-import { resolveSignedFileUrl } from '@/utils/ImRequestUtils'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 
 type WorkerResponse = {
   success: boolean

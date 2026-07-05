@@ -9,7 +9,7 @@ import { isMobile } from '@/utils/PlatformConstants'
 import { invokeSilently } from '@/utils/TauriInvokeHandler'
 import { TauriCommand } from '@/enums'
 import { md5FromString } from '@/utils/Md5Util'
-import { resolveSignedFileUrl } from '@/utils/ImRequestUtils'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 
 type TaskKind = 'image' | 'video' | 'emoji'
 

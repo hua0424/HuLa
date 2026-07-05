@@ -1,7 +1,7 @@
 import { BaseDirectory, exists, mkdir, writeFile } from '@tauri-apps/plugin-fs'
 import { createEventHook } from '@vueuse/core'
 import { isMobile } from '@/utils/PlatformConstants'
-import { resolveSignedFileUrl } from '@/utils/ImRequestUtils'
+import { resolveSignedFileUrl } from '@/utils/fileSign'
 
 export const useDownload = () => {
   const process = ref(0)
