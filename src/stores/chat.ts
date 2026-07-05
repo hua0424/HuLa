@@ -882,7 +882,12 @@ export const useChatStore = defineStore(
       }
 
       // 如果收到的消息里面是艾特自己的就发送系统通知
-      if (msg.message.body.atUidList?.includes(userStore.userInfo!.uid) && cacheUser) {
+      // 后端 atUidList 是 number[]，本地 uid 是 string，需要 String() 归一后再比较 [#150]
+      const currentUid = String(userStore.userInfo!.uid)
+      const isAtMe =
+        Array.isArray(msg.message.body.atUidList) &&
+        msg.message.body.atUidList.some((atUid: string | number) => String(atUid) === currentUid)
+      if (isAtMe && cacheUser) {
         sendNotification({
           title: cacheUser.name as string,
           body: msg.message.body.content,
