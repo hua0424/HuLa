@@ -125,4 +125,21 @@ describe('BL-003 Voice.vue objectKey-only receive', () => {
     expect(resolveSignedFileUrl).not.toHaveBeenCalled()
     expect(loadAudioWaveformMock).toHaveBeenCalledWith('https://example.com/voice.mp3')
   })
+
+  it('url 为空且缺少 msgId 时，不触发换签，resolvedAudioUrl 为空，组件不抛错', async () => {
+    const { resolveSignedFileUrl } = await import('@/utils/fileSign')
+    mountVoice(
+      {
+        url: '',
+        objectKey: 'object-key-1',
+        second: 5
+      }
+      // 不传 msgId
+    )
+    await flushPromises()
+
+    expect(resolveSignedFileUrl).not.toHaveBeenCalled()
+    expect(loadAudioWaveformMock).toHaveBeenCalledWith('')
+    expect(getAudioUrlMock).toHaveBeenCalledWith('')
+  })
 })

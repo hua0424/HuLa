@@ -80,7 +80,7 @@ export const useThumbnailCacheStore = defineStore(
     }
 
     const decideExt = async (url: string, msgId?: string) => {
-      const match = url.match(/\\.([a-zA-Z0-9]+)(?:\\?|$)/)
+      const match = url.match(/\.([a-zA-Z0-9]+)(?:\?|$)/)
       if (match?.[1]) {
         return match[1].toLowerCase()
       }

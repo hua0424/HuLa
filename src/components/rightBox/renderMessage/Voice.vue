@@ -87,8 +87,8 @@ const settingStore = useSettingStore()
 const userStore = useUserStore()
 const { themes } = storeToRefs(settingStore)
 
-// 使用 msgId 作为音频 ID 兜底，确保 objectKey-only 消息也能唯一标识播放器
-const audioId = props.msgId || props.body.url
+// 使用 msgId 作为音频 ID 兜底，确保 objectKey-only 消息也能唯一标识播放器；两者都缺失时给一个兜底值避免 undefined
+const audioId = props.msgId || props.body.url || 'voice-fallback'
 const resolvedAudioUrl = ref('')
 
 const resolveAudioUrl = async () => {
