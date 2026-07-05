@@ -51,9 +51,23 @@ vi.mock('@/utils/fileSign', () => ({
   resolveSignedFileUrl: vi.fn().mockResolvedValue('https://signed.example.com/video.mp4')
 }))
 
+import { isMobile } from '@/utils/PlatformConstants'
+
 vi.mock('@/utils/PlatformConstants', () => ({
   isMobile: vi.fn().mockReturnValue(false)
 }))
+
+vi.mock('vue', async (importOriginal) => {
+  const actual = (await importOriginal()) as typeof import('vue')
+  return {
+    ...actual,
+    defineAsyncComponent: () =>
+      actual.defineComponent({
+        name: 'VideoPreview',
+        template: '<div data-testid="video-preview">preview</div>'
+      })
+  }
+})
 
 vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: vi.fn().mockImplementation((path: string) => `convert://${path}`)
@@ -141,6 +155,8 @@ describe('BL-003 Video.vue objectKey-only receive', () => {
     await wrapper.find('.play-button').trigger('click')
     await flushPromises()
 
+    // 首次检查下载状态时应使用 objectKey 作为 workKey
+    expect(checkVideoDownloadedMock).toHaveBeenCalledWith('object-key-1', 'clip.mp4')
     expect(downloadFileMock).toHaveBeenCalledWith(
       'object-key-1',
       'videos/clip.mp4',
@@ -148,6 +164,26 @@ describe('BL-003 Video.vue objectKey-only receive', () => {
       'msg-123',
       'object-key-1'
     )
+  })
+
+  it('移动端 objectKey-only 视频解析播放地址时使用 objectKey 作为 key', async () => {
+    vi.mocked(isMobile).mockReturnValue(true)
+    checkVideoDownloadedMock.mockResolvedValue(true)
+    const wrapper = mountVideo({
+      url: '',
+      objectKey: 'object-key-1',
+      filename: 'clip.mp4',
+      size: 1024,
+      thumbWidth: 300,
+      thumbHeight: 150
+    })
+    await flushPromises()
+
+    await wrapper.find('.play-button').trigger('click')
+    await flushPromises()
+
+    expect(checkVideoDownloadedMock).toHaveBeenCalledWith('object-key-1', 'clip.mp4')
+    expect(getLocalVideoPathMock).toHaveBeenCalledWith('object-key-1', 'clip.mp4')
   })
 
   it('旧消息（带 http url）按 url 路径下载，objectKey 为空', async () => {

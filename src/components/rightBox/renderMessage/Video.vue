@@ -369,7 +369,7 @@ watch(
 const checkDownloadStatusLazy = async () => {
   if (!hasRemoteVideo.value || hasCheckedDownloadStatus.value) return
   hasCheckedDownloadStatus.value = true
-  isVideoDownloaded.value = await checkVideoDownloaded(props.body.url, props.body.filename)
+  isVideoDownloaded.value = await checkVideoDownloaded(videoWorkKey.value, props.body.filename)
 }
 
 // 使用 IntersectionObserver 在视频进入视口时检查下载状态
@@ -417,9 +417,10 @@ const resolveMobilePlayableUrl = async () => {
   if (url) {
     return convertFileSrc(url)
   }
-  const downloaded = await checkVideoDownloaded(props.body.url, props.body.filename)
+  const workKey = videoWorkKey.value
+  const downloaded = await checkVideoDownloaded(workKey, props.body.filename)
   if (!downloaded) return ''
-  const relative = await getLocalVideoPath(props.body.url, props.body.filename)
+  const relative = await getLocalVideoPath(workKey, props.body.filename)
   const baseDirPath = await appDataDir()
   const absolute = await join(baseDirPath, relative)
   return convertFileSrc(absolute)
