@@ -638,7 +638,7 @@ pub async fn send_msg(
     data: ChatMessageReq,
     state: State<'_, AppData>,
     success_channel: Channel<MessageResp>,
-    error_channel: Channel<String>,
+    error_channel: Channel<serde_json::Value>,
 ) -> Result<(), String> {
     // 获取当前登录用户信息
     let (login_uid, nickname, current_user_type) = {
@@ -732,8 +732,8 @@ pub async fn send_msg(
 
         let mut id = None;
 
-        // 根据发送结果更新消息状态
-        let status = match result {
+        // 根据发送结果更新消息状态，同时保留可读错误信息供前端展示
+        let (status, error_msg) = match result {
             Ok(Some(mut resp)) => {
                 resp.old_msg_id = Some(msg_id.clone());
                 id = resp.message.id.clone();
@@ -747,9 +747,10 @@ pub async fn send_msg(
                 if let Some(path) = extract_thumbnail_path_from_body(&resp.message.body) {
                     record_for_send.thumbnail_path = Some(path);
                 }
-                "success"
+                ("success", String::new())
             }
-            _ => "failed", // aichatoverview#34: 对齐前端 MessageStatusEnum.FAILED='failed'（原 'fail' 不匹配，重载/比较都会漏判）
+            Ok(None) => ("failed", "服务端返回空响应".to_string()),
+            Err(e) => ("failed", e.to_string()),
         };
 
         // 更新消息状态
@@ -774,12 +775,22 @@ pub async fn send_msg(
             }
             // 发送失败（status="failed"，DB 已记 failed）→ 通知前端回写 FAILED，触发 retry-button。
             Ok(_) => {
-                error_channel.send(msg_id.clone()).unwrap();
+                error_channel
+                    .send(serde_json::json!({
+                        "msgId": msg_id,
+                        "error": error_msg
+                    }))
+                    .unwrap();
             }
             // 本地 DB 更新本身失败 → 同样按失败处理，让前端进入 FAILED。
             Err(e) => {
                 error!("{:?}", e);
-                error_channel.send(msg_id.clone()).unwrap();
+                error_channel
+                    .send(serde_json::json!({
+                        "msgId": msg_id,
+                        "error": e.to_string()
+                    }))
+                    .unwrap();
             }
         }
     });

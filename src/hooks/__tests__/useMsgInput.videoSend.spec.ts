@@ -156,14 +156,18 @@ vi.mock('@/strategy/MessageStrategy', () => {
       url: '',
       thumbnail: new File(['thumb'], 'thumb.jpg', { type: 'image/jpeg' }),
       size: 1024,
+      mime: 'video/mp4',
       duration: 0
     }),
     buildMessageBody: vi.fn().mockReturnValue({
       url: '',
       path: '/tmp/video.mp4',
-      thumbnail: new File(['thumb'], 'thumb.jpg', { type: 'image/jpeg' }),
       thumbUrl: 'blob://local-thumb',
+      thumbSize: 1024,
+      thumbWidth: 300,
+      thumbHeight: 150,
       size: 1024,
+      mime: 'video/mp4',
       duration: 0
     }),
     buildMessageType: vi.fn().mockReturnValue({
@@ -240,6 +244,8 @@ describe('BL-033 sendFilesDirect 视频自动识别', () => {
     expect(payload.msgType).toBe(MsgEnum.VIDEO)
     expect(payload.body.objectKey).toBe('object-key-video')
     expect(payload.body.path).toBeUndefined()
+    expect(payload.body.thumbnail).toBeUndefined()
+    expect(payload.body.mime).toBe('video/mp4')
     expect(payload.body.thumbUrl).toBe('https://cdn.example.com/thumb.jpg')
   })
 

@@ -15,7 +15,7 @@ export type SendMessagePayload = {
 export type SendMessageOptions = {
   data: SendMessagePayload
   onSuccess?: (payload: any) => void
-  onError?: (msgId: string) => void
+  onError?: (msgId?: string) => void
 }
 
 /**
@@ -41,7 +41,7 @@ const sendMessageViaHttp = async (options: SendMessageOptions) => {
 const sendMessageViaTauri = async (options: SendMessageOptions) => {
   const { data, onSuccess, onError } = options
   const successChannel = new Channel<any>()
-  const errorChannel = new Channel<string>()
+  const errorChannel = new Channel<{ msgId?: string; error?: string }>()
   const noop = () => {}
 
   const sendPromise = new Promise<void>((resolve, reject) => {
@@ -51,11 +51,13 @@ const sendMessageViaTauri = async (options: SendMessageOptions) => {
       onSuccess?.(payload)
       resolve()
     }
-    errorChannel.onmessage = (msgId) => {
+    errorChannel.onmessage = (payload) => {
       successChannel.onmessage = noop
       errorChannel.onmessage = noop
+      const msgId = payload?.msgId
+      const error = payload?.error
       onError?.(msgId)
-      reject(new Error(msgId || 'send_msg_failed'))
+      reject(new Error((error ?? msgId ?? 'send_msg_failed') as string))
     }
   })
 
