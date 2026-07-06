@@ -77,7 +77,7 @@
     "sync_loading": "正在同步消息",
     "official_popover": "官方群聊认证",
     "bot_popover": "HuLa助手",
-    "mention_tag": "[有人@我]",
+    "mention_tag": "[有人{'@'}我]",
     "shield_group": "您已屏蔽群聊",
     "shield_user": "您已屏蔽此人",
     "empty_description": "快和朋友聊天吧！",
