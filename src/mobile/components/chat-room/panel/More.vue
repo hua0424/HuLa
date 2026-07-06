@@ -7,6 +7,8 @@
             @click="handleClickIcon(item)"
             v-for="item in page"
             :key="item.id"
+            :data-testid="`mobile-more-item-${item.testid}`"
+            :aria-label="item.label"
             class="flex flex-col gap-8px items-center justify-center rounded-2">
             <svg
               v-if="item.label !== '文件' && item.label !== '图片' && item.isShow()"
@@ -87,6 +89,7 @@ const pickRtcCall = ref(false)
 const options = ref([
   {
     label: '文件',
+    testid: 'file',
     icon: 'file',
     showArrow: false,
     isRotate: true,
@@ -95,16 +98,34 @@ const options = ref([
   },
   {
     label: '图片',
+    testid: 'image',
     icon: 'photo',
     showArrow: false,
     isRotate: true,
     onClick: () => {},
     isShow: () => isUploadAllowed('image')
   },
-  { label: '视频', icon: 'voice', showArrow: true, isRotate: false, onClick: () => {}, isShow: () => true },
-  { label: '历史', icon: 'history', showArrow: true, isRotate: false, onClick: () => {}, isShow: () => true },
+  {
+    label: '视频',
+    testid: 'video',
+    icon: 'video-one',
+    showArrow: true,
+    isRotate: false,
+    onClick: () => {},
+    isShow: () => true
+  },
+  {
+    label: '历史',
+    testid: 'history',
+    icon: 'history',
+    showArrow: true,
+    isRotate: false,
+    onClick: () => {},
+    isShow: () => true
+  },
   {
     label: '视频通话',
+    testid: 'videocall',
     icon: 'video-one',
     showArrow: true,
     isRotate: false,

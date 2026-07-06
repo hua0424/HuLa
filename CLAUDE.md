@@ -77,6 +77,9 @@ The Windows tester drives the desktop client via playwright-cli over CDP and **l
 | `thinking-archive-entry` | thinking 归档入口（群聊/私聊显示「查看 AI 思考记录」） | `components/rightBox/chatBox/ThinkingPanel.vue` |
 | `thinking-archive-drawer` | thinking 归档抽屉根 | `components/rightBox/chatBox/ThinkingPanel.vue` |
 | `thinking-archive-drawer-close` | thinking 归档抽屉关闭按钮 | `components/rightBox/chatBox/ThinkingPanel.vue` |
+| `chat-footer-file` / `chat-footer-image` / `chat-footer-voice` | 桌面端底部文件/图片/语音上传按钮 | `components/rightBox/chatBox/ChatFooter.vue` |
+| `mobile-voice-button` / `mobile-emoji-button` / `mobile-more-button` / `mobile-send-button` | 移动端输入栏语音/表情/更多/发送按钮 | `components/rightBox/MsgInput.vue` |
+| `mobile-more-item-file` / `mobile-more-item-image` / `mobile-more-item-video` / `mobile-more-item-history` / `mobile-more-item-videocall` | 移动端更多面板功能入口 | `mobile/components/chat-room/panel/More.vue` |
 
 ## Architecture: platform abstraction is the central design
 
