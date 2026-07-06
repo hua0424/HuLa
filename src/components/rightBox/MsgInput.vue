@@ -16,6 +16,8 @@
         <div v-if="isMobile()" class="flex items-center justify-center w-6 ms-5px h-2.5rem">
           <svg
             @click="handleVoiceClick"
+            data-testid="mobile-voice-button"
+            aria-label="语音"
             :class="[
               mobilePanelState === MobilePanelStateEnum.VOICE ? 'text-#169781' : '',
               isVoiceUploadDisabled ? 'opacity-30 pointer-events-none' : ''
@@ -203,7 +205,11 @@
           class="grid gap-2 h-2.5rem items-center"
           :class="msgInput ? 'grid-cols-[2rem_3rem]' : 'grid-cols-[2rem_2rem]'">
           <div class="w-full flex-center h-full">
-            <svg @click="handleEmojiClick" class="w-25px h-25px mt-2px outline-none iconpark-icon">
+            <svg
+              @click="handleEmojiClick"
+              data-testid="mobile-emoji-button"
+              aria-label="表情"
+              class="w-25px h-25px mt-2px outline-none iconpark-icon">
               <use :href="mobilePanelState === MobilePanelStateEnum.EMOJI ? '#face' : '#smiling-face'"></use>
             </svg>
           </div>
@@ -212,6 +218,8 @@
             class="flex-shrink-0 max-h-62px h-full border-t border-gray-200/50 flex items-center justify-end">
             <n-button-group size="small" :class="isMobile() ? 'h-full' : 'pr-20px'">
               <n-button
+                data-testid="mobile-send-button"
+                aria-label="发送"
                 color="#13987f"
                 :disabled="props.isAIMode && props.isAIStreaming ? false : disabledSend"
                 class="w-3rem h-full"
@@ -223,6 +231,8 @@
           <div v-if="!msgInput" class="flex items-center justify-start h-full">
             <svg
               @click="handleMoreClick"
+              data-testid="mobile-more-button"
+              aria-label="更多"
               :class="mobilePanelState === MobilePanelStateEnum.MORE ? 'rotate-45' : 'rotate-0'"
               class="w-25px h-25px mt-2px outline-none iconpark-icon transition-transform duration-300 ease">
               <use href="#add-one"></use>

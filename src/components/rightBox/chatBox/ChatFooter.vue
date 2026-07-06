@@ -133,7 +133,7 @@
               <div
                 class="flex-center gap-2px mr-12px"
                 :class="{ 'opacity-30 pointer-events-none': isUploadDisabled('file') }">
-                <svg @click="handleFileOpen">
+                <svg @click="handleFileOpen" data-testid="chat-footer-file" aria-label="文件">
                   <use href="#file2"></use>
                 </svg>
                 <svg style="width: 14px; height: 14px">
@@ -147,6 +147,8 @@
             <template #trigger>
               <svg
                 @click="handleImageOpen"
+                data-testid="chat-footer-image"
+                aria-label="图片"
                 class="mr-18px"
                 :class="{ 'opacity-30 pointer-events-none': isUploadDisabled('image') }">
                 <use href="#photo"></use>
@@ -158,6 +160,8 @@
             <template #trigger>
               <svg
                 @click="handleVoiceRecord"
+                data-testid="chat-footer-voice"
+                aria-label="语音"
                 class="mr-18px"
                 :class="{ 'opacity-30 pointer-events-none': isUploadDisabled('voice') }">
                 <use href="#voice"></use>
