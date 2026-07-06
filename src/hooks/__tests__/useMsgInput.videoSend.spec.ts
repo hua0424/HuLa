@@ -290,4 +290,19 @@ describe('BL-033 sendFilesDirect 视频自动识别', () => {
     const payload = sharedMocks.sendWithTracking.mock.calls[0][0].payload
     expect(payload.msgType).toBe(MsgEnum.FILE)
   })
+
+  it('缩略图上传失败时静默降级为 FILE', async () => {
+    const { messageStrategyMap } = await import('@/strategy/MessageStrategy')
+    const videoStrategy = messageStrategyMap[MsgEnum.VIDEO] as any
+    vi.mocked(videoStrategy.uploadThumbnail).mockRejectedValueOnce(new Error('缩略图生成失败'))
+
+    const { sendFilesDirect } = useMsgInput(makeInputDom())
+
+    await sendFilesDirect([new File(['video'], 'clip.mp4', { type: 'video/mp4' })])
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(sharedMocks.sendWithTracking).toHaveBeenCalledTimes(1)
+    const payload = sharedMocks.sendWithTracking.mock.calls[0][0].payload
+    expect(payload.msgType).toBe(MsgEnum.FILE)
+  })
 })

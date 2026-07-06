@@ -800,13 +800,18 @@ export const useMsgInput = (messageInputDom: Ref) => {
   }
 
   // ==================== 通用文件处理函数 ====================
-  const processGenericFile = async (
+
+  /**
+   * 处理可上传文件（FILE / VIDEO）
+   * 合并 FILE 与 VIDEO 的公共流程；VIDEO 分支额外生成并上传缩略图。
+   */
+  const processUploadableFile = async (
     file: File,
     tempMsgId: string,
-    messageStrategy: any,
     targetRoomId: string,
-    msgType: MsgEnum = MsgEnum.FILE
+    msgType: MsgEnum.FILE | MsgEnum.VIDEO
   ): Promise<void> => {
+    const messageStrategy = messageStrategyMap[msgType]
     const msg = await messageStrategy.getMsg('', reply, [file])
     const messageBody = messageStrategy.buildMessageBody(msg, reply)
 
@@ -825,6 +830,42 @@ export const useMsgInput = (messageInputDom: Ref) => {
       const progressCallback = (pct: number) => {
         if (!isProgressActive) return
         updateProgress(pct)
+      }
+
+      let previewThumbUrl = ''
+
+      if (msgType === MsgEnum.VIDEO) {
+        // 上传缩略图
+        let uploadResult: string
+        if (messageStrategy.uploadThumbnail && messageStrategy.doUploadThumbnail) {
+          const thumbnailUploadInfo = await messageStrategy.uploadThumbnail(msg.thumbnail, {
+            provider: UploadProviderEnum.QINIU
+          })
+          const thumbnailUploadResult = await messageStrategy.doUploadThumbnail(
+            msg.thumbnail,
+            thumbnailUploadInfo.uploadUrl,
+            thumbnailUploadInfo.config
+          )
+          uploadResult =
+            thumbnailUploadInfo.config?.provider === UploadProviderEnum.QINIU
+              ? thumbnailUploadResult?.qiniuUrl || thumbnailUploadInfo.downloadUrl
+              : thumbnailUploadInfo.downloadUrl
+        } else {
+          uploadResult = await useUpload()
+            .uploadFile(msg.thumbnail, {
+              provider: UploadProviderEnum.QINIU,
+              scene: UploadSceneEnum.CHAT
+            })
+            .then((UploadResult) => {
+              return UploadResult.downloadUrl
+            })
+        }
+
+        previewThumbUrl = messageBody.thumbUrl || ''
+        messageBody.thumbUrl = uploadResult
+        messageBody.thumbSize = msg.thumbnail.size
+        messageBody.thumbWidth = 300
+        messageBody.thumbHeight = 150
       }
 
       const { uploadUrl, downloadUrl, config } = await messageStrategy.uploadFile(msg.path, {
@@ -854,6 +895,16 @@ export const useMsgInput = (messageInputDom: Ref) => {
           body: messageBody
         }
       })
+
+      // 释放视频本地预览 URL
+      if (msgType === MsgEnum.VIDEO) {
+        if (previewThumbUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(previewThumbUrl)
+        }
+        if (messageBody.thumbUrl && messageBody.thumbUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(messageBody.thumbUrl)
+        }
+      }
     } catch (error) {
       cleanup()
       throw error
@@ -938,109 +989,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
   }
 
   /**
-   * 处理视频文件（File 对象）
-   * @param file 视频文件
-   * @param tempMsgId 临时消息 ID
-   * @param targetRoomId 目标房间 ID
-   */
-  const processVideoFile = async (file: File, tempMsgId: string, targetRoomId: string): Promise<void> => {
-    const messageStrategy = messageStrategyMap[MsgEnum.VIDEO]
-    const msg = await messageStrategy.getMsg('', reply, [file])
-    const messageBody = messageStrategy.buildMessageBody(msg, reply)
-
-    const tempMsg = messageStrategy.buildMessageType(tempMsgId, { ...messageBody, url: '' }, globalStore, userUid)
-    tempMsg.message.roomId = targetRoomId
-    tempMsg.message.status = MessageStatusEnum.SENDING
-    chatStore.pushMsg(tempMsg)
-
-    let isProgressActive = true
-    const cleanup = () => {
-      isProgressActive = false
-    }
-
-    try {
-      const updateProgress = createRafProgressUpdater(tempMsgId)
-      const progressCallback = (pct: number) => {
-        if (!isProgressActive) return
-        updateProgress(pct)
-      }
-
-      // 上传缩略图
-      let uploadResult: string
-      if (messageStrategy.uploadThumbnail && messageStrategy.doUploadThumbnail) {
-        const thumbnailUploadInfo = await messageStrategy.uploadThumbnail(msg.thumbnail, {
-          provider: UploadProviderEnum.QINIU
-        })
-        const thumbnailUploadResult = await messageStrategy.doUploadThumbnail(
-          msg.thumbnail,
-          thumbnailUploadInfo.uploadUrl,
-          thumbnailUploadInfo.config
-        )
-        uploadResult =
-          thumbnailUploadInfo.config?.provider === UploadProviderEnum.QINIU
-            ? thumbnailUploadResult?.qiniuUrl || thumbnailUploadInfo.downloadUrl
-            : thumbnailUploadInfo.downloadUrl
-      } else {
-        uploadResult = await useUpload()
-          .uploadFile(msg.thumbnail, {
-            provider: UploadProviderEnum.QINIU,
-            scene: UploadSceneEnum.CHAT
-          })
-          .then((UploadResult) => {
-            return UploadResult.downloadUrl
-          })
-      }
-
-      const previewThumbUrl = messageBody.thumbUrl || ''
-
-      // 上传视频文件
-      const { uploadUrl, downloadUrl, config } = await messageStrategy.uploadFile(msg.path, {
-        provider: UploadProviderEnum.QINIU
-      })
-      const doUploadResult = await messageStrategy.doUpload(msg.path, uploadUrl, { ...config, progressCallback })
-
-      cleanup()
-
-      messageBody.url = config?.provider === UploadProviderEnum.QINIU ? doUploadResult?.qiniuUrl : downloadUrl
-      messageBody.objectKey = config?.objectKey
-      delete messageBody.path
-      messageBody.thumbUrl = uploadResult
-      messageBody.thumbSize = msg.thumbnail.size
-      messageBody.thumbWidth = 300
-      messageBody.thumbHeight = 150
-
-      chatStore.updateMsg({
-        msgId: tempMsgId,
-        body: messageBody,
-        status: MessageStatusEnum.SENDING
-      })
-
-      await sendWithTracking({
-        tempMsgId,
-        payload: {
-          id: tempMsgId,
-          clientMsgId: tempMsgId,
-          roomId: targetRoomId,
-          msgType: MsgEnum.VIDEO,
-          body: messageBody
-        }
-      })
-
-      // 释放本地预览 URL
-      if (previewThumbUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(previewThumbUrl)
-      }
-      if (messageBody.thumbUrl && messageBody.thumbUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(messageBody.thumbUrl)
-      }
-    } catch (error) {
-      cleanup()
-      throw error
-    }
-  }
-
-  /**
-   * 处理视频路径文件（Tauri 路径文件转 File 后走视频流程）
+   * 处理视频路径文件（Tauri 路径文件转 File 后走公共视频流程）
    * @param file 路径视频文件
    * @param tempMsgId 临时消息 ID
    * @param targetRoomId 目标房间 ID
@@ -1051,7 +1000,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
     const fileData = await readFile(normalizedPath, { baseDir })
     const fileType = file.type || getMimeTypeFromExtension(file.name)
     const fileObj = new File([new Uint8Array(fileData)], file.name, { type: fileType })
-    await processVideoFile(fileObj, tempMsgId, targetRoomId)
+    await processUploadableFile(fileObj, tempMsgId, targetRoomId, MsgEnum.VIDEO)
   }
 
   onMounted(async () => {
@@ -1238,15 +1187,13 @@ export const useMsgInput = (messageInputDom: Ref) => {
           } else {
             if (isVideoUploadFile(job.file)) {
               try {
-                await processVideoFile(job.file, tempMsgId, targetRoomId)
+                await processUploadableFile(job.file, tempMsgId, targetRoomId, MsgEnum.VIDEO)
               } catch (error) {
                 console.info(`[sendFilesDirect] ${job.file.name} 视频处理失败，降级为文件消息:`, error)
-                const messageStrategy = messageStrategyMap[MsgEnum.FILE]
-                await processGenericFile(job.file, tempMsgId, messageStrategy, targetRoomId)
+                await processUploadableFile(job.file, tempMsgId, targetRoomId, MsgEnum.FILE)
               }
             } else {
-              const messageStrategy = messageStrategyMap[MsgEnum.FILE]
-              await processGenericFile(job.file, tempMsgId, messageStrategy, targetRoomId)
+              await processUploadableFile(job.file, tempMsgId, targetRoomId, MsgEnum.FILE)
             }
           }
 
