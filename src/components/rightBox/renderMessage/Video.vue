@@ -1,5 +1,5 @@
 <template>
-  <div ref="videoContainerRef" :style="containerStyle" @dblclick="handleOpenVideoViewer">
+  <div ref="videoContainerRef" data-testid="video-message" :style="containerStyle" @dblclick="handleOpenVideoViewer">
     <n-image
       v-if="body?.thumbUrl"
       class="video-thumbnail"

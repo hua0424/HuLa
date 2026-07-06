@@ -74,7 +74,8 @@ vi.mock('@/hooks/useUpload', () => ({
 }))
 
 vi.mock('@/utils/FileType', () => ({
-  isPathUploadFile: vi.fn().mockReturnValue(false)
+  isPathUploadFile: vi.fn().mockReturnValue(false),
+  isVideoUploadFile: vi.fn().mockReturnValue(false)
 }))
 
 vi.mock('@/strategy/MessageStrategy', () => {

@@ -1,4 +1,5 @@
 import { readImage, readText } from '@tauri-apps/plugin-clipboard-manager'
+import { BaseDirectory, readFile } from '@tauri-apps/plugin-fs'
 import { useDebounceFn } from '@vueuse/core'
 import pLimit from 'p-limit'
 import { storeToRefs } from 'pinia'
@@ -16,7 +17,8 @@ import { useMessageSender } from '@/hooks/useMessageSender'
 import { messageStrategyMap } from '@/strategy/MessageStrategy.ts'
 import { processClipboardImage } from '@/utils/ImageUtils.ts'
 import { getReplyContent } from '@/utils/MessageReply.ts'
-import { isPathUploadFile, type PathUploadFile, type UploadFile } from '@/utils/FileType'
+import { isPathUploadFile, isVideoUploadFile, type PathUploadFile, type UploadFile } from '@/utils/FileType'
+import { getMimeTypeFromExtension } from '@/utils/Formatting.ts'
 import { isMac, isMobile, isWindows } from '@/utils/PlatformConstants'
 import { type SelectionRange, useCommon } from './useCommon.ts'
 import { globalFileUploadQueue } from './useFileUploadQueue.ts'
@@ -802,7 +804,8 @@ export const useMsgInput = (messageInputDom: Ref) => {
     file: File,
     tempMsgId: string,
     messageStrategy: any,
-    targetRoomId: string
+    targetRoomId: string,
+    msgType: MsgEnum = MsgEnum.FILE
   ): Promise<void> => {
     const msg = await messageStrategy.getMsg('', reply, [file])
     const messageBody = messageStrategy.buildMessageBody(msg, reply)
@@ -847,7 +850,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
           id: tempMsgId,
           clientMsgId: tempMsgId,
           roomId: targetRoomId,
-          msgType: MsgEnum.FILE,
+          msgType: msgType,
           body: messageBody
         }
       })
@@ -932,6 +935,123 @@ export const useMsgInput = (messageInputDom: Ref) => {
       cleanup()
       throw error
     }
+  }
+
+  /**
+   * 处理视频文件（File 对象）
+   * @param file 视频文件
+   * @param tempMsgId 临时消息 ID
+   * @param targetRoomId 目标房间 ID
+   */
+  const processVideoFile = async (file: File, tempMsgId: string, targetRoomId: string): Promise<void> => {
+    const messageStrategy = messageStrategyMap[MsgEnum.VIDEO]
+    const msg = await messageStrategy.getMsg('', reply, [file])
+    const messageBody = messageStrategy.buildMessageBody(msg, reply)
+
+    const tempMsg = messageStrategy.buildMessageType(tempMsgId, { ...messageBody, url: '' }, globalStore, userUid)
+    tempMsg.message.roomId = targetRoomId
+    tempMsg.message.status = MessageStatusEnum.SENDING
+    chatStore.pushMsg(tempMsg)
+
+    let isProgressActive = true
+    const cleanup = () => {
+      isProgressActive = false
+    }
+
+    try {
+      const updateProgress = createRafProgressUpdater(tempMsgId)
+      const progressCallback = (pct: number) => {
+        if (!isProgressActive) return
+        updateProgress(pct)
+      }
+
+      // 上传缩略图
+      let uploadResult: string
+      if (messageStrategy.uploadThumbnail && messageStrategy.doUploadThumbnail) {
+        const thumbnailUploadInfo = await messageStrategy.uploadThumbnail(msg.thumbnail, {
+          provider: UploadProviderEnum.QINIU
+        })
+        const thumbnailUploadResult = await messageStrategy.doUploadThumbnail(
+          msg.thumbnail,
+          thumbnailUploadInfo.uploadUrl,
+          thumbnailUploadInfo.config
+        )
+        uploadResult =
+          thumbnailUploadInfo.config?.provider === UploadProviderEnum.QINIU
+            ? thumbnailUploadResult?.qiniuUrl || thumbnailUploadInfo.downloadUrl
+            : thumbnailUploadInfo.downloadUrl
+      } else {
+        uploadResult = await useUpload()
+          .uploadFile(msg.thumbnail, {
+            provider: UploadProviderEnum.QINIU,
+            scene: UploadSceneEnum.CHAT
+          })
+          .then((UploadResult) => {
+            return UploadResult.downloadUrl
+          })
+      }
+
+      const previewThumbUrl = messageBody.thumbUrl || ''
+
+      // 上传视频文件
+      const { uploadUrl, downloadUrl, config } = await messageStrategy.uploadFile(msg.path, {
+        provider: UploadProviderEnum.QINIU
+      })
+      const doUploadResult = await messageStrategy.doUpload(msg.path, uploadUrl, { ...config, progressCallback })
+
+      cleanup()
+
+      messageBody.url = config?.provider === UploadProviderEnum.QINIU ? doUploadResult?.qiniuUrl : downloadUrl
+      messageBody.objectKey = config?.objectKey
+      delete messageBody.path
+      messageBody.thumbUrl = uploadResult
+      messageBody.thumbSize = msg.thumbnail.size
+      messageBody.thumbWidth = 300
+      messageBody.thumbHeight = 150
+
+      chatStore.updateMsg({
+        msgId: tempMsgId,
+        body: messageBody,
+        status: MessageStatusEnum.SENDING
+      })
+
+      await sendWithTracking({
+        tempMsgId,
+        payload: {
+          id: tempMsgId,
+          clientMsgId: tempMsgId,
+          roomId: targetRoomId,
+          msgType: MsgEnum.VIDEO,
+          body: messageBody
+        }
+      })
+
+      // 释放本地预览 URL
+      if (previewThumbUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(previewThumbUrl)
+      }
+      if (messageBody.thumbUrl && messageBody.thumbUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(messageBody.thumbUrl)
+      }
+    } catch (error) {
+      cleanup()
+      throw error
+    }
+  }
+
+  /**
+   * 处理视频路径文件（Tauri 路径文件转 File 后走视频流程）
+   * @param file 路径视频文件
+   * @param tempMsgId 临时消息 ID
+   * @param targetRoomId 目标房间 ID
+   */
+  const processVideoPathFile = async (file: PathUploadFile, tempMsgId: string, targetRoomId: string): Promise<void> => {
+    const normalizedPath = file.path.replace(/\\/g, '/')
+    const baseDir = isMobile() ? BaseDirectory.AppData : BaseDirectory.AppCache
+    const fileData = await readFile(normalizedPath, { baseDir })
+    const fileType = file.type || getMimeTypeFromExtension(file.name)
+    const fileObj = new File([new Uint8Array(fileData)], file.name, { type: fileType })
+    await processVideoFile(fileObj, tempMsgId, targetRoomId)
   }
 
   onMounted(async () => {
@@ -1102,11 +1222,32 @@ export const useMsgInput = (messageInputDom: Ref) => {
           }
 
           if (isPathUploadFile(job.file)) {
-            const messageStrategy = messageStrategyMap[MsgEnum.FILE]
-            await processGenericPathFile(job.file, tempMsgId, messageStrategy, targetRoomId)
+            if (isVideoUploadFile(job.file)) {
+              try {
+                await processVideoPathFile(job.file, tempMsgId, targetRoomId)
+              } catch (error) {
+                // 视频校验/缩略图生成失败时静默降级为 FILE，不打断用户
+                console.info(`[sendFilesDirect] ${job.file.name} 视频处理失败，降级为文件消息:`, error)
+                const messageStrategy = messageStrategyMap[MsgEnum.FILE]
+                await processGenericPathFile(job.file, tempMsgId, messageStrategy, targetRoomId)
+              }
+            } else {
+              const messageStrategy = messageStrategyMap[MsgEnum.FILE]
+              await processGenericPathFile(job.file, tempMsgId, messageStrategy, targetRoomId)
+            }
           } else {
-            const messageStrategy = messageStrategyMap[MsgEnum.FILE]
-            await processGenericFile(job.file, tempMsgId, messageStrategy, targetRoomId)
+            if (isVideoUploadFile(job.file)) {
+              try {
+                await processVideoFile(job.file, tempMsgId, targetRoomId)
+              } catch (error) {
+                console.info(`[sendFilesDirect] ${job.file.name} 视频处理失败，降级为文件消息:`, error)
+                const messageStrategy = messageStrategyMap[MsgEnum.FILE]
+                await processGenericFile(job.file, tempMsgId, messageStrategy, targetRoomId)
+              }
+            } else {
+              const messageStrategy = messageStrategyMap[MsgEnum.FILE]
+              await processGenericFile(job.file, tempMsgId, messageStrategy, targetRoomId)
+            }
           }
 
           // 成功 - 更新队列状态

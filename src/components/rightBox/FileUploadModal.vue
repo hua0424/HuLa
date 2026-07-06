@@ -59,8 +59,15 @@
         </div>
 
         <div class="flex justify-end gap-8px">
-          <n-button quaternary @click="handleCancel">{{ t('message.file_upload.cancel') }}</n-button>
-          <n-button secondary type="primary" @click="handleConfirm" :disabled="fileList.length === 0">
+          <n-button quaternary data-testid="file-upload-cancel" @click="handleCancel">
+            {{ t('message.file_upload.cancel') }}
+          </n-button>
+          <n-button
+            secondary
+            type="primary"
+            data-testid="file-upload-confirm"
+            :disabled="fileList.length === 0"
+            @click="handleConfirm">
             {{ t('message.file_upload.send', { count: fileList.length }) }}
           </n-button>
         </div>
