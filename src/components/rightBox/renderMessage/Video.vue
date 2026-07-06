@@ -1,7 +1,7 @@
 <template>
   <div ref="videoContainerRef" :style="containerStyle" @dblclick="handleOpenVideoViewer">
     <n-image
-      v-if="body?.thumbUrl"
+      v-if="body?.thumbUrl || body?.thumbObjectKey"
       class="video-thumbnail"
       object-fit="cover"
       show-toolbar-tooltip
@@ -221,7 +221,7 @@ const resolveVideoUrl = async () => {
     return
   }
   if (props.body?.objectKey && props.message?.id) {
-    resolvedVideoUrl.value = await resolveSignedFileUrl('', props.message.id, props.body.objectKey)
+    resolvedVideoUrl.value = await resolveSignedFileUrl('', props.message.id, props.body.objectKey, 'file')
   } else {
     resolvedVideoUrl.value = ''
   }
@@ -280,7 +280,8 @@ const containerStyle = computed(() => {
 })
 
 const remoteThumbSrc = computed(() => props.body?.thumbUrl || '')
-const downloadKey = computed(() => remoteThumbSrc.value || '')
+const thumbWorkKey = computed(() => props.body?.thumbUrl || props.body?.thumbObjectKey || '')
+const downloadKey = computed(() => thumbWorkKey.value)
 const displayThumbSrc = computed(() => localVideoThumbSrc.value || remoteThumbSrc.value || '')
 
 const requestVideoThumbnailDownload = () => {
@@ -288,10 +289,11 @@ const requestVideoThumbnailDownload = () => {
   void thumbnailStore
     .enqueueThumbnail({
       url: props.body?.thumbUrl || '',
-      objectKey: props.body?.thumbUrl ? undefined : props.body?.objectKey,
+      objectKey: props.body?.thumbObjectKey,
       msgId: props.message.id,
       roomId: props.message.roomId,
-      kind: 'video'
+      kind: 'video',
+      target: 'thumb'
     })
     .then((path) => {
       if (!path) return
@@ -317,7 +319,7 @@ const ensureLocalVideoThumbnail = async () => {
   }
 
   localVideoThumbSrc.value = null
-  thumbnailStore.invalidate(props.body?.thumbUrl, props.body?.objectKey, props.message?.id)
+  thumbnailStore.invalidate(props.body?.thumbUrl, props.body?.thumbObjectKey, props.message?.id)
   requestVideoThumbnailDownload()
 }
 

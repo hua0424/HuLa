@@ -515,6 +515,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
       } else if (msg.type === MsgEnum.VIDEO) {
         // 先上传缩略图（使用去重功能）
         let uploadResult: string
+        let thumbObjectKey: string | undefined
         if (messageStrategy.uploadThumbnail && messageStrategy.doUploadThumbnail) {
           const thumbnailUploadInfo = await messageStrategy.uploadThumbnail(msg.thumbnail, {
             provider: UploadProviderEnum.QINIU
@@ -528,15 +529,14 @@ export const useMsgInput = (messageInputDom: Ref) => {
             thumbnailUploadInfo.config?.provider === UploadProviderEnum.QINIU
               ? thumbnailUploadResult?.qiniuUrl || thumbnailUploadInfo.downloadUrl
               : thumbnailUploadInfo.downloadUrl
+          thumbObjectKey = thumbnailUploadInfo.config?.objectKey
         } else {
-          uploadResult = await useUpload()
-            .uploadFile(msg.thumbnail, {
-              provider: UploadProviderEnum.QINIU,
-              scene: UploadSceneEnum.CHAT
-            })
-            .then((UploadResult) => {
-              return UploadResult.downloadUrl
-            })
+          const thumbUploadRes = await useUpload().uploadFile(msg.thumbnail, {
+            provider: UploadProviderEnum.QINIU,
+            scene: UploadSceneEnum.CHAT
+          })
+          uploadResult = thumbUploadRes.downloadUrl
+          thumbObjectKey = thumbUploadRes.config?.objectKey
         }
 
         // 再上传视频文件
@@ -549,6 +549,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
         messageBody.objectKey = config?.objectKey
         delete messageBody.path // 删除临时路径
         messageBody.thumbUrl = uploadResult
+        messageBody.thumbObjectKey = thumbObjectKey
         messageBody.thumbSize = msg.thumbnail.size
         messageBody.thumbWidth = 300
         messageBody.thumbHeight = 150
