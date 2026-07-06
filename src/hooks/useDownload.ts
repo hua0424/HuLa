@@ -1,7 +1,7 @@
 import { BaseDirectory, exists, mkdir, writeFile } from '@tauri-apps/plugin-fs'
 import { createEventHook } from '@vueuse/core'
 import { isMobile } from '@/utils/PlatformConstants'
-import { resolveSignedFileUrl } from '@/utils/fileSign'
+import { resolveSignedFileUrl, type SignDownloadTarget } from '@/utils/fileSign'
 
 export const useDownload = () => {
   const process = ref(0)
@@ -13,14 +13,15 @@ export const useDownload = () => {
     savePath: string,
     baseDir: BaseDirectory = isMobile() ? BaseDirectory.AppData : BaseDirectory.AppCache,
     msgId?: string,
-    objectKey?: string
+    objectKey?: string,
+    target: SignDownloadTarget = 'file'
   ) => {
     try {
       isDownloading.value = true
       process.value = 0
 
       // 有 msgId 时先换取签名 URL（无 msgId 或失败时返回原 URL）
-      const fetchUrl = await resolveSignedFileUrl(url, msgId, objectKey)
+      const fetchUrl = await resolveSignedFileUrl(url, msgId, objectKey, target)
 
       // 确保目录存在
       const dirPath = savePath.substring(0, savePath.lastIndexOf('/'))

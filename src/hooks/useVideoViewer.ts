@@ -76,7 +76,7 @@ export const useVideoViewer = () => {
       return await join(baseDirPath, localPath)
     }
     if (objectKey && msgId) {
-      return await resolveSignedFileUrl('', msgId, objectKey)
+      return await resolveSignedFileUrl('', msgId, objectKey, 'file')
     }
     return key
   }

@@ -9,7 +9,7 @@ import { isMobile } from '@/utils/PlatformConstants'
 import { invokeSilently } from '@/utils/TauriInvokeHandler'
 import { TauriCommand } from '@/enums'
 import { md5FromString } from '@/utils/Md5Util'
-import { resolveSignedFileUrl } from '@/utils/fileSign'
+import { resolveSignedFileUrl, type SignDownloadTarget } from '@/utils/fileSign'
 
 type TaskKind = 'image' | 'video' | 'emoji'
 
@@ -19,6 +19,7 @@ type Task = {
   msgId: string
   roomId: string
   kind: TaskKind
+  target?: SignDownloadTarget
   status: 'pending' | 'downloading' | 'completed' | 'failed'
   retries: number
   path?: string
@@ -124,7 +125,7 @@ export const useThumbnailCacheStore = defineStore(
           return
         }
 
-        const fetchUrl = await resolveSignedFileUrl(task.url, task.msgId, task.objectKey)
+        const fetchUrl = await resolveSignedFileUrl(task.url, task.msgId, task.objectKey, task.target ?? 'file')
 
         const buffer: ArrayBuffer = await new Promise((resolve, reject) => {
           const handler = (e: MessageEvent<any>) => {
@@ -166,6 +167,7 @@ export const useThumbnailCacheStore = defineStore(
       msgId: string
       roomId: string
       kind: TaskKind
+      target?: SignDownloadTarget
     }) => {
       const t: Task = { ...options, status: 'pending', retries: 0 }
       const taskKey = getTaskKey(t)
