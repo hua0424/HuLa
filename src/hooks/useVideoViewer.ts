@@ -1,4 +1,4 @@
-import { appDataDir, join, resourceDir } from '@tauri-apps/api/path'
+import { appDataDir, isAbsolute, join, resourceDir } from '@tauri-apps/api/path'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { BaseDirectory, exists } from '@tauri-apps/plugin-fs'
 import { MsgEnum } from '@/enums'
@@ -111,6 +111,10 @@ export const useVideoViewer = () => {
     const msgId = msg?.message?.id
     const objectKey = body.objectKey
     if (body.localPath) {
+      // 本地路径可能是绝对路径（下载后完整保存）或相对路径（旧数据），避免重复拼接 baseDir
+      if (await isAbsolute(body.localPath)) {
+        return body.localPath
+      }
       const baseDirPath = isMobile() ? await appDataDir() : await resourceDir()
       return await join(baseDirPath, body.localPath)
     }
@@ -185,6 +189,7 @@ export const useVideoViewer = () => {
     openVideoViewer,
     getLocalVideoPath,
     checkVideoDownloaded,
-    getVideoFilename
+    getVideoFilename,
+    resolveDisplayPath
   }
 }
