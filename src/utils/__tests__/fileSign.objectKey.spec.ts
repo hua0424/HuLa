@@ -26,6 +26,11 @@ describe('BL-003 resolveSignedFileUrl with objectKey', () => {
 
     expect(result).toBe('https://signed.example.com/file')
     expect(imRequest).toHaveBeenCalledTimes(1)
+    expect(imRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        body: { msgId: 'msg-123' }
+      })
+    )
   })
 
   it('url 为空且无 objectKey 时，即使 msgId 存在也不换签，返回原 url', async () => {
@@ -51,6 +56,31 @@ describe('BL-003 resolveSignedFileUrl with objectKey', () => {
 
     expect(result).toBe('https://signed.example.com/file')
     expect(imRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it('target="thumb" 时请求体携带 target（#158 视频缩略图）', async () => {
+    vi.mocked(imRequest).mockResolvedValueOnce({ url: 'https://signed.example.com/thumb.jpg' })
+
+    const result = await resolveSignedFileUrl('', 'msg-123', 'thumb-object-key', 'thumb')
+
+    expect(result).toBe('https://signed.example.com/thumb.jpg')
+    expect(imRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: { msgId: 'msg-123', target: 'thumb' }
+      })
+    )
+  })
+
+  it('target 默认 file 时请求体不带 target', async () => {
+    vi.mocked(imRequest).mockResolvedValueOnce({ url: 'https://signed.example.com/file' })
+
+    await resolveSignedFileUrl('https://example.com/file.txt', 'msg-123')
+
+    expect(imRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: { msgId: 'msg-123' }
+      })
+    )
   })
 
   it('换签失败时 fallback 到原 url（即使 url 为空）', async () => {

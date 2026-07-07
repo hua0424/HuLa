@@ -74,7 +74,8 @@ vi.mock('@/hooks/useUpload', () => ({
 }))
 
 vi.mock('@/utils/FileType', () => ({
-  isPathUploadFile: vi.fn().mockReturnValue(false)
+  isPathUploadFile: vi.fn().mockReturnValue(false),
+  isVideoUploadFile: vi.fn().mockReturnValue(false)
 }))
 
 vi.mock('@/strategy/MessageStrategy', () => {
@@ -110,7 +111,7 @@ vi.mock('@/strategy/MessageStrategy', () => {
     uploadThumbnail: vi.fn().mockResolvedValue({
       uploadUrl: 'https://up-thumb.qiniu.com',
       downloadUrl: 'https://cdn.example.com/thumb.bin',
-      config: { provider: 'qiniu' }
+      config: { provider: 'qiniu', objectKey: 'object-key-thumb-6' }
     }),
     doUploadThumbnail: vi.fn().mockResolvedValue({ qiniuUrl: 'https://cdn.example.com/thumb.bin' })
   })
@@ -235,6 +236,7 @@ describe('BL-003 useMsgInput send objectKey', () => {
     const payload = sharedMocks.sendWithTracking.mock.calls[0][0].payload
     expect(payload.msgType).toBe(MsgEnum.VIDEO)
     expect(payload.body.objectKey).toBe(`object-key-${MsgEnum.VIDEO}`)
+    expect(payload.body.thumbObjectKey).toBe('object-key-thumb-6')
     expect(payload.body.path).toBeUndefined()
   })
 

@@ -439,6 +439,8 @@ export type VideoBody = {
   thumbWidth?: number
   thumbHeight?: number
   thumbUrl?: string
+  /** #158：MINIO 等 objectKey-only 缩略图 */
+  thumbObjectKey?: string
   thumbnailPath?: string
   localPath?: string
   /** BL-003：服务端 objectKey-only 消息时用于换签 */

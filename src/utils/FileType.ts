@@ -186,6 +186,19 @@ export const fixFileMimeType = (file: File): File => {
 }
 
 /**
+ * 判断上传文件是否为视频（支持浏览器 File 与 Tauri 路径文件）
+ * @param file 上传文件对象
+ * @returns 是否为视频
+ */
+export const isVideoUploadFile = (file: UploadFile): boolean => {
+  if (isPathUploadFile(file)) {
+    const ext = getFileExtension(file.name).toLowerCase()
+    return SUPPORTED_VIDEO_EXTENSIONS.includes(ext as any) || file.type?.startsWith('video/')
+  }
+  return getMessageTypeByFile(file) === MsgEnum.VIDEO
+}
+
+/**
  * 根据文件类型获取对应的消息枚举
  * @param file File对象
  * @returns 消息类型枚举

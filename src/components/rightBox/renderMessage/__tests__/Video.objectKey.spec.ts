@@ -186,6 +186,51 @@ describe('BL-003 Video.vue objectKey-only receive', () => {
     expect(getLocalVideoPathMock).toHaveBeenCalledWith('object-key-1', 'clip.mp4')
   })
 
+  it('objectKey-only 视频使用 thumbObjectKey 请求缩略图并带 target=thumb', async () => {
+    mountVideo({
+      url: '',
+      objectKey: 'object-key-1',
+      thumbUrl: '',
+      thumbObjectKey: 'thumb-object-key-1',
+      filename: 'clip.mp4',
+      size: 1024,
+      thumbWidth: 300,
+      thumbHeight: 150
+    })
+    await flushPromises()
+
+    expect(enqueueThumbnailMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: '',
+        objectKey: 'thumb-object-key-1',
+        msgId: 'msg-123',
+        kind: 'video',
+        target: 'thumb'
+      })
+    )
+  })
+
+  it('旧视频（只有 thumbUrl）缩略图请求不带 target', async () => {
+    mountVideo({
+      url: 'https://example.com/clip.mp4',
+      thumbUrl: 'https://example.com/thumb.jpg',
+      filename: 'clip.mp4',
+      size: 1024,
+      thumbWidth: 300,
+      thumbHeight: 150
+    })
+    await flushPromises()
+
+    expect(enqueueThumbnailMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'https://example.com/thumb.jpg',
+        objectKey: undefined,
+        kind: 'video',
+        target: 'thumb'
+      })
+    )
+  })
+
   it('旧消息（带 http url）按 url 路径下载，objectKey 为空', async () => {
     checkVideoDownloadedMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
     const wrapper = mountVideo({

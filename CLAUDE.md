@@ -80,6 +80,8 @@ The Windows tester drives the desktop client via playwright-cli over CDP and **l
 | `chat-footer-file` / `chat-footer-image` / `chat-footer-voice` | 桌面端底部文件/图片/语音上传按钮 | `components/rightBox/chatBox/ChatFooter.vue` |
 | `mobile-voice-button` / `mobile-emoji-button` / `mobile-more-button` / `mobile-send-button` | 移动端输入栏语音/表情/更多/发送按钮 | `components/rightBox/MsgInput.vue` |
 | `mobile-more-item-file` / `mobile-more-item-image` / `mobile-more-item-video` / `mobile-more-item-history` / `mobile-more-item-videocall` | 移动端更多面板功能入口 | `mobile/components/chat-room/panel/More.vue` |
+| `file-upload-confirm` / `file-upload-cancel` | 文件上传弹窗发送/取消按钮 | `components/rightBox/FileUploadModal.vue` |
+| `video-message` | 视频消息气泡根（含缩略图与播放入口） | `components/rightBox/renderMessage/Video.vue` |
 
 ## Architecture: platform abstraction is the central design
 

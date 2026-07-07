@@ -875,6 +875,7 @@ class VideoMessageStrategyImpl extends AbstractMessageStrategy {
         url: '', // 上传后会更新
         thumbnail: thumbnail || '',
         size: validatedFile.size,
+        mime: validatedFile.type,
         duration: 0, // 实际项目中可解析视频时长
         reply: replyValue.content ? { content: replyValue.content, key: replyValue.key } : undefined
       }
@@ -905,6 +906,7 @@ class VideoMessageStrategyImpl extends AbstractMessageStrategy {
       url: '', // 上传后会更新
       thumbnail: thumbnail || '',
       size: validatedFile.size,
+      mime: validatedFile.type,
       duration: 0, // 实际项目中可解析视频时长
       reply: replyValue.content ? { content: replyValue.content, key: replyValue.key } : undefined
     }
@@ -1052,12 +1054,12 @@ class VideoMessageStrategyImpl extends AbstractMessageStrategy {
     return {
       url: msg.url,
       path: msg.path,
-      thumbnail: msg.thumbnail,
       thumbUrl: thumbUrl, // 本地预览URL，上传完成后会被替换为服务器URL
       thumbSize: msg.thumbnail?.size || 0,
       thumbWidth: 300,
       thumbHeight: 150,
       size: msg.size,
+      mime: msg.mime,
       duration: msg.duration,
       replyMsgId: msg.reply?.key || void 0,
       reply: reply.value.content
