@@ -433,6 +433,63 @@ export const useMsgInput = (messageInputDom: Ref) => {
 
   const retainRawContent = (type: MsgEnum) => [MsgEnum.EMOJI, MsgEnum.IMAGE].includes(type)
 
+  /**
+   * 上传视频缩略图与视频文件，并更新临时消息体
+   */
+  const processVideoUpload = async (msg: any, messageBody: any, tempMsgId: string): Promise<void> => {
+    const messageStrategy = messageStrategyMap[MsgEnum.VIDEO]
+
+    // 先上传缩略图（使用去重功能）
+    let uploadResult: string
+    let thumbObjectKey: string | undefined
+    if (messageStrategy.uploadThumbnail && messageStrategy.doUploadThumbnail) {
+      const thumbnailUploadInfo = await messageStrategy.uploadThumbnail(msg.thumbnail, {
+        provider: UploadProviderEnum.QINIU
+      })
+      const thumbnailUploadResult = await messageStrategy.doUploadThumbnail(
+        msg.thumbnail,
+        thumbnailUploadInfo.uploadUrl,
+        thumbnailUploadInfo.config
+      )
+      uploadResult =
+        thumbnailUploadInfo.config?.provider === UploadProviderEnum.QINIU
+          ? thumbnailUploadResult?.qiniuUrl || thumbnailUploadInfo.downloadUrl
+          : thumbnailUploadInfo.downloadUrl
+      thumbObjectKey = thumbnailUploadInfo.config?.objectKey
+    } else {
+      const thumbUploadRes = await useUpload().uploadFile(msg.thumbnail, {
+        provider: UploadProviderEnum.QINIU,
+        scene: UploadSceneEnum.CHAT
+      })
+      uploadResult = thumbUploadRes.downloadUrl
+      thumbObjectKey = thumbUploadRes.config?.objectKey
+    }
+
+    // 再上传视频文件
+    const { uploadUrl, downloadUrl, config } = await messageStrategy.uploadFile(msg.path, {
+      provider: UploadProviderEnum.QINIU
+    })
+    const doUploadResult = await messageStrategy.doUpload(msg.path, uploadUrl, config)
+    messageBody.url =
+      config?.provider && config?.provider === UploadProviderEnum.QINIU ? doUploadResult?.qiniuUrl : downloadUrl
+    messageBody.objectKey = config?.objectKey
+    delete messageBody.path // 删除临时路径
+    messageBody.thumbUrl = uploadResult
+    messageBody.thumbObjectKey = thumbObjectKey
+    messageBody.thumbSize = msg.thumbnail.size
+    messageBody.thumbWidth = 300
+    messageBody.thumbHeight = 150
+
+    // 更新临时消息的URL
+    chatStore.updateMsg({
+      msgId: tempMsgId,
+      body: {
+        ...messageBody
+      },
+      status: MessageStatusEnum.SENDING
+    })
+  }
+
   /** 处理发送信息事件 */
   // TODO 输入框中的内容当我切换消息的时候需要记录之前输入框的内容 (nyh -> 2024-03-01 07:03:43)
   const { sendWithTracking } = useMessageSender()
@@ -513,55 +570,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
           status: MessageStatusEnum.SENDING
         })
       } else if (msg.type === MsgEnum.VIDEO) {
-        // 先上传缩略图（使用去重功能）
-        let uploadResult: string
-        let thumbObjectKey: string | undefined
-        if (messageStrategy.uploadThumbnail && messageStrategy.doUploadThumbnail) {
-          const thumbnailUploadInfo = await messageStrategy.uploadThumbnail(msg.thumbnail, {
-            provider: UploadProviderEnum.QINIU
-          })
-          const thumbnailUploadResult = await messageStrategy.doUploadThumbnail(
-            msg.thumbnail,
-            thumbnailUploadInfo.uploadUrl,
-            thumbnailUploadInfo.config
-          )
-          uploadResult =
-            thumbnailUploadInfo.config?.provider === UploadProviderEnum.QINIU
-              ? thumbnailUploadResult?.qiniuUrl || thumbnailUploadInfo.downloadUrl
-              : thumbnailUploadInfo.downloadUrl
-          thumbObjectKey = thumbnailUploadInfo.config?.objectKey
-        } else {
-          const thumbUploadRes = await useUpload().uploadFile(msg.thumbnail, {
-            provider: UploadProviderEnum.QINIU,
-            scene: UploadSceneEnum.CHAT
-          })
-          uploadResult = thumbUploadRes.downloadUrl
-          thumbObjectKey = thumbUploadRes.config?.objectKey
-        }
-
-        // 再上传视频文件
-        const { uploadUrl, downloadUrl, config } = await messageStrategy.uploadFile(msg.path, {
-          provider: UploadProviderEnum.QINIU
-        })
-        const doUploadResult = await messageStrategy.doUpload(msg.path, uploadUrl, config)
-        messageBody.url =
-          config?.provider && config?.provider === UploadProviderEnum.QINIU ? doUploadResult?.qiniuUrl : downloadUrl
-        messageBody.objectKey = config?.objectKey
-        delete messageBody.path // 删除临时路径
-        messageBody.thumbUrl = uploadResult
-        messageBody.thumbObjectKey = thumbObjectKey
-        messageBody.thumbSize = msg.thumbnail.size
-        messageBody.thumbWidth = 300
-        messageBody.thumbHeight = 150
-
-        // 更新临时消息的URL
-        chatStore.updateMsg({
-          msgId: tempMsgId,
-          body: {
-            ...messageBody
-          },
-          status: MessageStatusEnum.SENDING
-        })
+        await processVideoUpload(msg, messageBody, tempMsgId)
       }
       await sendWithTracking({
         tempMsgId,
@@ -599,6 +608,54 @@ export const useMsgInput = (messageInputDom: Ref) => {
       if (msg.type === MsgEnum.VIDEO && messageBody.thumbUrl && messageBody.thumbUrl.startsWith('blob:')) {
         URL.revokeObjectURL(messageBody.thumbUrl)
       }
+    }
+  }
+
+  /**
+   * 桌面端直接发送单个视频文件（不经过输入框，用于 footer 视频入口）
+   */
+  const sendVideoDirect = async (file: File) => {
+    const targetRoomId = globalStore.currentSessionRoomId
+    const messageStrategy = messageStrategyMap[MsgEnum.VIDEO]
+
+    try {
+      const msg = await messageStrategy.getMsg('', reply.value, [file])
+      const atUidList: string[] = []
+      const tempMsgId = 'T' + Date.now().toString()
+
+      const messageBody: any = {
+        ...messageStrategy.buildMessageBody(msg, reply),
+        atUidList
+      }
+
+      const tempMsg = await messageStrategy.buildMessageType(tempMsgId, messageBody, globalStore, userUid)
+      tempMsg.message.status = MessageStatusEnum.SENDING
+      chatStore.pushMsg(tempMsg)
+      chatStore.updateMsg({
+        msgId: tempMsgId,
+        status: MessageStatusEnum.SENDING
+      })
+
+      await processVideoUpload(msg, messageBody, tempMsgId)
+
+      await sendWithTracking({
+        tempMsgId,
+        payload: {
+          id: tempMsgId,
+          clientMsgId: tempMsgId,
+          roomId: targetRoomId,
+          msgType: MsgEnum.VIDEO,
+          body: messageBody
+        }
+      })
+
+      // 释放视频缩略图的本地预览 URL
+      if (messageBody.thumbUrl && messageBody.thumbUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(messageBody.thumbUrl)
+      }
+    } catch (error) {
+      console.error('视频发送失败:', error)
+      window.$message?.error?.('视频发送失败')
     }
   }
 
@@ -1359,6 +1416,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
     stripHtml,
     sendLocationDirect,
     sendFilesDirect,
+    sendVideoDirect,
     sendVoiceDirect,
     sendEmojiDirect,
     personList,

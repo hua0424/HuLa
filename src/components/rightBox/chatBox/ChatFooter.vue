@@ -159,6 +159,26 @@
           <n-popover trigger="hover" :show-arrow="false" placement="bottom">
             <template #trigger>
               <svg
+                @click="handleVideoOpen"
+                data-testid="chat-footer-video"
+                aria-label="视频"
+                class="mr-18px"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                :class="{ 'opacity-30 pointer-events-none': isUploadDisabled('video') }">
+                <rect x="2" y="6" width="14" height="12" rx="2"></rect>
+                <polygon points="18 9 23 6 23 18 18 15" fill="currentColor" stroke="none"></polygon>
+              </svg>
+            </template>
+            <span>{{ isUploadDisabled('video') ? t('aiclaw.chat.notice') : t('editor.video') }}</span>
+          </n-popover>
+          <n-popover trigger="hover" :show-arrow="false" placement="bottom">
+            <template #trigger>
+              <svg
                 @click="handleVoiceRecord"
                 data-testid="chat-footer-voice"
                 aria-label="语音"
@@ -393,6 +413,36 @@ const handleFileOpen = async () => {
   if (!filesData) return
   // 使用processFiles方法进行文件类型验证
   await processFiles(filesData.files, MsgInputRef.value.messageInputDom, MsgInputRef.value?.showFileModal)
+}
+
+// 视频选择（只能选择视频类型）
+const handleVideoOpen = async () => {
+  const selected = await open({
+    multiple: false,
+    filters: [
+      {
+        name: 'Videos',
+        extensions: ['mp4', 'mov', 'avi', 'wmv']
+      }
+    ]
+  })
+
+  if (!selected) return
+
+  const paths = Array.isArray(selected) ? selected : [selected]
+  const files = await Promise.all(
+    paths.map(async (path) => {
+      const fileData = await readFile(path)
+      const fileName = extractFileName(path)
+      const mimeType = getMimeTypeFromExtension(fileName)
+      const blob = new Blob([new Uint8Array(fileData)], { type: mimeType })
+      return new File([blob], fileName, { type: mimeType })
+    })
+  )
+
+  for (const file of files) {
+    await MsgInputRef.value?.sendVideoDirect?.(file)
+  }
 }
 
 // 图片选择（只能选择图片类型）

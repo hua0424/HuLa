@@ -5,7 +5,7 @@ import { useGroupStore } from '@/stores/group'
 import { isAiclaw, isAiclawByUserType } from '@/utils/AiclawUtils'
 
 export type AiclawHeaderMode = 'aiclaw' | 'normal'
-export type AllowedUploadType = 'image' | 'file' | 'voice'
+export type AllowedUploadType = 'image' | 'file' | 'voice' | 'video'
 
 /**
  * REQ-006-3 / REQ-007-71：AI-会话判定的统一 seam。
