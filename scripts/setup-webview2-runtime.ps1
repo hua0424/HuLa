@@ -17,6 +17,9 @@
 .PARAMETER DownloadUrl
   Fixed Version Runtime .cab 下载地址。默认使用社区镜像的 Microsoft 官方二进制。
 
+.PARAMETER ExpectedSha256
+  下载 .cab 的 SHA256 校验值。默认锁定 149.0.4022.80 x64 官方二进制。
+
 .PARAMETER SkipDownload
   如果本地已存在固定运行时，跳过下载/解压检查。
 
@@ -30,6 +33,7 @@
 param(
   [string]$RuntimeDir = (Join-Path $env:LOCALAPPDATA 'HuLa\WebView2FixedRuntime\149.0.4022.80'),
   [string]$DownloadUrl = 'https://github.com/libnyanpasu/webview2-runtime-archive/releases/download/149.0.4022.80/Microsoft.WebView2.FixedVersionRuntime.x64.cab',
+  [string]$ExpectedSha256 = '2C9CB91FCC8B46295BE9E2D8959518A0D4A56D9B2B75DE1A046309462599616A',
   [switch]$SkipDownload
 )
 
@@ -59,11 +63,11 @@ if (-not $hasRuntime -and -not $SkipDownload) {
     New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
   }
 
-  # 1.1 下载 .cab（幂等：如果已存在且非空则复用）
+  # 1.1 下载 .cab（幂等：如果已存在且非空则复用，但 always 校验 SHA256）
   if (-not (Test-Path $cabPath) -or (Get-Item $cabPath).Length -eq 0) {
     Write-Info "正在下载 WebView2 Fixed Version Runtime 149.0.4022.80 ..."
     try {
-      Invoke-WebRequest -Uri $DownloadUrl -OutFile $cabPath -UseBasicParsing
+      Invoke-WebRequest -Uri $DownloadUrl -OutFile $cabPath
     } catch {
       Write-ErrorExit "下载失败：$_`n请检查网络，或手动下载 .cab 后放到：$cabPath"
     }
@@ -72,7 +76,14 @@ if (-not $hasRuntime -and -not $SkipDownload) {
     Write-Info "复用已下载的 cab：$cabPath"
   }
 
-  # 1.2 解压 .cab
+  # 1.2 校验 SHA256（下载的是待执行的二进制运行时，必须固定哈希）
+  Write-Info "正在校验 cab 哈希 ..."
+  $actualHash = (Get-FileHash -Algorithm SHA256 -Path $cabPath).Hash
+  if ($actualHash -ne $ExpectedSha256) {
+    Remove-Item -Path $cabPath -Force -ErrorAction SilentlyContinue
+    Write-ErrorExit "SHA256 校验失败。期望：$ExpectedSha256，实际：$actualHash。已删除可疑文件，请检查下载源。"
+  }
+  Write-Info "SHA256 校验通过。"
   Write-Info "正在解压到 $RuntimeDir ..."
   if (-not (Test-Path $RuntimeDir)) {
     New-Item -ItemType Directory -Path $RuntimeDir -Force | Out-Null
@@ -114,7 +125,7 @@ if (-not $hasRuntime -and -not $SkipDownload) {
 $env:WEBVIEW2_BROWSER_EXECUTABLE_FOLDER = $RuntimeDir
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
 # 每个测试进程使用独立 user data，避免与日常 HuLa 冲突
-$env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $env:TEMP "hula-webview2-test-$(Get-Random)"
+$env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $env:TEMP "hula-webview2-test-$([Guid]::NewGuid().ToString('N'))"
 
 Write-Info "环境变量已设置："
 Write-Info "  WEBVIEW2_BROWSER_EXECUTABLE_FOLDER = $env:WEBVIEW2_BROWSER_EXECUTABLE_FOLDER"
