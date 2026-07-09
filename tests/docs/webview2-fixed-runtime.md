@@ -15,7 +15,7 @@ WebView2 Evergreen Runtime 自 **150.0.4078.48** 起，不再读取 `WEBVIEW2_AD
 . .\scripts\setup-webview2-runtime.ps1
 
 # 然后按原有方式启动客户端或运行 launch_app.ps1
-. .\tests\scripts\launch_app.ps1
+. .\tests\desktop\launch_app.ps1
 ```
 
 脚本会：
