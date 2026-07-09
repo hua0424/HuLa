@@ -301,6 +301,7 @@
                       </p>
                       <p
                         v-if="isSilentMember(item.uid)"
+                        data-testid="aiclaw-silent-badge"
                         class="text-(9px #d03050 center) w-34px truncate leading-tight"
                         :title="t('aiclaw.silent_badge')">
                         {{ t('aiclaw.silent_badge') }}
