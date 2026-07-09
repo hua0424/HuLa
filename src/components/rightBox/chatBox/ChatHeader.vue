@@ -939,10 +939,12 @@ const loadSilentConfigsForSidebar = async () => {
   await Promise.all(aiclawMembers.map((m) => chatStore.loadAiclawGroupConfig(Number(m.uid), roomId)))
 }
 
+// REQ-009 #86：监听「进入群聊 / 群成员变化」两路信号，避免只 watch userList.length
+// 导致切换同规模群、或组件挂载时 isGroup 尚未就绪而漏拉 approved。
 watch(
-  () => groupStore.userList.length,
-  () => {
-    if (chatStore.isGroup) {
+  [currentSessionRoomId, () => chatStore.isGroup, () => groupStore.userList.length],
+  ([roomId, isGroup]) => {
+    if (roomId && isGroup) {
       loadSilentConfigsForSidebar()
     }
   },
