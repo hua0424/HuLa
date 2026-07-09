@@ -20,11 +20,12 @@ WebView2 Evergreen Runtime 自 **150.0.4078.48** 起，不再读取 `WEBVIEW2_AD
 
 脚本会：
 1. 下载 `Microsoft.WebView2.FixedVersionRuntime.x64.cab`（约 280MB，仅首次）。
-2. 解压到 `%LOCALAPPDATA%\HuLa\WebView2FixedRuntime\149.0.4022.80`。
-3. 在当前 PowerShell 进程中设置：
+2. **校验 SHA256**（哈希锁定 `2C9CB91FCC8B46295BE9E2D8959518A0D4A56D9B2B75DE1A046309462599616A`，与官方 149.0.4022.80 x64 二进制一致），校验失败会删除文件并报错。
+3. 解压到 `%LOCALAPPDATA%\HuLa\WebView2FixedRuntime\149.0.4022.80`。
+4. 在当前 PowerShell 进程中设置：
    - `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` → 固定运行时目录
    - `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` → `--remote-debugging-port=9222`
-   - `WEBVIEW2_USER_DATA_FOLDER` → 临时测试目录
+   - `WEBVIEW2_USER_DATA_FOLDER` → **每个测试进程独立的临时目录**（GUID 命名，避免与日常 `%APPDATA%\com.hula.pc` 抢锁/污染）
 
 ## 验证
 
@@ -42,6 +43,8 @@ Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" |
 ## 与日常 HuLa 的关系
 
 脚本设置的 `WEBVIEW2_USER_DATA_FOLDER` 是每个测试进程独立的临时目录，不会污染日常 `%APPDATA%\com.hula.pc` 数据。固定运行时仅在当前 PowerShell 进程中生效，不影响系统 Evergreen WebView2。
+
+下载的 CAB 来自 Microsoft 官方 WebView2 Fixed Version Runtime 二进制（社区镜像托管），脚本通过固定 SHA256 哈希校验，确保解压执行的是预期版本。如需换源，可传 `-DownloadUrl` 与 `-ExpectedSha256`。
 
 ## 代码侧配合
 
