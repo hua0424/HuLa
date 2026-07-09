@@ -21,12 +21,16 @@ fn sanitize_sensitive_env() {
     ];
 
     for key in BLOCKED_VARS {
-        // WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 是注入向量（可向 WebView2 注入任意启动参数），
-        // sanitize 默认无条件剥离它。仅 debug 构建放行这一个变量，供 TEST-A 注入
-        // --remote-debugging-port 开启 CDP，让自动化测试 attach；release 构建 cfg 关闭、
-        // 不放行，该变量与其余三个一并被剥离（注入向量在发布产物中始终清除，语义不变）。
+        // WebView2 环境变量是注入向量。release 构建全部剥离；debug 构建放行
+        // CDP 调试所需的三个变量，供开发/自动化测试使用（其中 BROWSER_EXECUTABLE_FOLDER
+        // 用于锁定到固定版本 WebView2 Runtime，规避 Evergreen 更新导致 CDP 失效）。
         #[cfg(debug_assertions)]
-        if key == "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS" {
+        if matches!(
+            key,
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+                | "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER"
+                | "WEBVIEW2_USER_DATA_FOLDER"
+        ) {
             continue;
         }
         unsafe { std::env::remove_var(key) };
