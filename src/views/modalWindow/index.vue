@@ -24,7 +24,7 @@
         target-filterable
         v-model:value="selectedValue"
         :options="filteredOptions"
-        :render-source-list="renderSourceList()"
+        :render-source-list="renderSourceList('', true, '', roomId)"
         :render-target-label="renderLabel"
         :disabled-options="disabledOptions" />
 
@@ -53,11 +53,11 @@ const windowTitle = ref('')
 const selectedValue = ref([])
 // 从父窗口传递过来的 roomId
 const roomId = ref<string>('')
-// 使用model.tsx中的getDisabledOptions
-const disabledOptions = computed(() => getDisabledOptions())
+// 使用model.tsx中的getDisabledOptions（#173：按邀请目标群 roomId 判定，消漂移）
+const disabledOptions = computed(() => getDisabledOptions(roomId.value || undefined))
 
 // 使用model.tsx中的getFilteredOptions
-const filteredOptions = computed(() => getFilteredOptions())
+const filteredOptions = computed(() => getFilteredOptions(roomId.value || undefined))
 
 // 初始化群成员数据
 const initGroupMembers = async () => {
