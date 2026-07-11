@@ -301,6 +301,7 @@
                       </p>
                       <p
                         v-if="isSilentMember(item.uid)"
+                        data-testid="aiclaw-silent-badge"
                         class="text-(9px #d03050 center) w-34px truncate leading-tight"
                         :title="t('aiclaw.silent_badge')">
                         {{ t('aiclaw.silent_badge') }}
@@ -641,7 +642,7 @@ import { useSettingStore } from '@/stores/setting'
 import { useUserStore } from '@/stores/user.ts'
 import { useAiclawStore } from '@/stores/aiclaw'
 import { AvatarUtils } from '@/utils/AvatarUtils'
-import { isSilentAiclaw } from '@/utils/AiclawUtils'
+import { useSilentAiclaw } from '@/hooks/useSilentAiclaw'
 import { notification, setSessionTop, shield, updateRoomInfo } from '@/utils/ImRequestUtils'
 import { canvasToImageBytes } from '@/utils/Canvas2Dom'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
@@ -923,31 +924,8 @@ const userList = computed(() => {
     .slice(0, 10)
 })
 
-// REQ-009 #86：为侧边栏成员列表加载 AI 助理 approved 状态
-const isSilentMember = (uid: string): boolean => {
-  const roomId = currentSessionRoomId.value
-  if (!roomId) return false
-  const approved = chatStore.getAiclawGroupConfig(Number(uid), roomId)?.approved
-  const userInfo = groupStore.getUserInfo(uid)
-  return isSilentAiclaw(userInfo?.userType, approved)
-}
-
-const loadSilentConfigsForSidebar = async () => {
-  const roomId = currentSessionRoomId.value
-  if (!roomId) return
-  const aiclawMembers = groupStore.userList.filter((m) => m.userType === UserType.AICLAW)
-  await Promise.all(aiclawMembers.map((m) => chatStore.loadAiclawGroupConfig(Number(m.uid), roomId)))
-}
-
-watch(
-  () => groupStore.userList.length,
-  () => {
-    if (chatStore.isGroup) {
-      loadSilentConfigsForSidebar()
-    }
-  },
-  { immediate: true }
-)
+// REQ-009 #86 / #174：未批准 aiclaw 沉默标识，逻辑收敛到 useSilentAiclaw 单一事实源
+const { isSilentMember } = useSilentAiclaw()
 
 // 获取用户的最新头像
 const currentUserAvatar = computed(() => {
