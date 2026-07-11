@@ -213,12 +213,11 @@
 import MobileLayout from '#/components/MobileLayout.vue'
 import HeaderBar from '#/components/chat-room/HeaderBar.vue'
 import { type } from '@tauri-apps/plugin-os'
-import { OnlineEnum, RoleEnum, UserType } from '@/enums'
+import { OnlineEnum, RoleEnum } from '@/enums'
 import { useGroupStore } from '@/stores/group'
 import { useGlobalStore } from '@/stores/global'
-import { useChatStore } from '@/stores/chat'
 import { AvatarUtils } from '@/utils/AvatarUtils'
-import { isSilentAiclaw } from '@/utils/AiclawUtils'
+import { useSilentAiclaw } from '@/hooks/useSilentAiclaw'
 import router from '@/router'
 import { useI18n } from 'vue-i18n'
 
@@ -232,7 +231,6 @@ const emit = defineEmits<{
 
 const groupStore = useGroupStore()
 const globalStore = useGlobalStore()
-const chatStore = useChatStore()
 const dialog = useDialog()
 const { t } = useI18n()
 
@@ -243,22 +241,9 @@ const showDeleteConfirm = ref(false)
 const scrollHeight = ref(0)
 const scrollArea = ref<HTMLElement>()
 
-// REQ-009 #86：判断成员是否为「未批准的 AI 助理」，用于头像旁沉默标识
-const isSilentMember = (uid: string): boolean => {
-  const userInfo = groupStore.getUserInfo(uid)
-  const roomId = globalStore.currentSessionRoomId
-  if (!roomId || !userInfo) return false
-  const approved = chatStore.getAiclawGroupConfig(Number(uid), roomId)?.approved
-  return isSilentAiclaw(userInfo.userType, approved)
-}
-
-// 为当前群的所有 AI 助理成员加载 approved 状态
-const loadSilentConfigsForCurrentRoom = async () => {
-  const roomId = globalStore.currentSessionRoomId
-  if (!roomId) return
-  const aiclawMembers = groupStore.userList.filter((m) => m.userType === UserType.AICLAW)
-  await Promise.all(aiclawMembers.map((m) => chatStore.loadAiclawGroupConfig(Number(m.uid), roomId)))
-}
+// REQ-009 #86 / #174：未批准 aiclaw 沉默标识，逻辑收敛到 useSilentAiclaw 单一事实源。
+// 本页 onMounted 里显式拉取（autoWatch 关掉，避免与 onMounted 的 getGroupUserList 时序重复触发）。
+const { isSilentMember, loadSilentConfigsForCurrentRoom } = useSilentAiclaw({ autoWatch: false })
 
 // 判断是否为移动端视图
 const isMobileView = computed(() => {

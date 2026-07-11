@@ -149,9 +149,20 @@
                         @error="userLoadedMap[item.uid] = true" />
                     </div>
                     <n-flex vertical :size="2" class="flex-1 truncate">
-                      <p :title="item.name" class="text-12px truncate flex-1 leading-tight">
-                        {{ item.myName ? item.myName : item.name }}
-                      </p>
+                      <n-flex align="center" :size="4" class="flex-1 truncate">
+                        <p :title="item.name" class="text-12px truncate min-w-0 leading-tight">
+                          {{ item.myName ? item.myName : item.name }}
+                        </p>
+                        <!-- REQ-009 #86 / #174：未批准 aiclaw 的沉默标识，群内全员常驻可见 -->
+                        <span
+                          v-if="isSilentMember(item.uid)"
+                          data-testid="aiclaw-silent-badge"
+                          :aria-label="t('aiclaw.silent_badge')"
+                          class="text-9px px-3px py-1px rounded-3px bg-#d0305015 text-#d03050 flex-shrink-0 leading-tight"
+                          :title="t('aiclaw.silent_badge')">
+                          {{ t('aiclaw.silent_badge') }}
+                        </span>
+                      </n-flex>
                       <n-flex
                         v-if="item.userStateId && getUserState(item.userStateId)"
                         align="center"
@@ -200,6 +211,7 @@ import { useMitt } from '@/hooks/useMitt.ts'
 import { usePopover } from '@/hooks/usePopover.ts'
 import { useWindow } from '@/hooks/useWindow.ts'
 import { useLinkSegments } from '@/hooks/useLinkSegments'
+import { useSilentAiclaw } from '@/hooks/useSilentAiclaw'
 import type { UserItem } from '@/services/types'
 import { WsResponseMessageType } from '@/services/wsType.ts'
 import { useGlobalStore } from '@/stores/global.ts'
@@ -243,6 +255,8 @@ const infoPopoverRefs = ref<Record<string, any>>([])
 const inputInstRef = ref<InputInst | null>(null)
 const isCollapsed = ref(false)
 const { optionsList, report, selectKey } = useChatMain()
+// REQ-009 #86 / #174：未批准 aiclaw 沉默标识（常驻成员面板全员可见）
+const { isSilentMember } = useSilentAiclaw()
 const { handlePopoverUpdate, enableScroll } = usePopover(selectKey, 'image-chat-sidebar')
 provide('popoverControls', { enableScroll })
 
