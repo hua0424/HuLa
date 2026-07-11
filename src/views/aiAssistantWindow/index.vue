@@ -300,13 +300,24 @@
 
       <!-- REQ-004: Group settings view -->
       <div v-else-if="selectedItem && rightView === 'groupSettings'" class="flex-1 flex flex-col overflow-hidden">
-        <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
-          <svg
-            class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors"
-            @click="handleBackToDetail">
-            <use href="#left"></use>
-          </svg>
-          <span class="text-15px font-500 text-[--text-color]">{{ t('aiclaw.group_settings.title') }}</span>
+        <div class="flex items-center justify-between gap-8px px-24px py-12px border-b border-[--line-color]">
+          <div class="flex items-center gap-8px min-w-0">
+            <svg
+              class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors flex-shrink-0"
+              @click="handleBackToDetail">
+              <use href="#left"></use>
+            </svg>
+            <span class="text-15px font-500 text-[--text-color] truncate">{{ t('aiclaw.group_settings.title') }}</span>
+          </div>
+          <!-- #173 方案 b：owner 视角把该 aiclaw 添加到自己的群，复用邀请链路 -->
+          <n-button
+            size="small"
+            type="primary"
+            secondary
+            data-testid="aiclaw-add-to-group-button"
+            @click="showAddToGroup = true">
+            + {{ t('aiclaw.group_settings.add_to_group') }}
+          </n-button>
         </div>
         <div class="flex-1 overflow-auto">
           <template v-if="sortedGroupConfigList.length > 0">
@@ -383,6 +394,14 @@
     <!-- Delete confirm dialog -->
     <AiclawDeleteConfirmDialog v-model:visible="showDeleteDialog" @confirm="handleDeleteConfirm" />
 
+    <!-- #173 方案 b：添加到群选择器 -->
+    <AiclawAddToGroupModal
+      v-if="selectedItem"
+      v-model:visible="showAddToGroup"
+      :aiclaw-uid="selectedItem.uid"
+      :aiclaw-name="selectedItem.name"
+      @invited="handleAddedToGroup" />
+
     <!-- F18: Relation edit dialog -->
     <n-modal
       v-model:show="showRelationDialog"
@@ -421,6 +440,7 @@ import AiclawCreateForm from '@/components/aiclaw/AiclawCreateForm.vue'
 import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
 import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
 import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
+import AiclawAddToGroupModal from '@/components/aiclaw/AiclawAddToGroupModal.vue'
 import { ImUrlEnum } from '@/enums'
 import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
 import { isDesktop, isWeb } from '@/utils/PlatformConstants'
@@ -491,6 +511,8 @@ type RightView = 'detail' | 'conversations' | 'conversationMessages' | 'friends'
 const showCreateForm = ref(false)
 const showTokenDialog = ref(false)
 const showDeleteDialog = ref(false)
+// #173 方案 b：添加到群选择器可见性
+const showAddToGroup = ref(false)
 const createdToken = ref('')
 const viewingUid = ref('')
 const deletingUid = ref('')
@@ -789,6 +811,20 @@ const handleOpenGroupSettings = async () => {
     groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(selectedUid.value))
   } catch (error) {
     console.error('[AiAssistant] Failed to load group configs:', error)
+  } finally {
+    groupConfigLoading.value = false
+  }
+}
+
+// #173 方案 b：添加到群成功后，刷新该 aiclaw 的群配置列表，让新群卡片（未批准态）即时出现
+const handleAddedToGroup = async () => {
+  if (!selectedUid.value) return
+  groupConfigLoading.value = true
+  try {
+    await chatStore.loadAiclawGroupConfigs(Number(selectedUid.value))
+    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(selectedUid.value))
+  } catch (error) {
+    console.error('[AiAssistant] Failed to reload group configs after add:', error)
   } finally {
     groupConfigLoading.value = false
   }

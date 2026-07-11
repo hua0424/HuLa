@@ -128,7 +128,15 @@
     "load_failed": "加载群聊配置失败",
     "batch_title": "AI 助理入群配置",
     "batch_subtitle": "请为新加入的 AI 助理批准入群并设置工作目录",
-    "config_changed": "AI 助理 {name} 的群聊配置已更新"
+    "config_changed": "AI 助理 {name} 的群聊配置已更新",
+    "add_to_group": "添加到群",
+    "add_to_group_title": "添加到群",
+    "add_to_group_subtitle": "选择一个群，把该 AI 助理邀请进群",
+    "add_to_group_placeholder": "选择群聊",
+    "add_to_group_empty": "没有可添加的群（该助理已在你的全部群中，或你还没有群聊）",
+    "add_to_group_confirm": "添加",
+    "add_to_group_success": "已发送入群邀请",
+    "add_to_group_failed": "添加到群失败"
   },
   "auto_reply_tag": "自动回复",
   "notice": {
