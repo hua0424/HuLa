@@ -33,25 +33,28 @@ export const options = computed(() => {
 })
 
 // 获取已禁用选项的值列表
-export const getDisabledOptions = () => {
-  // 当前选中的房间id
-  const currentRoomId = globalStore.currentSessionRoomId
+// #173：显式传入邀请目标群 roomId，直接读该群成员集合（getUserListByRoomId），
+// 不再依赖环境态 currentSessionRoomId——独立邀请弹窗窗口里后者可能滞后/不同，
+// 叠加 userList 异步分批加载会造成同屏 disabled 状态漂移。不传时回退当前会话群（保留既有行为）。
+export const getDisabledOptions = (roomId?: string) => {
+  const targetRoomId = roomId || globalStore.currentSessionRoomId
+  if (!targetRoomId) return []
 
-  if (!currentRoomId || !groupStore.userList.length) return []
+  const members = roomId ? groupStore.getUserListByRoomId(roomId) : groupStore.userList
+  if (!members.length) return []
 
   // 确保返回群内所有成员的UID
-  const result = groupStore.userList.map((member) => member.uid)
-  return result
+  return members.map((member) => member.uid)
 }
 
 // 获取过滤后的选项列表
-export const getFilteredOptions = () => {
-  // 获取禁用选项列表
-  const disabledOptions = getDisabledOptions()
-  // 当前选中的房间id
-  const currentRoomId = globalStore.currentSessionRoomId
+export const getFilteredOptions = (roomId?: string) => {
+  // 获取禁用选项列表（按目标群）
+  const disabledOptions = getDisabledOptions(roomId)
+  // 目标房间id
+  const targetRoomId = roomId || globalStore.currentSessionRoomId
   // 如果没有房间ID，返回所有好友
-  if (!currentRoomId) return options.value
+  if (!targetRoomId) return options.value
 
   // 标记已在群内的好友
   return options.value.map((option: { value: string; label: string; avatar?: string; [key: string]: any }) => {
@@ -74,11 +77,13 @@ export const getFilteredOptions = () => {
 export const renderSourceList = (
   preSelectedFriendId = '',
   enablePreSelection = true,
-  placeholder = ''
+  placeholder = '',
+  roomId = ''
 ): TransferRenderSourceList => {
   return ({ onCheck, checkedOptions, pattern }) => {
     // 使用过滤后的选项列表，确保已在群内的好友被正确标记为禁用
-    const baseOptions = getFilteredOptions()
+    // #173：按邀请目标群 roomId 判定，消除 currentSessionRoomId 竞态漂移
+    const baseOptions = getFilteredOptions(roomId || undefined)
 
     // 根据搜索模式进一步过滤
     const displayOptions = pattern
