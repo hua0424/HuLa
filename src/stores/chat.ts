@@ -1404,13 +1404,19 @@ export const useChatStore = defineStore(
         sessionUnreadStore.setLastRead(userStore.userInfo?.uid, roomId, 0)
 
         if (globalStore.currentSessionRoomId === roomId) {
-          globalStore.updateCurrentSessionRoomId(sessionList.value[0].roomId)
+          globalStore.updateCurrentSessionRoomId(sessionList.value[0]?.roomId ?? '')
         }
 
         // 删除会话后更新未读计数
         requestUnreadCountUpdate()
       }
       removeUnreadCountCache(roomId)
+    }
+
+    // 统一处理会话解散/失效后的清理（在线 ROOM_DISSOLUTION 与离线同步刷新共用）
+    const removeDissolvedSession = (roomId: string) => {
+      removeSession(roomId)
+      groupStore.removeGroupDetail(roomId)
     }
 
     // 监听 Worker 消息
@@ -2144,6 +2150,7 @@ export const useChatStore = defineStore(
       loadMore,
       currentMsgReply,
       sessionList,
+      sessionMap,
       sessionOptions,
       syncLoading,
       getSessionList,
@@ -2165,6 +2172,7 @@ export const useChatStore = defineStore(
       fetchCurrentRoomRemoteOnce,
       getGroupSessions,
       removeSession,
+      removeDissolvedSession,
       changeRoom,
       addSession,
       setAllSessionMsgList,

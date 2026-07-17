@@ -385,13 +385,15 @@ useMitt.on(WsResponseMessageType.ONLINE, async (onStatusChangeType: OnStatusChan
 
 useMitt.on(WsResponseMessageType.ROOM_DISSOLUTION, async (roomId: string) => {
   console.log('收到群解散通知', roomId)
-  // 移除群聊的会话
-  chatStore.removeSession(roomId)
-  // 移除群聊的详情
-  groupStore.removeGroupDetail(roomId)
-  // 如果当前会话为解散的群聊，切换到第一个会话
-  if (globalStore.currentSessionRoomId === roomId) {
-    globalStore.currentSessionRoomId = chatStore.sessionList[0].roomId
+  chatStore.removeDissolvedSession(roomId)
+})
+
+useMitt.on(MittEnum.CONTACTS_SYNCED, async () => {
+  console.log('收到联系人列表同步完成通知')
+  const previousRoomId = globalStore.currentSessionRoomId
+  await chatStore.getSessionList(true)
+  if (previousRoomId && !chatStore.getSession(previousRoomId)) {
+    chatStore.removeDissolvedSession(previousRoomId)
   }
 })
 

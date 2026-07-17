@@ -10,12 +10,13 @@ use entity::im_contact;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info};
 
 #[tauri::command]
 pub async fn list_contacts_command(
+    app_handle: AppHandle,
     state: State<'_, AppData>,
 ) -> Result<Vec<im_contact::Model>, String> {
     info!("Querying all conversation list:");
@@ -39,8 +40,9 @@ pub async fn list_contacts_command(
                 let db_conn = state.db_conn.clone();
                 let rc = state.rc.clone();
                 let uid = login_uid.clone();
+                let app_handle = app_handle.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = fetch_and_update_contacts(db_conn, rc, uid).await {
+                    if let Err(e) = fetch_and_update_contacts(app_handle, db_conn, rc, uid).await {
                         error!("Background contact sync failed: {:?}", e);
                     }
                 });
@@ -50,9 +52,13 @@ pub async fn list_contacts_command(
 
         // 本地无数据，从网络获取
         info!("No local contacts, fetching from network");
-        let data =
-            fetch_and_update_contacts(state.db_conn.clone(), state.rc.clone(), login_uid.clone())
-                .await?;
+        let data = fetch_and_update_contacts(
+            app_handle,
+            state.db_conn.clone(),
+            state.rc.clone(),
+            login_uid.clone(),
+        )
+        .await?;
         return Ok(data);
     }
     .await;
@@ -68,6 +74,7 @@ pub async fn list_contacts_command(
 
 /// 获取并更新联系人数据
 async fn fetch_and_update_contacts(
+    app_handle: AppHandle,
     db_conn: Arc<RwLock<DatabaseConnection>>,
     request_client: Arc<Mutex<ImRequestClient>>,
     login_uid: String,
@@ -98,6 +105,11 @@ async fn fetch_and_update_contacts(
                     e
                 )
             })?;
+
+        // 同步完成后通知前端刷新会话列表（离线错过群解散推送的兜底刷新）
+        if let Err(e) = app_handle.emit("contacts-synced", ()) {
+            error!("Failed to emit contacts-synced event: {}", e);
+        }
 
         Ok(data)
     } else {

@@ -123,7 +123,9 @@ export enum MittEnum {
   /** 会话切换完成*/
   SESSION_CHANGED = 'sessionChanged',
   /** 更新会话最后一条消息 */
-  UPDATE_SESSION_LAST_MSG = 'updateSessionLastMsg'
+  UPDATE_SESSION_LAST_MSG = 'updateSessionLastMsg',
+  /** 联系人列表后台同步完成 */
+  CONTACTS_SYNCED = 'contactsSynced'
 }
 
 /** 主题类型 */

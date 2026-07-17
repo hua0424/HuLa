@@ -71,7 +71,13 @@ export const useMessage = () => {
     try {
       await ensureGroupMembersSynced(roomId, item.type)
     } catch (error) {
-      console.error('[useMessage] 同步群成员失败:', error)
+      console.error('[useMessage] 同步群成员失败，尝试刷新会话列表确认房间是否已失效:', error)
+      // 强拉一次服务端会话列表，不依赖后端错误文案字符串匹配
+      await chatStore.getSessionList(true)
+      if (!chatStore.getSession(roomId)) {
+        // 房间已不在服务端列表中，按解散/失效统一清理
+        chatStore.removeDissolvedSession(roomId)
+      }
     }
   }
 
