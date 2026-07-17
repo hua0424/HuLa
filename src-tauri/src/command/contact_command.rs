@@ -9,6 +9,7 @@ use crate::repository::im_contact_repository::{
 use entity::im_contact;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{Mutex, RwLock};
@@ -79,6 +80,12 @@ async fn fetch_and_update_contacts(
     request_client: Arc<Mutex<ImRequestClient>>,
     login_uid: String,
 ) -> Result<Vec<im_contact::Model>, CommonError> {
+    // 进入时先读取本地列表，用于后续 diff；列表无变化时不 emit，避免自激环（P1-2）
+    let local_contacts = list_contact(&*db_conn.read().await, &login_uid)
+        .await
+        .unwrap_or_default();
+    let local_rooms: HashSet<String> = local_contacts.into_iter().map(|c| c.room_id).collect();
+
     let old_tokens = capture_token_snapshot_arc(&request_client).await;
 
     let resp: Option<Vec<im_contact::Model>> = request_client
@@ -94,21 +101,26 @@ async fn fetch_and_update_contacts(
     persist_token_if_refreshed_arc(&old_tokens, &request_client, &db_conn, &login_uid).await;
 
     if let Some(data) = resp {
-        // 保存到本地数据库
-        save_contact_batch(&*db_conn.read().await, data.clone(), &login_uid)
-            .await
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "[{}:{}] Failed to save contact data to local database: {}",
-                    file!(),
-                    line!(),
-                    e
-                )
-            })?;
+        let remote_rooms: HashSet<String> = data.iter().map(|c| c.room_id.clone()).collect();
+        let changed = remote_rooms != local_rooms;
 
-        // 同步完成后通知前端刷新会话列表（离线错过群解散推送的兜底刷新）
-        if let Err(e) = app_handle.emit("contacts-synced", ()) {
-            error!("Failed to emit contacts-synced event: {}", e);
+        if changed {
+            // 保存到本地数据库
+            save_contact_batch(&*db_conn.read().await, data.clone(), &login_uid)
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "[{}:{}] Failed to save contact data to local database: {}",
+                        file!(),
+                        line!(),
+                        e
+                    )
+                })?;
+
+            // 同步完成后通知前端刷新会话列表（离线错过群解散推送的兜底刷新）
+            if let Err(e) = app_handle.emit("contacts-synced", ()) {
+                error!("Failed to emit contacts-synced event: {}", e);
+            }
         }
 
         Ok(data)

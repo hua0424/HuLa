@@ -53,12 +53,19 @@ vi.mock('@/utils/TauriInvokeHandler', () => ({
   invokeWithErrorHandler: vi.fn().mockResolvedValue(undefined),
   invokeSilently: vi.fn().mockResolvedValue(undefined)
 }))
+vi.mock('@/utils/PlatformConstants', () => ({
+  isWeb: () => false,
+  isMobile: () => false,
+  isWindows: () => true,
+  isMac: () => false
+}))
 
 import { useChatStore } from '@/stores/chat'
 import { useGlobalStore } from '@/stores/global'
 import { useGroupStore } from '@/stores/group'
 import { RoomTypeEnum } from '@/enums'
 import type { SessionItem } from '@/services/types'
+import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 
 const makeSession = (roomId: string): SessionItem =>
   ({
@@ -143,5 +150,22 @@ describe('useChatStore removeDissolvedSession (#179)', () => {
 
     expect(chatStore.sessionList.map((s) => s.roomId)).toEqual(['room-2'])
     expect(globalStore.currentSessionRoomId).toBe('room-2')
+  })
+
+  it('getSessionList 强拉后从 sessionMap 中清理已消失的 roomId（P1-1）', async () => {
+    const chatStore = useChatStore()
+
+    const s1 = makeSession('room-1')
+    const s2 = makeSession('room-2')
+    chatStore.sessionList = [s1, s2]
+    chatStore.sessionMap = { 'room-1': s1, 'room-2': s2 }
+
+    vi.mocked(invokeWithErrorHandler).mockResolvedValueOnce([s2])
+
+    await chatStore.getSessionList(true)
+
+    expect(chatStore.sessionList.map((s) => s.roomId)).toEqual(['room-2'])
+    expect(chatStore.sessionMap['room-1']).toBeUndefined()
+    expect(chatStore.sessionMap['room-2']).toBeDefined()
   })
 })

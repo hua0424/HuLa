@@ -179,7 +179,7 @@ const handleSelfRemove = async (roomId: string) => {
 
   // 如果当前会话就是被移除的群聊，切换到其他会话
   if (globalStore.currentSessionRoomId === roomId) {
-    globalStore.updateCurrentSessionRoomId(chatStore.sessionList[0].roomId)
+    globalStore.updateCurrentSessionRoomId(chatStore.sessionList[0]?.roomId ?? '')
   }
 }
 
@@ -389,8 +389,8 @@ useMitt.on(WsResponseMessageType.ROOM_DISSOLUTION, async (roomId: string) => {
 })
 
 useMitt.on(MittEnum.CONTACTS_SYNCED, async () => {
-  console.log('收到联系人列表同步完成通知')
   const previousRoomId = globalStore.currentSessionRoomId
+  console.log('收到联系人列表同步完成通知，当前会话:', previousRoomId)
   await chatStore.getSessionList(true)
   if (previousRoomId && !chatStore.getSession(previousRoomId)) {
     chatStore.removeDissolvedSession(previousRoomId)

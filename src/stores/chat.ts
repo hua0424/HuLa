@@ -118,10 +118,8 @@ export const useChatStore = defineStore(
     }
 
     // 将已有的会话列表同步到 sessionMap，解决持久化恢复或请求失败时 map 为空的问题
+    // 同时按 sessionList 全量重建，清理已不在列表中的幽灵 roomId（P1-1）
     const rebuildSessionMap = () => {
-      if (!sessionList.value.length) {
-        return
-      }
       sessionMap.value = sessionList.value.reduce(
         (map, session) => {
           map[session.roomId] = session
@@ -629,12 +627,10 @@ export const useChatStore = defineStore(
             unreadCountManager.refreshBadge(globalStore.unReadMark, feedStore.unreadCount)
             return
           }
-          // 将会话数据写入 sessionList 并更新 sessionMap
+          // 将会话数据写入 sessionList 并全量重建 sessionMap（清理已消失的 roomId）
           const list = Array.isArray(data) ? data : data.list || []
           sessionList.value = [...list]
-          for (const session of sessionList.value) {
-            sessionMap.value[session.roomId] = session
-          }
+          rebuildSessionMap()
           sortAndUniqueSessionList()
           sessionOptions.isLoading = false
           globalStore.unreadReady = true
@@ -680,10 +676,8 @@ export const useChatStore = defineStore(
         syncPersistedUnreadCounts()
         sessionOptions.isLoading = false
 
-        // 同步更新 sessionMap
-        for (const session of sessionList.value) {
-          sessionMap.value[session.roomId] = session
-        }
+        // 全量重建 sessionMap，清理已不在新列表中的幽灵 roomId
+        rebuildSessionMap()
 
         sortAndUniqueSessionList()
 
