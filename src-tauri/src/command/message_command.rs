@@ -950,6 +950,7 @@ mod tests {
             },
             message: Message {
                 id: Some("m1".to_string()),
+                client_msg_id: None,
                 room_id: Some("r1".to_string()),
                 message_type: Some(1),
                 body: Some(json!({"content": "hello"})),
