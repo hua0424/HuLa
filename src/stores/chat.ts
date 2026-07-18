@@ -1397,14 +1397,16 @@ export const useChatStore = defineStore(
         delete lastReadActiveTime.value[roomId]
         sessionUnreadStore.setLastRead(userStore.userInfo?.uid, roomId, 0)
 
-        if (globalStore.currentSessionRoomId === roomId) {
-          globalStore.updateCurrentSessionRoomId(sessionList.value[0]?.roomId ?? '')
-        }
-
         // 删除会话后更新未读计数
         requestUnreadCountUpdate()
       }
       removeUnreadCountCache(roomId)
+
+      // 无论会话是否已在 store 中被清理（例如 getSessionList(true) 已重建列表），
+      // 只要当前会话是该 roomId，就安全切走，避免 currentSessionRoomId 指向幽灵会话
+      if (globalStore.currentSessionRoomId === roomId) {
+        globalStore.updateCurrentSessionRoomId(sessionList.value[0]?.roomId ?? '')
+      }
     }
 
     // 统一处理会话解散/失效后的清理（在线 ROOM_DISSOLUTION 与离线同步刷新共用）

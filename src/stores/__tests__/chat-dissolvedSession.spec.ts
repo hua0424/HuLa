@@ -152,6 +152,30 @@ describe('useChatStore removeDissolvedSession (#179)', () => {
     expect(globalStore.currentSessionRoomId).toBe('room-2')
   })
 
+  it('removeDissolvedSession 在会话已被 getSessionList 清理后仍重置当前会话', async () => {
+    const chatStore = useChatStore()
+    const globalStore = useGlobalStore()
+
+    const s1 = makeSession('room-1')
+    const s2 = makeSession('room-2')
+    chatStore.sessionList = [s1, s2]
+    chatStore.sessionMap = { 'room-1': s1, 'room-2': s2 }
+    globalStore.currentSessionRoomId = 'room-1'
+
+    // 模拟后台同步后 room-1 已从列表中消失
+    vi.mocked(invokeWithErrorHandler).mockResolvedValueOnce([s2])
+    await chatStore.getSessionList(true)
+
+    // 此时 store 中已无 room-1，但 currentSessionRoomId 仍指向它
+    expect(chatStore.getSession('room-1')).toBeUndefined()
+    expect(globalStore.currentSessionRoomId).toBe('room-1')
+
+    // 统一清理入口应把当前会话切走
+    chatStore.removeDissolvedSession('room-1')
+
+    expect(globalStore.currentSessionRoomId).toBe('room-2')
+  })
+
   it('getSessionList 强拉后从 sessionMap 中清理已消失的 roomId（P1-1）', async () => {
     const chatStore = useChatStore()
 
