@@ -55,7 +55,8 @@ export const useSettingStore = defineStore(StoresEnum.SETTING, {
     chat: {
       sendKey: 'Enter',
       isDouble: true,
-      translate: 'youdao'
+      translate: 'youdao',
+      showThinking: true
     },
     shortcuts: getDefaultShortcuts(),
     page: {
@@ -162,9 +163,16 @@ export const useSettingStore = defineStore(StoresEnum.SETTING, {
     /** 设置发送消息快捷键 */
     setSendMessageShortcut(shortcut: string) {
       if (!this.chat) {
-        this.chat = { sendKey: 'Enter', isDouble: true, translate: 'youdao' }
+        this.chat = { sendKey: 'Enter', isDouble: true, translate: 'youdao', showThinking: true }
       }
       this.chat.sendKey = shortcut
+    },
+    /** 设置是否显示 AI 思考过程（REQ-014） */
+    setShowThinking(enabled: boolean) {
+      if (!this.chat) {
+        this.chat = { sendKey: 'Enter', isDouble: true, translate: 'youdao', showThinking: true }
+      }
+      this.chat.showThinking = enabled
     },
     /** 设置全局快捷键开关状态 */
     setGlobalShortcutEnabled(enabled: boolean) {

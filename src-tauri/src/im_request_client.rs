@@ -670,8 +670,8 @@ pub enum ImUrl {
     AiclawSetRelation,
     AiclawGroupConfigList,
     AiclawGroupConfigUpdate,
-    AiclawThinkingList,
     AiclawThinkingDetail,
+    AiclawThinkingByTrigger,
 
     FileSignDownload,
 }
@@ -1011,8 +1011,8 @@ impl ImUrl {
             ),
             ImUrl::AiclawGroupConfigList => (http::Method::GET, "im/aiclaw/group/config"),
             ImUrl::AiclawGroupConfigUpdate => (http::Method::PUT, "im/aiclaw/group/config"),
-            ImUrl::AiclawThinkingList => (http::Method::GET, "im/aiclaw/thinking/list"),
             ImUrl::AiclawThinkingDetail => (http::Method::GET, "im/aiclaw/thinking/{thinkingId}"),
+            ImUrl::AiclawThinkingByTrigger => (http::Method::POST, "im/aiclaw/thinking/by-trigger"),
 
             ImUrl::FileSignDownload => (http::Method::POST, "im/file/sign-download"),
         }
@@ -1313,8 +1313,8 @@ impl ImUrl {
             "aiclawSetRelation" => Ok(ImUrl::AiclawSetRelation),
             "aiclawGroupConfigList" => Ok(ImUrl::AiclawGroupConfigList),
             "aiclawGroupConfigUpdate" => Ok(ImUrl::AiclawGroupConfigUpdate),
-            "aiclawThinkingList" => Ok(ImUrl::AiclawThinkingList),
             "aiclawThinkingDetail" => Ok(ImUrl::AiclawThinkingDetail),
+            "aiclawThinkingByTrigger" => Ok(ImUrl::AiclawThinkingByTrigger),
 
             "fileSignDownload" => Ok(ImUrl::FileSignDownload),
 

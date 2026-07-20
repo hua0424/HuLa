@@ -69,16 +69,15 @@ The Windows tester drives the desktop client via playwright-cli over CDP and **l
 | `message-sender-name` (+ `data-from-user-uid` / `data-user-type`) | group sender name span; data-* associate name↔uid↔userType (no visible badge) | `components/rightBox/renderMessage/index.vue` |
 | `audio-call-message` / `video-call-message` | call-message bubble root | `renderMessage/AudioCall.vue` / `VideoCall.vue` |
 | `markdown-content` / `image-content` | content inside a bubble | `renderMessage/Text.vue` / `Image.vue` |
-| `typing-status` | streaming-reply status badge | `components/rightBox/chatBox/ThinkingCard.vue` |
+| `typing-status` | streaming-reply / AI 思考状态徽章 | `components/rightBox/chatBox/InlineThinkingCard.vue` |
+| `chat-header-show-thinking-switch` | 聊天头部「显示 AI 思考」开关 | `components/rightBox/chatBox/ChatHeader.vue` |
+| `inline-thinking-card` | 锚定在触发消息下方的 AI 思考卡根 | `components/rightBox/chatBox/InlineThinkingCard.vue` |
 | `session-list` / `new-chat-button` | conversation list + "+" entry | `views/homeWindow/message/index.vue` / `layout/center/index.vue` |
 | `aiclaw-group-settings-menu` | 群聊成员右键「群设置」菜单项 | `hooks/useChatMain.ts` |
 | `aiclaw-group-config-modal` | 群内 aiclaw 配置弹窗根 | `components/rightBox/chatBox/ChatMain.vue` |
 | `aiclaw-group-config-rate-limit` / `aiclaw-group-config-daily-limit` / `aiclaw-group-config-respond-ai` / `aiclaw-group-config-mention` / `aiclaw-group-config-save` | aiclaw 群配置表单字段与保存按钮 | `components/aiclaw/AiclawGroupConfigForm.vue` |
 | `aiclaw-silent-badge` | 未批准 aiclaw 沉默标识（常驻群成员面板 + 抽屉 + 群成员管理页） | `components/rightBox/chatBox/ChatSidebar.vue` 等（逻辑 `hooks/useSilentAiclaw.ts`） |
 | `aiclaw-add-to-group-button` / `aiclaw-add-to-group-modal` / `aiclaw-add-to-group-select` / `aiclaw-add-to-group-confirm` / `aiclaw-add-to-group-empty` | AI 助理面板「添加到群」入口与选群弹窗 | `views/aiAssistantWindow/index.vue` / `components/aiclaw/AiclawAddToGroupModal.vue` |
-| `thinking-archive-entry` | thinking 归档入口（群聊/私聊显示「查看 AI 思考记录」） | `components/rightBox/chatBox/ThinkingPanel.vue` |
-| `thinking-archive-drawer` | thinking 归档抽屉根 | `components/rightBox/chatBox/ThinkingPanel.vue` |
-| `thinking-archive-drawer-close` | thinking 归档抽屉关闭按钮 | `components/rightBox/chatBox/ThinkingPanel.vue` |
 | `chat-footer-file` / `chat-footer-image` / `chat-footer-voice` | 桌面端底部文件/图片/语音上传按钮 | `components/rightBox/chatBox/ChatFooter.vue` |
 | `mobile-voice-button` / `mobile-emoji-button` / `mobile-more-button` / `mobile-send-button` | 移动端输入栏语音/表情/更多/发送按钮 | `components/rightBox/MsgInput.vue` |
 | `mobile-more-item-file` / `mobile-more-item-image` / `mobile-more-item-video` / `mobile-more-item-history` / `mobile-more-item-videocall` | 移动端更多面板功能入口 | `mobile/components/chat-room/panel/More.vue` |

@@ -100,10 +100,7 @@
     "review": "View thinking content",
     "review_loading": "Loading...",
     "review_error": "Failed to load thinking content",
-    "truncated": "Content too long, truncated",
-    "archive_entry": "View AI thinking history ({count})",
-    "archive_title": "AI Thinking History",
-    "archive_empty": "No thinking history"
+    "truncated": "Content too long, truncated"
   },
   "group_settings": {
     "title": "Group Chat Settings",

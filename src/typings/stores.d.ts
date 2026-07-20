@@ -51,6 +51,8 @@ declare namespace STO {
       isDouble: boolean
       /** 翻译提供商 */
       translate: 'youdao' | 'tencent'
+      /** 是否显示 AI 思考过程（REQ-014） */
+      showThinking: boolean
     }
     /** 快捷键设置 */
     shortcuts: {

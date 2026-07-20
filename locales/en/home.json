@@ -158,7 +158,8 @@
       "screen_share": "Screen share",
       "remote_assist": "Remote assist",
       "invite_to_group": "Invite to group",
-      "start_group_chat": "Start group chat"
+      "start_group_chat": "Start group chat",
+      "show_thinking": "Show AI thinking"
     },
     "sidebar": {
       "single": {

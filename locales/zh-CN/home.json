@@ -155,7 +155,8 @@
       "screen_share": "屏幕共享",
       "remote_assist": "远程协助",
       "invite_to_group": "邀请进群",
-      "start_group_chat": "发起群聊"
+      "start_group_chat": "发起群聊",
+      "show_thinking": "显示 AI 思考"
     },
     "sidebar": {
       "single": {
