@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { AppException, ErrorType } from '@/common/exception'
+import { isErrorToastSuppressed } from '@/utils/errorToastSuppression'
 
 /**
  * Tauri invoke 调用的统一错误处理包装器
@@ -23,6 +24,8 @@ export async function invokeWithErrorHandler<T = any>(
   }
 ): Promise<T> {
   const { showError = true, customErrorMessage, isRetryError = false, errorType = ErrorType.Unknown } = options || {}
+  // #179 TC-03：幽灵会话选中窗口内，该 roomId 相关请求的错误 toast 统一压制
+  const effectiveShowError = showError && !isErrorToastSuppressed(args)
 
   try {
     const result = await invoke<T>(command, args)
@@ -45,7 +48,7 @@ export async function invokeWithErrorHandler<T = any>(
     // 使用 AppException 统一处理错误
     throw new AppException(errorMessage, {
       type: errorType,
-      showError,
+      showError: effectiveShowError,
       isRetryError,
       details: {
         command,

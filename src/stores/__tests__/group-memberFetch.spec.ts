@@ -45,16 +45,26 @@ describe('useGroupStore 成员拉取错误提示抑制（#179 TC-03）', () => {
     expect(groupListMemberMock).toHaveBeenCalledWith('room-1', { showError: true })
   })
 
-  it('suppressMemberFetchError 窗口内：底层请求以 showError:false 发起；释放后恢复', async () => {
-    const groupStore = useGroupStore()
+  it('suppressMemberFetchError 窗口内：底层请求以 showError:false 发起；延迟释放后恢复', async () => {
+    vi.useFakeTimers()
+    try {
+      const groupStore = useGroupStore()
 
-    groupStore.suppressMemberFetchError('room-1')
-    await groupStore.getGroupUserList('room-1', true)
-    expect(groupListMemberMock).toHaveBeenLastCalledWith('room-1', { showError: false })
+      groupStore.suppressMemberFetchError('room-1')
+      await groupStore.getGroupUserList('room-1', true)
+      expect(groupListMemberMock).toHaveBeenLastCalledWith('room-1', { showError: false })
 
-    groupStore.releaseMemberFetchError('room-1')
-    await groupStore.getGroupUserList('room-1', true)
-    expect(groupListMemberMock).toHaveBeenLastCalledWith('room-1', { showError: true })
+      // 释放是 5s 延迟生效：覆盖点击后组件挂载的迟到成员拉取（TC-03 漏弹教训）
+      groupStore.releaseMemberFetchError('room-1')
+      await groupStore.getGroupUserList('room-1', true)
+      expect(groupListMemberMock).toHaveBeenLastCalledWith('room-1', { showError: false })
+
+      await vi.advanceTimersByTimeAsync(5000)
+      await groupStore.getGroupUserList('room-1', true)
+      expect(groupListMemberMock).toHaveBeenLastCalledWith('room-1', { showError: true })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('markRoomDissolved 后：成员拉取直接短路返回空列表，不再发起请求', async () => {

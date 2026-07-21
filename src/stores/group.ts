@@ -4,6 +4,11 @@ import type { GroupDetailReq, UserItem } from '@/services/types'
 import { useGlobalStore } from '@/stores/global'
 import { useUserStore } from '@/stores/user'
 import * as ImRequestUtils from '@/utils/ImRequestUtils'
+import {
+  isRoomErrorToastSuppressed,
+  releaseErrorToastsForRoom,
+  suppressErrorToastsForRoom
+} from '@/utils/errorToastSuppression'
 import { useChatStore } from './chat'
 
 export const useGroupStore = defineStore(
@@ -30,18 +35,19 @@ export const useGroupStore = defineStore(
     const memberOrderCounters = reactive<Record<string, number>>({})
     const onlineCountMap = reactive<Record<string, number>>({})
 
-    // #179：选中会话期间按 roomId 抑制底层成员拉取的网络错误弹窗；
-    // 幽灵会话由 useMessage 兜底统一清理并给出优雅提示，瞬时错误由调用方补回提示
-    const memberErrorSuppressedRoomIds = reactive(new Set<string>())
+    // #179：选中会话期间按 roomId 抑制相关请求的网络错误弹窗（注册表见 errorToastSuppression），
+    // 幽灵会话由 useMessage 兜底统一清理并给出优雅提示，瞬时错误由调用方补回提示。
+    // 抑制/释放动作落到中央注册表，invokeWithErrorHandler 对所有带该 roomId 的请求统一压制；
+    // 本 store 的 getGroupUserList 同步读取同一注册表决定底层请求是否带 showError。
     // 已确认解散/失效的房间：成员拉取直接短路，避免任何迟到/重复请求再弹错误
     const dissolvedRoomIds = reactive(new Set<string>())
 
     const suppressMemberFetchError = (roomId: string) => {
-      if (roomId) memberErrorSuppressedRoomIds.add(roomId)
+      suppressErrorToastsForRoom(roomId)
     }
 
     const releaseMemberFetchError = (roomId: string) => {
-      if (roomId) memberErrorSuppressedRoomIds.delete(roomId)
+      releaseErrorToastsForRoom(roomId)
     }
 
     const markRoomDissolved = (roomId: string) => {
@@ -546,7 +552,7 @@ export const useGroupStore = defineStore(
       }
 
       const data = await ImRequestUtils.groupListMember(roomId, {
-        showError: !memberErrorSuppressedRoomIds.has(roomId)
+        showError: !isRoomErrorToastSuppressed(roomId)
       })
       if (!data) {
         userListOptions.loading = false
