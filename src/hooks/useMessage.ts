@@ -79,12 +79,14 @@ export const useMessage = () => {
       // 本地列表只有在 CONTACTS_SYNCED 落地后才可信（否则拿到的是含幽灵的旧快照，
       // 会把「尚未刷新」误判为「会话仍存在」而误弹网络错误）。
       // 这里注册一次性监听后触发一次同步，等权威结果回来再判定；超时按瞬时失败处理。
+      let waitReason: 'synced' | 'timeout' = 'timeout'
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
           useMitt.off(MittEnum.CONTACTS_SYNCED, handler)
           resolve()
         }, 20000)
         const handler = () => {
+          waitReason = 'synced'
           clearTimeout(timer)
           useMitt.off(MittEnum.CONTACTS_SYNCED, handler)
           resolve()
@@ -95,12 +97,18 @@ export const useMessage = () => {
       // CONTACTS_SYNCED 只代表服务端全量同步落库完成；App.vue 的全局监听也会在此刻
       // 触发 getSessionList，其 isLoading 去重会让紧随其后的调用直接返回（sessionMap 未刷新）。
       // 这里循环调用直到真实执行一次（返回后无在途拉取）再判定。
+      let settleRounds = 0
       for (let i = 0; i < 50; i++) {
+        settleRounds = i + 1
         await chatStore.getSessionList(true).catch(() => {})
         if (!chatStore.sessionOptions?.isLoading) break
         await new Promise((resolve) => setTimeout(resolve, 200))
       }
-      if (!chatStore.getSession(roomId)) {
+      const sessionStillExists = !!chatStore.getSession(roomId)
+      console.log(
+        `[useMessage] 兜底判定: room=${roomId} wait=${waitReason} settleRounds=${settleRounds} sessionExists=${sessionStillExists} isLoading=${chatStore.sessionOptions?.isLoading} listHasRoom=${chatStore.sessionList?.some((s) => s.roomId === roomId)}`
+      )
+      if (!sessionStillExists) {
         // 房间已不在服务端列表中，按解散/失效统一清理，并给出轻提示代替网络错误弹窗
         chatStore.removeDissolvedSession(roomId)
         window.$message.info(t('message.message_menu.group_dissolved'))
