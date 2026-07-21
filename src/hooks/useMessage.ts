@@ -75,14 +75,23 @@ export const useMessage = () => {
       await ensureGroupMembersSynced(roomId, item.type)
     } catch (error) {
       console.error('[useMessage] 同步群成员失败，尝试刷新会话列表确认房间是否已失效:', error)
-      // 强拉一次服务端会话列表，不依赖后端错误文案字符串匹配
-      await chatStore.getSessionList(true)
-      // getSessionList 有 isLoading 去重：启动/登录同步的拉取在途时直接返回旧数据。
-      // 等待在途拉取结束（最多 ~20s，启动同步实测可达 ~10s）再判定，
-      // 避免把「尚未刷新」误判为「会话仍存在」而误弹网络错误
-      for (let i = 0; i < 100 && chatStore.sessionOptions?.isLoading; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 200))
-      }
+      // 桌面端 LIST_CONTACTS 读本地 SQLite 并异步触发服务端全量同步（fetch_and_update_contacts），
+      // 本地列表只有在 CONTACTS_SYNCED 落地后才可信（否则拿到的是含幽灵的旧快照，
+      // 会把「尚未刷新」误判为「会话仍存在」而误弹网络错误）。
+      // 这里注册一次性监听后触发一次同步，等权威结果回来再判定；超时按瞬时失败处理。
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          useMitt.off(MittEnum.CONTACTS_SYNCED, handler)
+          resolve()
+        }, 20000)
+        const handler = () => {
+          clearTimeout(timer)
+          useMitt.off(MittEnum.CONTACTS_SYNCED, handler)
+          resolve()
+        }
+        useMitt.on(MittEnum.CONTACTS_SYNCED, handler)
+        chatStore.getSessionList(true).catch(() => {})
+      })
       if (!chatStore.getSession(roomId)) {
         // 房间已不在服务端列表中，按解散/失效统一清理，并给出轻提示代替网络错误弹窗
         chatStore.removeDissolvedSession(roomId)

@@ -62,12 +62,15 @@ vi.mock('@/utils/TauriInvokeHandler', () => ({
   invokeWithErrorHandler: vi.fn()
 }))
 
+const mittHandlers = new Map<string, (...args: any[]) => void>()
 vi.mock('@/hooks/useMitt', () => ({
   useMitt: {
-    on: vi.fn(),
+    on: vi.fn((event: string, handler: (...args: any[]) => void) => mittHandlers.set(event, handler)),
+    off: vi.fn((event: string) => mittHandlers.delete(event)),
     emit: vi.fn()
   }
 }))
+const fireContactsSynced = () => mittHandlers.get('contactsSynced')?.()
 
 vi.mock('vue-i18n', () => ({
   useI18n: vi.fn(() => ({
@@ -79,6 +82,7 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    mittHandlers.clear()
     chatStoreMock.sessionOptions.isLoading = false
     ;(window as any).$message = { info: vi.fn(), error: vi.fn(), success: vi.fn(), warning: vi.fn() }
   })
@@ -90,7 +94,7 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
       unreadCount: 0
     }) as SessionItem
 
-  it('群成员同步失败且服务端列表已无该房间时，应清理幽灵会话并轻提示，不弹网络错误', async () => {
+  it('群成员同步失败且权威同步后房间已消失时，应清理幽灵会话并轻提示，不弹网络错误', async () => {
     const { handleMsgClick } = useMessage()
     const roomId = 'ghost-room-id'
     const session = createGroupSession(roomId)
@@ -99,9 +103,11 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
     groupStoreMock.getUserListByRoomId.mockReturnValue([])
     groupStoreMock.getGroupUserList.mockRejectedValue(new Error('房间号有误'))
 
-    // 强拉列表后房间消失
-    chatStoreMock.getSessionList.mockResolvedValue(undefined)
-    chatStoreMock.getSession.mockReturnValueOnce({ roomId } as SessionItem).mockReturnValueOnce(undefined)
+    // 兜底触发同步 → CONTACTS_SYNCED 落地后房间消失（桌面端本地库被全量同步重写）
+    chatStoreMock.getSessionList.mockImplementation(async () => {
+      fireContactsSynced()
+    })
+    chatStoreMock.getSession.mockReturnValueOnce({ roomId } as SessionItem).mockReturnValue(undefined)
 
     await handleMsgClick(session)
 
@@ -121,7 +127,7 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
     expect((window as any).$message.error).not.toHaveBeenCalled()
   })
 
-  it('群成员同步失败但服务端列表仍有该房间时，不应清理会话，补回一次网络错误提示', async () => {
+  it('群成员同步失败但权威同步后房间仍在时，不应清理会话，补回一次网络错误提示', async () => {
     const { handleMsgClick } = useMessage()
     const roomId = 'valid-room-id'
     const session = createGroupSession(roomId)
@@ -129,8 +135,9 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
     groupStoreMock.getUserListByRoomId.mockReturnValue([])
     groupStoreMock.getGroupUserList.mockRejectedValue(new Error('网络超时'))
 
-    // 强拉列表后房间仍在
-    chatStoreMock.getSessionList.mockResolvedValue(undefined)
+    chatStoreMock.getSessionList.mockImplementation(async () => {
+      fireContactsSynced()
+    })
     chatStoreMock.getSession.mockReturnValue({ roomId } as SessionItem)
 
     await handleMsgClick(session)
@@ -162,7 +169,7 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
     expect(groupStoreMock.releaseMemberFetchError).toHaveBeenCalledWith(roomId)
   })
 
-  it('getSessionList 去重返回旧数据时，等待在途拉取结束再判定，不误弹网络错误', async () => {
+  it('CONTACTS_SYNCED 未落地前不做判定：本地旧快照含幽灵也不误弹网络错误', async () => {
     const { handleMsgClick } = useMessage()
     const roomId = 'ghost-race-room'
     const session = createGroupSession(roomId)
@@ -170,17 +177,24 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
     groupStoreMock.getUserListByRoomId.mockReturnValue([])
     groupStoreMock.getGroupUserList.mockRejectedValue(new Error('房间号有误'))
 
-    // 模拟启动同步在途：getSessionList 因 isLoading 去重直接返回，
-    // 0.5s 后在途拉取完成、会话从 sessionMap 消失
-    chatStoreMock.sessionOptions.isLoading = true
-    setTimeout(() => {
-      chatStoreMock.sessionOptions.isLoading = false
-      chatStoreMock.getSession.mockReturnValue(undefined)
-    }, 500)
-    chatStoreMock.getSessionList.mockResolvedValue(undefined)
+    // 桌面端语义：getSessionList 先回本地旧快照（含幽灵），
+    // 300ms 后全量同步落地才发射 CONTACTS_SYNCED 并让房间消失
+    chatStoreMock.getSessionList.mockImplementation(async () => {
+      setTimeout(() => {
+        chatStoreMock.getSession.mockReturnValue(undefined)
+        fireContactsSynced()
+      }, 300)
+    })
     chatStoreMock.getSession.mockReturnValue({ roomId } as SessionItem)
 
-    await handleMsgClick(session)
+    const clickPromise = handleMsgClick(session)
+
+    // 100ms 时（同步未落地）：不得提前误判误弹
+    await new Promise((r) => setTimeout(r, 100))
+    expect((window as any).$message.error).not.toHaveBeenCalled()
+    expect(chatStoreMock.removeDissolvedSession).not.toHaveBeenCalled()
+
+    await clickPromise
 
     expect(chatStoreMock.removeDissolvedSession).toHaveBeenCalledWith(roomId)
     expect((window as any).$message.info).toHaveBeenCalledWith('message.message_menu.group_dissolved')
