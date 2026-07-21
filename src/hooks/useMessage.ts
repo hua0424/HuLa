@@ -92,9 +92,14 @@ export const useMessage = () => {
         useMitt.on(MittEnum.CONTACTS_SYNCED, handler)
         chatStore.getSessionList(true).catch(() => {})
       })
-      // CONTACTS_SYNCED 只代表服务端全量同步落库完成；App.vue 的全局监听刷新 sessionMap
-      // 是异步的，可能尚未执行。这里自己再读一次（此时本地库已是权威数据）再判定。
-      await chatStore.getSessionList(true).catch(() => {})
+      // CONTACTS_SYNCED 只代表服务端全量同步落库完成；App.vue 的全局监听也会在此刻
+      // 触发 getSessionList，其 isLoading 去重会让紧随其后的调用直接返回（sessionMap 未刷新）。
+      // 这里循环调用直到真实执行一次（返回后无在途拉取）再判定。
+      for (let i = 0; i < 50; i++) {
+        await chatStore.getSessionList(true).catch(() => {})
+        if (!chatStore.sessionOptions?.isLoading) break
+        await new Promise((resolve) => setTimeout(resolve, 200))
+      }
       if (!chatStore.getSession(roomId)) {
         // 房间已不在服务端列表中，按解散/失效统一清理，并给出轻提示代替网络错误弹窗
         chatStore.removeDissolvedSession(roomId)
