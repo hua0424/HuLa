@@ -1808,6 +1808,19 @@ export const useChatStore = defineStore(
       }
     })
 
+    /**
+     * 获取 '' 底部桶中的进行中思考（REQ-014 / CONTEXT.md 思考锚定裁决）：
+     * 无触发消息的思考（如 owner 在 TUI 输入驱动的 turn）进行中显示在消息流底部，
+     * complete/error 历史态不渲染。
+     */
+    const getBottomThinkingStates = computed(() => {
+      return (roomId: string): ThinkingState[] => {
+        if (!roomId) return []
+        const bucket = thinkingByTrigger.get(roomId)?.get('') ?? []
+        return bucket.filter((state) => state.status === 'thinking')
+      }
+    })
+
     /** autoReply 消息标记集（内存，不持久化） */
     const autoReplyMessages = reactive(new Set<string>())
     /** autoReply Set 上限，防止内存无限增长（CR-S9） */
@@ -2231,6 +2244,7 @@ export const useChatStore = defineStore(
       thinkingMetadataLoaded,
       isCurrentRoomThinking,
       getThinkingStatesByTriggerMsg,
+      getBottomThinkingStates,
       autoReplyMessages,
       startThinking,
       finalizeThinking,

@@ -111,6 +111,13 @@
                 data-testid="inline-thinking-card" />
             </div>
           </n-flex>
+          <!-- REQ-014：无触发消息的思考（TUI 驱动等）进行中显示在消息流底部，历史不渲染 -->
+          <InlineThinkingCard
+            v-for="thinking in chatStore.getBottomThinkingStates(globalStore.currentSessionRoomId)"
+            :key="thinking.thinkingId"
+            :thinking="thinking"
+            class="w-full mt-8px"
+            data-testid="inline-thinking-card" />
         </div>
       </div>
     </div>

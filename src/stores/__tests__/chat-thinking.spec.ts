@@ -106,6 +106,30 @@ describe('useChatStore trigger-keyed thinking lifecycle (REQ-014)', () => {
     expect(bucket![0].triggerMsgId).toBeUndefined()
   })
 
+  it('getBottomThinkingStates：null-trigger 进行中可见，完成后消失不入历史（P1 底部桶渲染出口）', () => {
+    const store = useChatStore()
+
+    // null-trigger（TUI 驱动 turn）进行中 → 底部可见
+    store.startThinking({ ...startPayload, triggerMsgId: undefined })
+    expect(store.getBottomThinkingStates(ROOM_ID)).toHaveLength(1)
+    expect(store.getBottomThinkingStates(ROOM_ID)[0].thinkingId).toBe('tk-001')
+
+    // 完成 → 从底部消失（历史不渲染，但仍留在 '' 桶中供其他语义使用）
+    store.finalizeThinking('tk-001', { status: 'complete', durationMs: 800 })
+    expect(store.getBottomThinkingStates(ROOM_ID)).toHaveLength(0)
+    expect(store.thinkingByTrigger.get(ROOM_ID)?.get('')).toHaveLength(1)
+
+    // error 同样不渲染
+    store.startThinking({ ...startPayload, thinkingId: 'tk-002', triggerMsgId: undefined })
+    expect(store.getBottomThinkingStates(ROOM_ID)).toHaveLength(1)
+    store.finalizeThinking('tk-002', { status: 'error', errorMsg: 'x' })
+    expect(store.getBottomThinkingStates(ROOM_ID)).toHaveLength(0)
+
+    // 有 triggerMsgId 的思考不进入底部出口
+    store.startThinking({ ...startPayload, thinkingId: 'tk-003' })
+    expect(store.getBottomThinkingStates(ROOM_ID)).toHaveLength(0)
+  })
+
   it('finalizeThinking(complete) 更新 thinkingByTrigger 并移除活跃流', () => {
     const store = useChatStore()
     store.startThinking(startPayload)
