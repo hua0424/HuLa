@@ -30,6 +30,24 @@ export const useGroupStore = defineStore(
     const memberOrderCounters = reactive<Record<string, number>>({})
     const onlineCountMap = reactive<Record<string, number>>({})
 
+    // #179：选中会话期间按 roomId 抑制底层成员拉取的网络错误弹窗；
+    // 幽灵会话由 useMessage 兜底统一清理并给出优雅提示，瞬时错误由调用方补回提示
+    const memberErrorSuppressedRoomIds = reactive(new Set<string>())
+    // 已确认解散/失效的房间：成员拉取直接短路，避免任何迟到/重复请求再弹错误
+    const dissolvedRoomIds = reactive(new Set<string>())
+
+    const suppressMemberFetchError = (roomId: string) => {
+      if (roomId) memberErrorSuppressedRoomIds.add(roomId)
+    }
+
+    const releaseMemberFetchError = (roomId: string) => {
+      if (roomId) memberErrorSuppressedRoomIds.delete(roomId)
+    }
+
+    const markRoomDissolved = (roomId: string) => {
+      if (roomId) dissolvedRoomIds.add(roomId)
+    }
+
     const getRoleSortWeight = (roleId?: number) => {
       switch (roleId) {
         case RoleEnum.LORD:
@@ -506,6 +524,11 @@ export const useGroupStore = defineStore(
         return []
       }
 
+      // 已确认解散的房间不再发起成员拉取，杜绝迟到请求弹网络错误
+      if (dissolvedRoomIds.has(roomId)) {
+        return []
+      }
+
       const session = chatStore.getSession(roomId)
       if (session && session.type !== RoomTypeEnum.GROUP) {
         console.warn('[group] skip member refresh, room is not group:', roomId)
@@ -522,7 +545,9 @@ export const useGroupStore = defineStore(
         setRoomMemberList(roomId, [])
       }
 
-      const data = await ImRequestUtils.groupListMember(roomId)
+      const data = await ImRequestUtils.groupListMember(roomId, {
+        showError: !memberErrorSuppressedRoomIds.has(roomId)
+      })
       if (!data) {
         userListOptions.loading = false
         return []
@@ -876,7 +901,10 @@ export const useGroupStore = defineStore(
       isCurrentLord,
       isAdmin,
       isAdminOrLord,
-      cleanupSession
+      cleanupSession,
+      suppressMemberFetchError,
+      releaseMemberFetchError,
+      markRoomDissolved
     }
   },
   {

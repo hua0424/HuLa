@@ -249,9 +249,12 @@ export async function getBadgesBatch(body: CacheBadgeReq[]) {
   })
 }
 
-export async function groupListMember(roomId: string) {
+export async function groupListMember(roomId: string, options?: { showError?: boolean }) {
   const args: Record<string, any> = { roomId, room_id: roomId }
-  return await invokeWithErrorHandler(TauriCommand.GET_ROOM_MEMBERS, args, { errorType: ErrorType.Network })
+  return await invokeWithErrorHandler(TauriCommand.GET_ROOM_MEMBERS, args, {
+    errorType: ErrorType.Network,
+    showError: options?.showError
+  })
 }
 
 export async function getMsgList(body: { msgIds?: string[]; async?: boolean }) {

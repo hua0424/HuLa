@@ -62,22 +62,31 @@ export const useMessage = () => {
     const roomId = item.roomId
     console.log('[handleMsgClick] 点击会话:', roomId, 'UI未读数:', item.unreadCount)
 
-    globalStore.updateCurrentSessionRoomId(roomId)
-
-    chatStore.getSession(roomId)
-    chatStore.markSessionRead(roomId)
-
-    // 再根据是否存在自身成员做一次兜底刷新，防止批量切换账号后看到旧数据
+    // #179：选中会话期间抑制底层群成员拉取的网络错误弹窗。
+    // 幽灵会话由 catch 兜底统一清理并给出优雅提示；会话仍存在（瞬时失败）时再补回一次错误提示。
+    groupStore.suppressMemberFetchError(roomId)
     try {
+      globalStore.updateCurrentSessionRoomId(roomId)
+
+      chatStore.getSession(roomId)
+      chatStore.markSessionRead(roomId)
+
+      // 再根据是否存在自身成员做一次兜底刷新，防止批量切换账号后看到旧数据
       await ensureGroupMembersSynced(roomId, item.type)
     } catch (error) {
       console.error('[useMessage] 同步群成员失败，尝试刷新会话列表确认房间是否已失效:', error)
       // 强拉一次服务端会话列表，不依赖后端错误文案字符串匹配
       await chatStore.getSessionList(true)
       if (!chatStore.getSession(roomId)) {
-        // 房间已不在服务端列表中，按解散/失效统一清理
+        // 房间已不在服务端列表中，按解散/失效统一清理，并给出轻提示代替网络错误弹窗
         chatStore.removeDissolvedSession(roomId)
+        window.$message.info(t('message.message_menu.group_dissolved'))
+      } else {
+        // 会话仍存在：瞬时拉取失败，维持原有网络错误提示行为（补回一次）
+        window.$message.error(error instanceof Error ? error.message : String(error))
       }
+    } finally {
+      groupStore.releaseMemberFetchError(roomId)
     }
   }
 

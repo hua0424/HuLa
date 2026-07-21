@@ -17,7 +17,9 @@ const globalStoreMock = {
 
 const groupStoreMock = {
   getUserListByRoomId: vi.fn(),
-  getGroupUserList: vi.fn()
+  getGroupUserList: vi.fn(),
+  suppressMemberFetchError: vi.fn(),
+  releaseMemberFetchError: vi.fn()
 }
 
 const userStoreMock = {
@@ -76,6 +78,7 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    ;(window as any).$message = { info: vi.fn(), error: vi.fn(), success: vi.fn(), warning: vi.fn() }
   })
 
   const createGroupSession = (roomId: string): SessionItem =>
@@ -85,7 +88,7 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
       unreadCount: 0
     }) as SessionItem
 
-  it('群成员同步失败且服务端列表已无该房间时，应清理幽灵会话', async () => {
+  it('群成员同步失败且服务端列表已无该房间时，应清理幽灵会话并轻提示，不弹网络错误', async () => {
     const { handleMsgClick } = useMessage()
     const roomId = 'ghost-room-id'
     const session = createGroupSession(roomId)
@@ -106,9 +109,17 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
     expect(groupStoreMock.getGroupUserList).toHaveBeenCalledWith(roomId, true)
     expect(chatStoreMock.getSessionList).toHaveBeenCalledWith(true)
     expect(chatStoreMock.removeDissolvedSession).toHaveBeenCalledWith(roomId)
+
+    // 抑制窗口覆盖整个选中过程（TC-03 合同）
+    expect(groupStoreMock.suppressMemberFetchError).toHaveBeenCalledWith(roomId)
+    expect(groupStoreMock.releaseMemberFetchError).toHaveBeenCalledWith(roomId)
+    // 优雅轻提示 + 不弹网络错误
+    expect((window as any).$message.info).toHaveBeenCalledTimes(1)
+    expect((window as any).$message.info).toHaveBeenCalledWith('message.message_menu.group_dissolved')
+    expect((window as any).$message.error).not.toHaveBeenCalled()
   })
 
-  it('群成员同步失败但服务端列表仍有该房间时，不应清理会话', async () => {
+  it('群成员同步失败但服务端列表仍有该房间时，不应清理会话，补回一次网络错误提示', async () => {
     const { handleMsgClick } = useMessage()
     const roomId = 'valid-room-id'
     const session = createGroupSession(roomId)
@@ -124,9 +135,13 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
 
     expect(chatStoreMock.getSessionList).toHaveBeenCalledWith(true)
     expect(chatStoreMock.removeDissolvedSession).not.toHaveBeenCalled()
+    // 维持原有网络错误提示行为（一次），不解散轻提示
+    expect((window as any).$message.error).toHaveBeenCalledTimes(1)
+    expect((window as any).$message.error).toHaveBeenCalledWith('网络超时')
+    expect((window as any).$message.info).not.toHaveBeenCalled()
   })
 
-  it('群成员同步成功时，按原有路径执行，不触发兜底', async () => {
+  it('群成员同步成功时，按原有路径执行，不触发兜底也无任何提示', async () => {
     const { handleMsgClick } = useMessage()
     const roomId = 'normal-room-id'
     const session = createGroupSession(roomId)
@@ -138,5 +153,10 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
     expect(groupStoreMock.getGroupUserList).not.toHaveBeenCalled()
     expect(chatStoreMock.getSessionList).not.toHaveBeenCalled()
     expect(chatStoreMock.removeDissolvedSession).not.toHaveBeenCalled()
+    expect((window as any).$message.error).not.toHaveBeenCalled()
+    expect((window as any).$message.info).not.toHaveBeenCalled()
+    // 抑制标志正常成对释放
+    expect(groupStoreMock.suppressMemberFetchError).toHaveBeenCalledWith(roomId)
+    expect(groupStoreMock.releaseMemberFetchError).toHaveBeenCalledWith(roomId)
   })
 })
