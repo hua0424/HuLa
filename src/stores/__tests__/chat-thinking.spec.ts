@@ -18,9 +18,9 @@ vi.hoisted(() => {
   globalThis.Worker = WorkerStub as unknown as typeof Worker
 })
 
-const loadThinkingByTriggerMock = vi.hoisted(() => vi.fn(async () => []))
+const loadThinkingByTriggerMock = vi.hoisted(() => vi.fn<(...args: any[]) => Promise<any[]>>(async () => []))
 vi.mock('@/services/thinkingService', () => ({
-  loadThinkingByTrigger: (...args: unknown[]) => loadThinkingByTriggerMock(...args)
+  loadThinkingByTrigger: (...args: any[]) => loadThinkingByTriggerMock(...args)
 }))
 
 vi.mock('@tauri-apps/api/webviewWindow', () => ({
@@ -187,7 +187,16 @@ describe('useChatStore loadThinkingByTriggerForMessages (REQ-014)', () => {
     loadThinkingByTriggerMock.mockReset().mockResolvedValue([])
   })
 
-  const makeServerItem = (overrides: Partial<any> = {}) => ({
+  const makeServerItem = (
+    overrides: Partial<{
+      id: number | string
+      aiclawUid: number | string
+      triggerMsgId: number | string
+      status: number
+      durationMs: number
+      createTime: string
+    }> = {}
+  ) => ({
     id: 3001,
     aiclawUid: AICLAW_ID,
     triggerMsgId: MSG_ID,

@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { computed, ref, reactive, defineComponent, unref } from 'vue'
+import { computed, ref, reactive, defineComponent } from 'vue'
 import type { ThinkingState } from '@/types/thinking'
 
 const chatMessageListRef = ref<any[]>([])
@@ -21,7 +21,7 @@ vi.mock('@/stores/chat', () => ({
       return chatMessageListRef.value
     },
     getThinkingStatesByTriggerMsg: (roomId: string | { value: string }, msgId: string) => {
-      const resolvedRoomId = unref(roomId)
+      const resolvedRoomId = typeof roomId === 'string' ? roomId : roomId.value
       return getThinkingStatesByTriggerMsg.value(resolvedRoomId, msgId)
     }
   })
