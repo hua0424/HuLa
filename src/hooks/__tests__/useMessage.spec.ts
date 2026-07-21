@@ -73,6 +73,11 @@ vi.mock('@/hooks/useMitt', () => ({
 }))
 const fireContactsSynced = () => mittHandlers.get('contactsSynced')?.()
 
+const mockIsWeb = vi.hoisted(() => ({ value: false }))
+vi.mock('@/utils/PlatformConstants', () => ({
+  isWeb: () => mockIsWeb.value
+}))
+
 vi.mock('vue-i18n', () => ({
   useI18n: vi.fn(() => ({
     t: vi.fn((key: string) => key)
@@ -84,6 +89,7 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     mittHandlers.clear()
+    mockIsWeb.value = false
     chatStoreMock.sessionOptions.isLoading = false
     ;(window as any).$message = { info: vi.fn(), error: vi.fn(), success: vi.fn(), warning: vi.fn() }
   })
@@ -203,5 +209,30 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
     expect(chatStoreMock.removeDissolvedSession).toHaveBeenCalledWith(roomId)
     expect((window as any).$message.info).toHaveBeenCalledWith('message.message_menu.group_dissolved')
     expect((window as any).$message.error).not.toHaveBeenCalled()
+  })
+
+  it('web 分支：行为与改动前一致——不武装抑制、不等 CONTACTS_SYNCED、失败仅 console（R6）', async () => {
+    mockIsWeb.value = true
+    const { handleMsgClick } = useMessage()
+    const roomId = 'web-room-id'
+    const session = createGroupSession(roomId)
+
+    groupStoreMock.getUserListByRoomId.mockReturnValue([])
+    groupStoreMock.getGroupUserList.mockRejectedValue(new Error('网络超时'))
+
+    await handleMsgClick(session)
+
+    // 不武装抑制（请求层即时错误提示照常）
+    expect(groupStoreMock.suppressMemberFetchError).not.toHaveBeenCalled()
+    expect(groupStoreMock.releaseMemberFetchError).not.toHaveBeenCalled()
+    // 不进入桌面兜底判定链：不强拉列表、不注册 CONTACTS_SYNCED 等待、不清理不提示
+    expect(chatStoreMock.getSessionList).not.toHaveBeenCalled()
+    expect(mittHandlers.has('contactsSynced')).toBe(false)
+    expect(chatStoreMock.removeDissolvedSession).not.toHaveBeenCalled()
+    expect((window as any).$message.error).not.toHaveBeenCalled()
+    expect((window as any).$message.info).not.toHaveBeenCalled()
+    // 选中会话主路径不受影响
+    expect(globalStoreMock.updateCurrentSessionRoomId).toHaveBeenCalledWith(roomId)
+    expect(chatStoreMock.markSessionRead).toHaveBeenCalledWith(roomId)
   })
 })

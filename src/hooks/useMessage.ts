@@ -9,6 +9,7 @@ import { useGroupStore } from '@/stores/group'
 import { useUserStore } from '@/stores/user'
 import { exitGroup, notification, setSessionTop, shield } from '@/utils/ImRequestUtils'
 import { shouldNotifyGroupDissolved } from '@/utils/errorToastSuppression'
+import { isWeb } from '@/utils/PlatformConstants'
 import { invokeWithErrorHandler } from '../utils/TauriInvokeHandler'
 import { useI18n } from 'vue-i18n'
 
@@ -62,6 +63,21 @@ export const useMessage = () => {
     // 更新当前会话信息
     const roomId = item.roomId
     console.log('[handleMsgClick] 点击会话:', roomId, 'UI未读数:', item.unreadCount)
+
+    // web 无本地快照语义也无 CONTACTS_SYNCED，幽灵兜底判定链在 web 上无意义且会
+    // 改变行为（失败从即时报错变 20s 等待）——web 分支保持改动前行为：不武装抑制、
+    // 失败仅 console.error，请求层即时错误提示照常（#179 红线：web 行为不变）
+    if (isWeb()) {
+      globalStore.updateCurrentSessionRoomId(roomId)
+      chatStore.getSession(roomId)
+      chatStore.markSessionRead(roomId)
+      try {
+        await ensureGroupMembersSynced(roomId, item.type)
+      } catch (error) {
+        console.error('[useMessage] 同步群成员失败:', error)
+      }
+      return
+    }
 
     // #179：选中会话期间抑制底层群成员拉取的网络错误弹窗。
     // 幽灵会话由 catch 兜底统一清理并给出优雅提示；会话仍存在（瞬时失败）时再补回一次错误提示。
