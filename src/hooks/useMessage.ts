@@ -78,8 +78,9 @@ export const useMessage = () => {
       // 强拉一次服务端会话列表，不依赖后端错误文案字符串匹配
       await chatStore.getSessionList(true)
       // getSessionList 有 isLoading 去重：启动/登录同步的拉取在途时直接返回旧数据。
-      // 等待在途拉取结束（最多 ~3s）再判定，避免把「尚未刷新」误判为「会话仍存在」而误弹网络错误
-      for (let i = 0; i < 15 && chatStore.sessionOptions?.isLoading; i++) {
+      // 等待在途拉取结束（最多 ~20s，启动同步实测可达 ~10s）再判定，
+      // 避免把「尚未刷新」误判为「会话仍存在」而误弹网络错误
+      for (let i = 0; i < 100 && chatStore.sessionOptions?.isLoading; i++) {
         await new Promise((resolve) => setTimeout(resolve, 200))
       }
       if (!chatStore.getSession(roomId)) {
