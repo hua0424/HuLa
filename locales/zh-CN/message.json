@@ -98,6 +98,7 @@
     "cannot_dissolve_channel": "无法解散频道",
     "cannot_quit_channel": "无法退出频道",
     "dissolve_group_success": "已解散群聊",
+    "group_dissolved": "该群聊已解散",
     "quit_group_success": "已退出群聊",
     "notification_allowed": "已允许消息提醒",
     "notification_silent": "已设置接收消息但不提醒"

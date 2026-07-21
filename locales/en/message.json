@@ -98,6 +98,7 @@
     "cannot_dissolve_channel": "Cannot dissolve channel",
     "cannot_quit_channel": "Cannot quit channel",
     "dissolve_group_success": "Group dissolved",
+    "group_dissolved": "This group has been dissolved",
     "quit_group_success": "Left group",
     "notification_allowed": "Notifications enabled",
     "notification_silent": "Receiving silently"

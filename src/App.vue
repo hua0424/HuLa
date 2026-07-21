@@ -19,6 +19,8 @@ import { loadLanguage } from '@/services/i18n'
 import { CallTypeEnum, EventEnum, ThemeEnum, ChangeTypeEnum, MittEnum, OnlineEnum, RoomTypeEnum } from '@/enums'
 import { useGlobalShortcut } from '@/hooks/useGlobalShortcut.ts'
 import { useMitt } from '@/hooks/useMitt.ts'
+import { useGhostSessionGuard } from '@/hooks/useGhostSessionGuard.ts'
+import { armBootSuppression } from '@/utils/errorToastSuppression'
 import { useWindow } from '@/hooks/useWindow.ts'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { useGlobalStore } from '@/stores/global'
@@ -179,7 +181,7 @@ const handleSelfRemove = async (roomId: string) => {
 
   // 如果当前会话就是被移除的群聊，切换到其他会话
   if (globalStore.currentSessionRoomId === roomId) {
-    globalStore.updateCurrentSessionRoomId(chatStore.sessionList[0].roomId)
+    globalStore.updateCurrentSessionRoomId(chatStore.sessionList[0]?.roomId ?? '')
   }
 }
 
@@ -385,15 +387,18 @@ useMitt.on(WsResponseMessageType.ONLINE, async (onStatusChangeType: OnStatusChan
 
 useMitt.on(WsResponseMessageType.ROOM_DISSOLUTION, async (roomId: string) => {
   console.log('收到群解散通知', roomId)
-  // 移除群聊的会话
-  chatStore.removeSession(roomId)
-  // 移除群聊的详情
-  groupStore.removeGroupDetail(roomId)
-  // 如果当前会话为解散的群聊，切换到第一个会话
-  if (globalStore.currentSessionRoomId === roomId) {
-    globalStore.currentSessionRoomId = chatStore.sessionList[0].roomId
-  }
+  chatStore.removeDissolvedSession(roomId)
 })
+
+// #179：权威联系人同步落地后的统一收尾（启动抑制窗关闭 + 恢复态幽灵优雅移除+轻提示）
+const { register: registerGhostSessionGuard } = useGhostSessionGuard()
+registerGhostSessionGuard()
+
+// #179 Q2：启动权威同步窗口——桌面端本地快照在首次同步落地前按定义陈旧，
+// 窗口内压制 roomId 级错误 toast（web 无本地快照语义，不开窗）
+if (!isWeb()) {
+  armBootSuppression()
+}
 
 useMitt.on(WsResponseMessageType.USER_STATE_CHANGE, async (data: { uid: string; userStateId: string }) => {
   console.log('收到用户状态改变', data)

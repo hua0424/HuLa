@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { error, info, warn } from '@tauri-apps/plugin-log'
 import { useMitt } from '@/hooks/useMitt'
+import { MittEnum } from '@/enums'
 import { WsResponseMessageType } from '@/services/wsType'
 import { useContactStore } from '@/stores/contacts'
 
@@ -523,6 +524,14 @@ class RustWebSocketClient {
       await listen('ws-group-config-change', (event: any) => {
         info(`群配置变更广播: ${JSON.stringify(event.payload)}`)
         useMitt.emit(WsResponseMessageType.AICLAW_GROUP_CONFIG_UPDATE, event.payload)
+      })
+    )
+
+    // 后台联系人列表同步完成事件（离线错过群解散推送的兜底刷新）
+    this.listenerController.add(
+      await listen('contacts-synced', (event: any) => {
+        info(`后台联系人列表同步完成: ${JSON.stringify(event.payload)}`)
+        useMitt.emit(MittEnum.CONTACTS_SYNCED, event.payload)
       })
     )
   }

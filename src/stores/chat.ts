@@ -118,10 +118,8 @@ export const useChatStore = defineStore(
     }
 
     // 将已有的会话列表同步到 sessionMap，解决持久化恢复或请求失败时 map 为空的问题
+    // 同时按 sessionList 全量重建，清理已不在列表中的幽灵 roomId（P1-1）
     const rebuildSessionMap = () => {
-      if (!sessionList.value.length) {
-        return
-      }
       sessionMap.value = sessionList.value.reduce(
         (map, session) => {
           map[session.roomId] = session
@@ -629,12 +627,10 @@ export const useChatStore = defineStore(
             unreadCountManager.refreshBadge(globalStore.unReadMark, feedStore.unreadCount)
             return
           }
-          // 将会话数据写入 sessionList 并更新 sessionMap
+          // 将会话数据写入 sessionList 并全量重建 sessionMap（清理已消失的 roomId）
           const list = Array.isArray(data) ? data : data.list || []
           sessionList.value = [...list]
-          for (const session of sessionList.value) {
-            sessionMap.value[session.roomId] = session
-          }
+          rebuildSessionMap()
           sortAndUniqueSessionList()
           sessionOptions.isLoading = false
           globalStore.unreadReady = true
@@ -680,10 +676,8 @@ export const useChatStore = defineStore(
         syncPersistedUnreadCounts()
         sessionOptions.isLoading = false
 
-        // 同步更新 sessionMap
-        for (const session of sessionList.value) {
-          sessionMap.value[session.roomId] = session
-        }
+        // 全量重建 sessionMap，清理已不在新列表中的幽灵 roomId
+        rebuildSessionMap()
 
         sortAndUniqueSessionList()
 
@@ -1403,14 +1397,37 @@ export const useChatStore = defineStore(
         delete lastReadActiveTime.value[roomId]
         sessionUnreadStore.setLastRead(userStore.userInfo?.uid, roomId, 0)
 
-        if (globalStore.currentSessionRoomId === roomId) {
-          globalStore.updateCurrentSessionRoomId(sessionList.value[0].roomId)
-        }
-
         // 删除会话后更新未读计数
         requestUnreadCountUpdate()
       }
       removeUnreadCountCache(roomId)
+
+      // 无论会话是否已在 store 中被清理（例如 getSessionList(true) 已重建列表），
+      // 只要当前会话是该 roomId，就安全切走，避免 currentSessionRoomId 指向幽灵会话
+      if (globalStore.currentSessionRoomId === roomId) {
+        globalStore.updateCurrentSessionRoomId(sessionList.value[0]?.roomId ?? '')
+      }
+    }
+
+    // 统一处理会话解散/失效后的清理（在线 ROOM_DISSOLUTION 与离线同步刷新共用）
+    const removeDissolvedSession = (roomId: string) => {
+      removeSession(roomId)
+      groupStore.removeGroupDetail(roomId)
+      // 标记房间已失效，后续任何迟到/重复的成员拉取直接短路，不再弹网络错误（#179 TC-03）
+      groupStore.markRoomDissolved(roomId)
+    }
+
+    /**
+     * 直读本地联系人快照判断房间是否存在（#179）。
+     * CONTACTS_SYNCED 落地后本地 im_contact 已是服务端全量，此查询即权威判定。
+     * 刻意不经 getSessionList：其 isLoading 去重会让并发调用拿到未刷新的内存列表。
+     */
+    const isRoomInContactsSnapshot = async (roomId: string): Promise<boolean> => {
+      const list: any[] = await invokeWithErrorHandler(TauriCommand.LIST_CONTACTS, undefined, {
+        showError: false,
+        errorType: ErrorType.Network
+      })
+      return Array.isArray(list) && list.some((item) => String(item?.roomId) === String(roomId))
     }
 
     // 监听 Worker 消息
@@ -2144,6 +2161,7 @@ export const useChatStore = defineStore(
       loadMore,
       currentMsgReply,
       sessionList,
+      sessionMap,
       sessionOptions,
       syncLoading,
       getSessionList,
@@ -2165,6 +2183,8 @@ export const useChatStore = defineStore(
       fetchCurrentRoomRemoteOnce,
       getGroupSessions,
       removeSession,
+      removeDissolvedSession,
+      isRoomInContactsSnapshot,
       changeRoom,
       addSession,
       setAllSessionMsgList,

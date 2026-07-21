@@ -8,6 +8,8 @@ import { useSettingStore } from '@/stores/setting.ts'
 import { useGroupStore } from '@/stores/group'
 import { useUserStore } from '@/stores/user'
 import { exitGroup, notification, setSessionTop, shield } from '@/utils/ImRequestUtils'
+import { shouldNotifyGroupDissolved } from '@/utils/errorToastSuppression'
+import { isWeb } from '@/utils/PlatformConstants'
 import { invokeWithErrorHandler } from '../utils/TauriInvokeHandler'
 import { useI18n } from 'vue-i18n'
 
@@ -62,16 +64,71 @@ export const useMessage = () => {
     const roomId = item.roomId
     console.log('[handleMsgClick] 点击会话:', roomId, 'UI未读数:', item.unreadCount)
 
-    globalStore.updateCurrentSessionRoomId(roomId)
+    // web 无本地快照语义也无 CONTACTS_SYNCED，幽灵兜底判定链在 web 上无意义且会
+    // 改变行为（失败从即时报错变 20s 等待）——web 分支保持改动前行为：不武装抑制、
+    // 失败仅 console.error，请求层即时错误提示照常（#179 红线：web 行为不变）
+    if (isWeb()) {
+      globalStore.updateCurrentSessionRoomId(roomId)
+      chatStore.getSession(roomId)
+      chatStore.markSessionRead(roomId)
+      try {
+        await ensureGroupMembersSynced(roomId, item.type)
+      } catch (error) {
+        console.error('[useMessage] 同步群成员失败:', error)
+      }
+      return
+    }
 
-    chatStore.getSession(roomId)
-    chatStore.markSessionRead(roomId)
-
-    // 再根据是否存在自身成员做一次兜底刷新，防止批量切换账号后看到旧数据
+    // #179：选中会话期间抑制底层群成员拉取的网络错误弹窗。
+    // 幽灵会话由 catch 兜底统一清理并给出优雅提示；会话仍存在（瞬时失败）时再补回一次错误提示。
+    groupStore.suppressMemberFetchError(roomId)
     try {
+      globalStore.updateCurrentSessionRoomId(roomId)
+
+      chatStore.getSession(roomId)
+      chatStore.markSessionRead(roomId)
+
+      // 再根据是否存在自身成员做一次兜底刷新，防止批量切换账号后看到旧数据
       await ensureGroupMembersSynced(roomId, item.type)
     } catch (error) {
-      console.error('[useMessage] 同步群成员失败:', error)
+      console.error('[useMessage] 同步群成员失败，尝试刷新会话列表确认房间是否已失效:', error)
+      // 桌面端 LIST_CONTACTS 读本地 SQLite 并异步触发服务端全量同步（fetch_and_update_contacts），
+      // 本地列表只有在 CONTACTS_SYNCED 落地后才可信（否则拿到的是含幽灵的旧快照，
+      // 会把「尚未刷新」误判为「会话仍存在」而误弹网络错误）。
+      // 这里注册一次性监听后触发一次同步，等权威结果回来再判定；超时按瞬时失败处理。
+      let waitReason: 'synced' | 'timeout' = 'timeout'
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          useMitt.off(MittEnum.CONTACTS_SYNCED, handler)
+          resolve()
+        }, 20000)
+        const handler = () => {
+          waitReason = 'synced'
+          clearTimeout(timer)
+          useMitt.off(MittEnum.CONTACTS_SYNCED, handler)
+          resolve()
+        }
+        useMitt.on(MittEnum.CONTACTS_SYNCED, handler)
+        chatStore.getSessionList(true).catch(() => {})
+      })
+      // CONTACTS_SYNCED 落地后直读本地联系人快照做权威判定——不经 getSessionList：
+      // 其 isLoading 去重会让并发调用拿到未刷新的内存列表，幽灵被误判为「仍存在」
+      // 而误弹网络错误（G29/G30 受控自检坐实的竞态）
+      const sessionStillExists = await chatStore.isRoomInContactsSnapshot(roomId).catch(() => true)
+      console.log(`[useMessage] 兜底判定: room=${roomId} wait=${waitReason} sessionExists=${sessionStillExists}`)
+      if (!sessionStillExists) {
+        // 房间已不在服务端列表中，按解散/失效统一清理，并给出轻提示代替网络错误弹窗
+        chatStore.removeDissolvedSession(roomId)
+        // 与 useGhostSessionGuard 按 roomId 去重，同次同步下双路径只提示一次（R5-P2）
+        if (shouldNotifyGroupDissolved(roomId)) {
+          window.$message.info(t('message.message_menu.group_dissolved'))
+        }
+      } else {
+        // 会话仍存在：瞬时拉取失败，维持原有网络错误提示行为（补回一次）
+        window.$message.error(error instanceof Error ? error.message : String(error))
+      }
+    } finally {
+      groupStore.releaseMemberFetchError(roomId)
     }
   }
 
