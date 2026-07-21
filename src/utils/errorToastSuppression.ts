@@ -14,6 +14,52 @@
 const suppressedRoomIds = new Set<string>()
 const releaseTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+// ── 启动权威同步窗口（#179 Q2）─────────────────────────────────────────────
+// 登录/启动后到首次 CONTACTS_SYNCED 落地前，本地联系人快照按定义是陈旧的，
+// 任何 roomId 作用域的失败（成员/群详情等拉取）都无法区分"幽灵"与"瞬时"，
+// 此窗口内统一压制 roomId 级错误 toast；窗口外一切照旧。
+let bootSuppressionActive = false
+let bootGraceTimer: ReturnType<typeof setTimeout> | null = null
+let bootHardTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 首次同步落地后的在途请求宽限（ms）：同步落地瞬间在飞的拉取随后才失败，需要覆盖 */
+export const BOOT_SUPPRESSION_GRACE_MS = 5000
+/** 硬超时（ms，自开窗起算的绝对上限）：同步永不到达时窗口也必须确定性关闭 */
+export const BOOT_SUPPRESSION_TIMEOUT_MS = 20000
+
+/** 开窗（主窗口挂载 / 登录完成后调用；重复调用重置硬超时） */
+export const armBootSuppression = () => {
+  bootSuppressionActive = true
+  if (bootGraceTimer) {
+    clearTimeout(bootGraceTimer)
+    bootGraceTimer = null
+  }
+  if (bootHardTimer) clearTimeout(bootHardTimer)
+  bootHardTimer = setTimeout(() => {
+    bootSuppressionActive = false
+    bootHardTimer = null
+  }, BOOT_SUPPRESSION_TIMEOUT_MS)
+}
+
+/**
+ * 首次权威同步（CONTACTS_SYNCED）落地后调用：给在途请求宽限期后关窗。
+ * 硬超时独立生效，保证窗口绝对寿命不超过 BOOT_SUPPRESSION_TIMEOUT_MS。
+ */
+export const releaseBootSuppressionAfterSync = (graceMs = BOOT_SUPPRESSION_GRACE_MS) => {
+  if (!bootSuppressionActive) return
+  if (bootGraceTimer) clearTimeout(bootGraceTimer)
+  bootGraceTimer = setTimeout(() => {
+    bootSuppressionActive = false
+    bootGraceTimer = null
+    if (bootHardTimer) {
+      clearTimeout(bootHardTimer)
+      bootHardTimer = null
+    }
+  }, graceMs)
+}
+
+export const isBootSuppressionActive = (): boolean => bootSuppressionActive
+
 /** 开始抑制某 roomId 相关请求的错误 toast；重复调用会取消待生效的释放 */
 export const suppressErrorToastsForRoom = (roomId: string | number) => {
   const key = String(roomId ?? '')
@@ -62,5 +108,7 @@ const extractRoomId = (args?: Record<string, any>): string | undefined => {
 /** invokeWithErrorHandler 用：该次调用的错误 toast 是否被抑制 */
 export const isErrorToastSuppressed = (args?: Record<string, any>): boolean => {
   const roomId = extractRoomId(args)
-  return !!roomId && suppressedRoomIds.has(roomId)
+  if (!roomId) return false
+  // 启动权威同步窗口内：一切 roomId 级错误 toast 压制（窗口外仅压已注册 roomId）
+  return bootSuppressionActive || suppressedRoomIds.has(roomId)
 }

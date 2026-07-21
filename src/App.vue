@@ -19,6 +19,8 @@ import { loadLanguage } from '@/services/i18n'
 import { CallTypeEnum, EventEnum, ThemeEnum, ChangeTypeEnum, MittEnum, OnlineEnum, RoomTypeEnum } from '@/enums'
 import { useGlobalShortcut } from '@/hooks/useGlobalShortcut.ts'
 import { useMitt } from '@/hooks/useMitt.ts'
+import { useGhostSessionGuard } from '@/hooks/useGhostSessionGuard.ts'
+import { armBootSuppression } from '@/utils/errorToastSuppression'
 import { useWindow } from '@/hooks/useWindow.ts'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { useGlobalStore } from '@/stores/global'
@@ -388,14 +390,15 @@ useMitt.on(WsResponseMessageType.ROOM_DISSOLUTION, async (roomId: string) => {
   chatStore.removeDissolvedSession(roomId)
 })
 
-useMitt.on(MittEnum.CONTACTS_SYNCED, async () => {
-  const previousRoomId = globalStore.currentSessionRoomId
-  console.log('收到联系人列表同步完成通知，当前会话:', previousRoomId)
-  await chatStore.getSessionList(true)
-  if (previousRoomId && !chatStore.getSession(previousRoomId)) {
-    chatStore.removeDissolvedSession(previousRoomId)
-  }
-})
+// #179：权威联系人同步落地后的统一收尾（启动抑制窗关闭 + 恢复态幽灵优雅移除+轻提示）
+const { register: registerGhostSessionGuard } = useGhostSessionGuard()
+registerGhostSessionGuard()
+
+// #179 Q2：启动权威同步窗口——桌面端本地快照在首次同步落地前按定义陈旧，
+// 窗口内压制 roomId 级错误 toast（web 无本地快照语义，不开窗）
+if (!isWeb()) {
+  armBootSuppression()
+}
 
 useMitt.on(WsResponseMessageType.USER_STATE_CHANGE, async (data: { uid: string; userStateId: string }) => {
   console.log('收到用户状态改变', data)
