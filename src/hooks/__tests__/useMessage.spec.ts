@@ -8,7 +8,8 @@ const chatStoreMock = {
   getSession: vi.fn(),
   getSessionList: vi.fn(),
   markSessionRead: vi.fn(),
-  removeDissolvedSession: vi.fn()
+  removeDissolvedSession: vi.fn(),
+  sessionOptions: { isLoading: false }
 }
 
 const globalStoreMock = {
@@ -78,6 +79,7 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    chatStoreMock.sessionOptions.isLoading = false
     ;(window as any).$message = { info: vi.fn(), error: vi.fn(), success: vi.fn(), warning: vi.fn() }
   })
 
@@ -158,5 +160,30 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
     // 抑制标志正常成对释放
     expect(groupStoreMock.suppressMemberFetchError).toHaveBeenCalledWith(roomId)
     expect(groupStoreMock.releaseMemberFetchError).toHaveBeenCalledWith(roomId)
+  })
+
+  it('getSessionList 去重返回旧数据时，等待在途拉取结束再判定，不误弹网络错误', async () => {
+    const { handleMsgClick } = useMessage()
+    const roomId = 'ghost-race-room'
+    const session = createGroupSession(roomId)
+
+    groupStoreMock.getUserListByRoomId.mockReturnValue([])
+    groupStoreMock.getGroupUserList.mockRejectedValue(new Error('房间号有误'))
+
+    // 模拟启动同步在途：getSessionList 因 isLoading 去重直接返回，
+    // 0.5s 后在途拉取完成、会话从 sessionMap 消失
+    chatStoreMock.sessionOptions.isLoading = true
+    setTimeout(() => {
+      chatStoreMock.sessionOptions.isLoading = false
+      chatStoreMock.getSession.mockReturnValue(undefined)
+    }, 500)
+    chatStoreMock.getSessionList.mockResolvedValue(undefined)
+    chatStoreMock.getSession.mockReturnValue({ roomId } as SessionItem)
+
+    await handleMsgClick(session)
+
+    expect(chatStoreMock.removeDissolvedSession).toHaveBeenCalledWith(roomId)
+    expect((window as any).$message.info).toHaveBeenCalledWith('message.message_menu.group_dissolved')
+    expect((window as any).$message.error).not.toHaveBeenCalled()
   })
 })
