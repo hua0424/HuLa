@@ -24,11 +24,15 @@ export const useGhostSessionGuard = () => {
     const previousRoomId = globalStore.currentSessionRoomId
     console.log('收到联系人列表同步完成通知，当前会话:', previousRoomId)
     await chatStore.getSessionList(true)
-    if (previousRoomId && !chatStore.getSession(previousRoomId)) {
-      chatStore.removeDissolvedSession(previousRoomId)
-      // 与 handleMsgClick 兜底按 roomId 去重，同次同步下双路径只提示一次（R5-P2）
-      if (shouldNotifyGroupDissolved(previousRoomId)) {
-        window.$message.info(t('message.message_menu.group_dissolved'))
+    if (previousRoomId) {
+      // 直读本地快照做权威判定（不经 getSessionList 的 isLoading 去重竞态，G29/G30 坐实）
+      const stillExists = await chatStore.isRoomInContactsSnapshot(previousRoomId).catch(() => true)
+      if (!stillExists) {
+        chatStore.removeDissolvedSession(previousRoomId)
+        // 与 handleMsgClick 兜底按 roomId 去重，同次同步下双路径只提示一次（R5-P2）
+        if (shouldNotifyGroupDissolved(previousRoomId)) {
+          window.$message.info(t('message.message_menu.group_dissolved'))
+        }
       }
     }
   }

@@ -95,24 +95,11 @@ export const useMessage = () => {
         useMitt.on(MittEnum.CONTACTS_SYNCED, handler)
         chatStore.getSessionList(true).catch(() => {})
       })
-      // CONTACTS_SYNCED 只代表服务端全量同步落库完成；App.vue 的全局监听也会在此刻
-      // 触发 getSessionList，其 isLoading 去重会让紧随其后的调用直接返回（sessionMap 未刷新）。
-      // 这里循环调用直到真实执行一次（返回后无在途拉取）再判定。
-      let settleRounds = 0
-      for (let i = 0; i < 50; i++) {
-        settleRounds = i + 1
-        await chatStore.getSessionList(true).catch(() => {})
-        const hasRoomNow = chatStore.sessionList?.some((s) => s.roomId === roomId)
-        console.log(
-          `[useMessage] settle#${settleRounds}: room=${roomId} isLoading=${chatStore.sessionOptions?.isLoading} listHasRoom=${hasRoomNow} listSize=${chatStore.sessionList?.length}`
-        )
-        if (!chatStore.sessionOptions?.isLoading) break
-        await new Promise((resolve) => setTimeout(resolve, 200))
-      }
-      const sessionStillExists = !!chatStore.getSession(roomId)
-      console.log(
-        `[useMessage] 兜底判定: room=${roomId} wait=${waitReason} settleRounds=${settleRounds} sessionExists=${sessionStillExists} isLoading=${chatStore.sessionOptions?.isLoading} listHasRoom=${chatStore.sessionList?.some((s) => s.roomId === roomId)}`
-      )
+      // CONTACTS_SYNCED 落地后直读本地联系人快照做权威判定——不经 getSessionList：
+      // 其 isLoading 去重会让并发调用拿到未刷新的内存列表，幽灵被误判为「仍存在」
+      // 而误弹网络错误（G29/G30 受控自检坐实的竞态）
+      const sessionStillExists = await chatStore.isRoomInContactsSnapshot(roomId).catch(() => true)
+      console.log(`[useMessage] 兜底判定: room=${roomId} wait=${waitReason} sessionExists=${sessionStillExists}`)
       if (!sessionStillExists) {
         // 房间已不在服务端列表中，按解散/失效统一清理，并给出轻提示代替网络错误弹窗
         chatStore.removeDissolvedSession(roomId)

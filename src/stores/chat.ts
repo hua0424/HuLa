@@ -1417,6 +1417,19 @@ export const useChatStore = defineStore(
       groupStore.markRoomDissolved(roomId)
     }
 
+    /**
+     * 直读本地联系人快照判断房间是否存在（#179）。
+     * CONTACTS_SYNCED 落地后本地 im_contact 已是服务端全量，此查询即权威判定。
+     * 刻意不经 getSessionList：其 isLoading 去重会让并发调用拿到未刷新的内存列表。
+     */
+    const isRoomInContactsSnapshot = async (roomId: string): Promise<boolean> => {
+      const list: any[] = await invokeWithErrorHandler(TauriCommand.LIST_CONTACTS, undefined, {
+        showError: false,
+        errorType: ErrorType.Network
+      })
+      return Array.isArray(list) && list.some((item) => String(item?.roomId) === String(roomId))
+    }
+
     // 监听 Worker 消息
     timerWorker.onmessage = (e) => {
       const { type, msgId } = e.data
@@ -2171,6 +2184,7 @@ export const useChatStore = defineStore(
       getGroupSessions,
       removeSession,
       removeDissolvedSession,
+      isRoomInContactsSnapshot,
       changeRoom,
       addSession,
       setAllSessionMsgList,

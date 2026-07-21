@@ -9,6 +9,7 @@ const chatStoreMock = {
   getSessionList: vi.fn(),
   markSessionRead: vi.fn(),
   removeDissolvedSession: vi.fn(),
+  isRoomInContactsSnapshot: vi.fn(),
   sessionOptions: { isLoading: false }
 }
 
@@ -103,11 +104,12 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
     groupStoreMock.getUserListByRoomId.mockReturnValue([])
     groupStoreMock.getGroupUserList.mockRejectedValue(new Error('房间号有误'))
 
-    // 兜底触发同步 → CONTACTS_SYNCED 落地后房间消失（桌面端本地库被全量同步重写）
+    // 兜底触发同步 → CONTACTS_SYNCED 落地后本地快照已无该房间
     chatStoreMock.getSessionList.mockImplementation(async () => {
       fireContactsSynced()
     })
     chatStoreMock.getSession.mockReturnValueOnce({ roomId } as SessionItem).mockReturnValue(undefined)
+    chatStoreMock.isRoomInContactsSnapshot.mockResolvedValue(false)
 
     await handleMsgClick(session)
 
@@ -139,6 +141,7 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
       fireContactsSynced()
     })
     chatStoreMock.getSession.mockReturnValue({ roomId } as SessionItem)
+    chatStoreMock.isRoomInContactsSnapshot.mockResolvedValue(true)
 
     await handleMsgClick(session)
 
@@ -178,14 +181,15 @@ describe('useMessage handleMsgClick 幽灵会话兜底清理', () => {
     groupStoreMock.getGroupUserList.mockRejectedValue(new Error('房间号有误'))
 
     // 桌面端语义：getSessionList 先回本地旧快照（含幽灵），
-    // 300ms 后全量同步落地才发射 CONTACTS_SYNCED 并让房间消失
+    // 300ms 后全量同步落地才发射 CONTACTS_SYNCED、快照直查转为「不存在」
     chatStoreMock.getSessionList.mockImplementation(async () => {
       setTimeout(() => {
-        chatStoreMock.getSession.mockReturnValue(undefined)
+        chatStoreMock.isRoomInContactsSnapshot.mockResolvedValue(false)
         fireContactsSynced()
       }, 300)
     })
     chatStoreMock.getSession.mockReturnValue({ roomId } as SessionItem)
+    chatStoreMock.isRoomInContactsSnapshot.mockResolvedValue(true)
 
     const clickPromise = handleMsgClick(session)
 

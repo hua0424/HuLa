@@ -8,7 +8,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const chatStoreMock = {
   getSession: vi.fn(),
   getSessionList: vi.fn(),
-  removeDissolvedSession: vi.fn()
+  removeDissolvedSession: vi.fn(),
+  isRoomInContactsSnapshot: vi.fn()
 }
 const globalStoreMock = {
   currentSessionRoomId: ''
@@ -43,6 +44,7 @@ describe('useGhostSessionGuard（#179 Q2）', () => {
     vi.clearAllMocks()
     mittHandlers.clear()
     globalStoreMock.currentSessionRoomId = ''
+    chatStoreMock.isRoomInContactsSnapshot.mockResolvedValue(true)
     ;(window as any).$message = { info: vi.fn(), error: vi.fn() }
   })
 
@@ -74,15 +76,16 @@ describe('useGhostSessionGuard（#179 Q2）', () => {
     }
   })
 
-  it('恢复态幽灵（当前会话不在权威列表）：移除 + 「该群聊已解散」轻提示', async () => {
+  it('恢复态幽灵（当前会话不在权威快照）：移除 + 「该群聊已解散」轻提示', async () => {
     const { handleContactsSynced } = useGhostSessionGuard()
     globalStoreMock.currentSessionRoomId = 'ghost-room'
     chatStoreMock.getSessionList.mockResolvedValue(undefined)
-    chatStoreMock.getSession.mockReturnValue(undefined)
+    chatStoreMock.isRoomInContactsSnapshot.mockResolvedValue(false)
 
     await handleContactsSynced()
 
     expect(chatStoreMock.getSessionList).toHaveBeenCalledWith(true)
+    expect(chatStoreMock.isRoomInContactsSnapshot).toHaveBeenCalledWith('ghost-room')
     expect(chatStoreMock.removeDissolvedSession).toHaveBeenCalledWith('ghost-room')
     expect((window as any).$message.info).toHaveBeenCalledTimes(1)
     expect((window as any).$message.info).toHaveBeenCalledWith('message.message_menu.group_dissolved')
@@ -92,7 +95,7 @@ describe('useGhostSessionGuard（#179 Q2）', () => {
     const { handleContactsSynced } = useGhostSessionGuard()
     globalStoreMock.currentSessionRoomId = 'ghost-room-dup'
     chatStoreMock.getSessionList.mockResolvedValue(undefined)
-    chatStoreMock.getSession.mockReturnValue(undefined)
+    chatStoreMock.isRoomInContactsSnapshot.mockResolvedValue(false)
 
     await handleContactsSynced()
     await handleContactsSynced()
@@ -101,11 +104,11 @@ describe('useGhostSessionGuard（#179 Q2）', () => {
     expect((window as any).$message.info).toHaveBeenCalledTimes(1)
   })
 
-  it('当前会话仍在权威列表：不移除、不提示', async () => {
+  it('当前会话仍在权威快照：不移除、不提示', async () => {
     const { handleContactsSynced } = useGhostSessionGuard()
     globalStoreMock.currentSessionRoomId = 'valid-room'
     chatStoreMock.getSessionList.mockResolvedValue(undefined)
-    chatStoreMock.getSession.mockReturnValue({ roomId: 'valid-room' })
+    chatStoreMock.isRoomInContactsSnapshot.mockResolvedValue(true)
 
     await handleContactsSynced()
 
