@@ -60,6 +60,19 @@ export const releaseBootSuppressionAfterSync = (graceMs = BOOT_SUPPRESSION_GRACE
 
 export const isBootSuppressionActive = (): boolean => bootSuppressionActive
 
+// ── 「群已解散」轻提示去重（R5-P2）────────────────────────────────────────
+// handleMsgClick 兜底与 useGhostSessionGuard 在同一次 CONTACTS_SYNCED 下可能
+// 对同一 roomId 双重触发提示；roomId 一次性（新群必然新 roomId），按 roomId 去重即可。
+const dissolvedNotifiedRoomIds = new Set<string>()
+
+/** 同一 roomId 的「该群聊已解散」轻提示只允许发一次；返回 true 表示本次应提示 */
+export const shouldNotifyGroupDissolved = (roomId: string | number): boolean => {
+  const key = String(roomId ?? '')
+  if (!key || dissolvedNotifiedRoomIds.has(key)) return false
+  dissolvedNotifiedRoomIds.add(key)
+  return true
+}
+
 /** 开始抑制某 roomId 相关请求的错误 toast；重复调用会取消待生效的释放 */
 export const suppressErrorToastsForRoom = (roomId: string | number) => {
   const key = String(roomId ?? '')

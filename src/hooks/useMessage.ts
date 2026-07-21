@@ -8,6 +8,7 @@ import { useSettingStore } from '@/stores/setting.ts'
 import { useGroupStore } from '@/stores/group'
 import { useUserStore } from '@/stores/user'
 import { exitGroup, notification, setSessionTop, shield } from '@/utils/ImRequestUtils'
+import { shouldNotifyGroupDissolved } from '@/utils/errorToastSuppression'
 import { invokeWithErrorHandler } from '../utils/TauriInvokeHandler'
 import { useI18n } from 'vue-i18n'
 
@@ -111,7 +112,10 @@ export const useMessage = () => {
       if (!sessionStillExists) {
         // 房间已不在服务端列表中，按解散/失效统一清理，并给出轻提示代替网络错误弹窗
         chatStore.removeDissolvedSession(roomId)
-        window.$message.info(t('message.message_menu.group_dissolved'))
+        // 与 useGhostSessionGuard 按 roomId 去重，同次同步下双路径只提示一次（R5-P2）
+        if (shouldNotifyGroupDissolved(roomId)) {
+          window.$message.info(t('message.message_menu.group_dissolved'))
+        }
       } else {
         // 会话仍存在：瞬时拉取失败，维持原有网络错误提示行为（补回一次）
         window.$message.error(error instanceof Error ? error.message : String(error))

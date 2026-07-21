@@ -88,6 +88,19 @@ describe('useGhostSessionGuard（#179 Q2）', () => {
     expect((window as any).$message.info).toHaveBeenCalledWith('message.message_menu.group_dissolved')
   })
 
+  it('同一 roomId 重复触发（兜底与守卫双路径）只提示一次（R5-P2）', async () => {
+    const { handleContactsSynced } = useGhostSessionGuard()
+    globalStoreMock.currentSessionRoomId = 'ghost-room-dup'
+    chatStoreMock.getSessionList.mockResolvedValue(undefined)
+    chatStoreMock.getSession.mockReturnValue(undefined)
+
+    await handleContactsSynced()
+    await handleContactsSynced()
+
+    expect(chatStoreMock.removeDissolvedSession).toHaveBeenCalledTimes(2)
+    expect((window as any).$message.info).toHaveBeenCalledTimes(1)
+  })
+
   it('当前会话仍在权威列表：不移除、不提示', async () => {
     const { handleContactsSynced } = useGhostSessionGuard()
     globalStoreMock.currentSessionRoomId = 'valid-room'

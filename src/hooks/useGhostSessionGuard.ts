@@ -3,7 +3,7 @@ import { MittEnum } from '@/enums'
 import { useMitt } from '@/hooks/useMitt'
 import { useChatStore } from '@/stores/chat'
 import { useGlobalStore } from '@/stores/global'
-import { releaseBootSuppressionAfterSync } from '@/utils/errorToastSuppression'
+import { releaseBootSuppressionAfterSync, shouldNotifyGroupDissolved } from '@/utils/errorToastSuppression'
 
 /**
  * #179：权威联系人同步（CONTACTS_SYNCED）落地后的统一收尾。
@@ -26,7 +26,10 @@ export const useGhostSessionGuard = () => {
     await chatStore.getSessionList(true)
     if (previousRoomId && !chatStore.getSession(previousRoomId)) {
       chatStore.removeDissolvedSession(previousRoomId)
-      window.$message.info(t('message.message_menu.group_dissolved'))
+      // 与 handleMsgClick 兜底按 roomId 去重，同次同步下双路径只提示一次（R5-P2）
+      if (shouldNotifyGroupDissolved(previousRoomId)) {
+        window.$message.info(t('message.message_menu.group_dissolved'))
+      }
     }
   }
 
