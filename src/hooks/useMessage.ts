@@ -102,6 +102,10 @@ export const useMessage = () => {
       for (let i = 0; i < 50; i++) {
         settleRounds = i + 1
         await chatStore.getSessionList(true).catch(() => {})
+        const hasRoomNow = chatStore.sessionList?.some((s) => s.roomId === roomId)
+        console.log(
+          `[useMessage] settle#${settleRounds}: room=${roomId} isLoading=${chatStore.sessionOptions?.isLoading} listHasRoom=${hasRoomNow} listSize=${chatStore.sessionList?.length}`
+        )
         if (!chatStore.sessionOptions?.isLoading) break
         await new Promise((resolve) => setTimeout(resolve, 200))
       }
