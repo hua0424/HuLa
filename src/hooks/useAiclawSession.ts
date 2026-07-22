@@ -63,11 +63,19 @@ export const useAiclawSession = () => {
   /** ChatHeader 的 AI 徽标 / RTC 操作 / aiclaw 删除对话框 模式 */
   const headerMode = computed<AiclawHeaderMode>(() => (isAiclawPrivateSession.value ? 'aiclaw' : 'normal'))
 
+  /**
+   * 「显示思考过程」开关可见性（REQ-014 / CONTEXT.md「room-has-aiclaw」术语）：
+   * 私聊 aiclaw 或群里有 aiclaw 成员时显示——私聊正是思考主场景。
+   * 不新造查询，由既有 isAiclawPrivateSession / roomHasAiclaw 派生。
+   */
+  const showThinkingSwitch = computed(() => roomHasAiclaw.value || isAiclawPrivateSession.value)
+
   return {
     isAiclawPrivateSession,
     roomHasAiclaw,
     allowedUploadTypes,
     disableComposer,
-    headerMode
+    headerMode,
+    showThinkingSwitch
   }
 }

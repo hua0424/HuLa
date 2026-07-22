@@ -1,6 +1,6 @@
 import { ImUrlEnum } from '@/enums'
 import { imRequestSilent } from '@/utils/ImRequestUtils'
-import type { ThinkingArchiveItem } from '@/types/thinking'
+import type { ThinkingMetadataItem } from '@/types/thinking'
 
 export type LoadThinkingByTriggerParams = {
   /** 房间 ID */
@@ -14,18 +14,18 @@ export type LoadThinkingByTriggerParams = {
  *
  * 契约：POST /im/aiclaw/thinking/by-trigger
  * body: { roomId, triggerMsgIds[] }
- * resp: ThinkingArchiveItem[]（metadata only，无 content；展开全文仍走 AICLAW_THINKING_DETAIL）
+ * resp: ThinkingMetadataItem[]（metadata only，无 content；展开全文仍走 AICLAW_THINKING_DETAIL）
  *
  * 使用静默请求：元数据加载失败不应阻塞消息列表渲染。
  */
 export const loadThinkingByTrigger = async ({
   roomId,
   triggerMsgIds
-}: LoadThinkingByTriggerParams): Promise<ThinkingArchiveItem[]> => {
+}: LoadThinkingByTriggerParams): Promise<ThinkingMetadataItem[]> => {
   if (!roomId || !triggerMsgIds?.length) return []
 
   try {
-    const data = await imRequestSilent<ThinkingArchiveItem[]>({
+    const data = await imRequestSilent<ThinkingMetadataItem[]>({
       url: ImUrlEnum.AICLAW_THINKING_BY_TRIGGER,
       body: {
         roomId: Number(roomId),

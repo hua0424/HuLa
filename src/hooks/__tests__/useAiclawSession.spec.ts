@@ -132,4 +132,31 @@ describe('useAiclawSession', () => {
       expect(session.roomHasAiclaw.value).toBe(true)
     })
   })
+
+  describe('showThinkingSwitch（REQ-014 / CONTEXT.md room-has-aiclaw 术语）', () => {
+    it('aiclaw 私聊：显示开关', () => {
+      setPrivateSession('2001', true)
+      const session = useAiclawSession()
+      expect(session.showThinkingSwitch.value).toBe(true)
+    })
+
+    it('普通私聊：不显示开关', () => {
+      setPrivateSession('1001', false)
+      const session = useAiclawSession()
+      expect(session.showThinkingSwitch.value).toBe(false)
+    })
+
+    it('含 aiclaw 成员的群聊：显示开关', () => {
+      mockFns.isAiclawByUserType.mockImplementation((userType) => userType === 4)
+      setGroupSession('room-g1', [{ uid: '2001', userType: 4 }])
+      const session = useAiclawSession()
+      expect(session.showThinkingSwitch.value).toBe(true)
+    })
+
+    it('无 aiclaw 成员的群聊：不显示开关', () => {
+      setGroupSession('room-g1', [{ uid: '1001', userType: 1 }])
+      const session = useAiclawSession()
+      expect(session.showThinkingSwitch.value).toBe(false)
+    })
+  })
 })

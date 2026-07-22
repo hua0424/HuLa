@@ -131,7 +131,7 @@
         </n-popover>
       </div>
 
-      <div v-if="roomHasAiclaw" class="options-box">
+      <div v-if="showThinkingSwitch" class="options-box">
         <n-popover trigger="hover" :show-arrow="false" placement="bottom">
           <template #trigger>
             <n-switch
@@ -807,7 +807,7 @@ const isChannel = computed(() => activeItem.value?.hotFlag === IsAllUserEnum.Yes
 // 是否为bot用户
 const isBotUser = computed(() => activeItem.value?.account === UserType.BOT)
 // REQ-006-3：AI 助理会话模式统一收敛到 seam
-const { headerMode, roomHasAiclaw } = useAiclawSession()
+const { headerMode, showThinkingSwitch } = useAiclawSession()
 const isAiclawSession = computed(() => headerMode.value === 'aiclaw')
 
 // AI 助理删除确认
