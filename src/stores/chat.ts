@@ -8,12 +8,7 @@ import { useRoute } from 'vue-router'
 import { ErrorType } from '@/common/exception'
 import { MittEnum, MessageStatusEnum, MsgEnum, RoomTypeEnum, StoresEnum, TauriCommand } from '@/enums'
 import type { MarkItemType, MessageType, RevokedMsgType, SessionItem } from '@/services/types'
-import {
-  mapServerThinkingStatus,
-  parseThinkingCreateTime,
-  type ThinkingArchiveItem,
-  type ThinkingState
-} from '@/types/thinking'
+import { mapServerThinkingStatus, parseThinkingCreateTime, type ThinkingState } from '@/types/thinking'
 import { useGlobalStore } from '@/stores/global.ts'
 import { useFeedStore } from '@/stores/feed.ts'
 import { useGroupStore } from '@/stores/group.ts'
@@ -23,6 +18,7 @@ import { renderReplyContent } from '@/utils/RenderReplyContent.ts'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useSessionUnreadStore } from '@/stores/sessionUnread'
 import type { AiclawGroupConfig } from '@/services/wsType'
+import { loadThinkingByTrigger } from '@/services/thinkingService'
 import { normalizeAiclawGroupConfig } from '@/utils/aiclawGroupConfig'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 import { isWeb } from '@/utils/PlatformConstants'
@@ -584,6 +580,9 @@ export const useChatStore = defineStore(
         normalizeMsgSendTime(msg)
         messageMap[roomId][msg.message.id] = msg
       }
+
+      // REQ-014：每加载一页消息后，按 triggerMsgId 批量反查 thinking 元数据
+      await loadThinkingByTriggerForMessages(roomId, list)
     }
 
     const remoteSyncLocks = new Set<string>()
@@ -1591,6 +1590,8 @@ export const useChatStore = defineStore(
         }
 
         // 4. 直接调用getPageMsg获取最新消息，强制使用空cursor
+        thinkingByTrigger.delete(requestRoomId)
+        thinkingMetadataLoaded.delete(requestRoomId)
         await getPageMsg(pageSize, requestRoomId, '')
 
         console.log('[Network] 已重置并刷新当前聊天室的消息列表')
@@ -1775,34 +1776,49 @@ export const useChatStore = defineStore(
     const thinkingStreams = reactive(new Map<string, ThinkingState>())
 
     /**
-     * 已完成思考的归档列表（按 roomId 分组）
-     * 保留最近 10 条已完成思考，供回顾
+     * 按触发消息索引的思考状态（REQ-014 / ADR-0007）
+     * key1: roomId
+     * key2: triggerMsgId（为空时归入 '' 底部桶）
+     * value: 该触发消息下的全部思考，按开始时间升序
      */
-    const thinkingArchive = reactive(new Map<string, ThinkingState[]>())
+    const thinkingByTrigger = reactive(new Map<string, Map<string, ThinkingState[]>>())
+
+    /** 每个房间已经批量反查过元数据的 msgId 集合，避免重复请求 */
+    const thinkingMetadataLoaded = reactive(new Map<string, Set<string>>())
 
     /** 当前房间是否有活跃思考 */
     const isCurrentRoomThinking = computed(() => {
       const roomId = globalStore.currentSessionRoomId
       if (!roomId) return false
-      for (const [, state] of thinkingStreams) {
-        if (state.roomId === roomId && state.status === 'thinking') {
+      const roomMap = thinkingByTrigger.get(roomId)
+      if (!roomMap) return false
+      for (const [, list] of roomMap) {
+        if (list.some((state) => state.status === 'thinking')) {
           return true
         }
       }
       return false
     })
 
-    /** 当前房间的思考列表（活跃 + 已完成未归档，供 ThinkingPanel 使用） */
-    const currentRoomThinkings = computed(() => {
-      const roomId = globalStore.currentSessionRoomId
-      if (!roomId) return []
-      const result: ThinkingState[] = []
-      for (const [, state] of thinkingStreams) {
-        if (state.roomId === roomId) {
-          result.push(state)
-        }
+    /** 获取某条消息在当前房间关联的全部思考 */
+    const getThinkingStatesByTriggerMsg = computed(() => {
+      return (roomId: string, msgId: string): ThinkingState[] => {
+        if (!roomId || !msgId) return []
+        return thinkingByTrigger.get(roomId)?.get(msgId) ?? []
       }
-      return result
+    })
+
+    /**
+     * 获取 '' 底部桶中的进行中思考（REQ-014 / CONTEXT.md 思考锚定裁决）：
+     * 无触发消息的思考（如 owner 在 TUI 输入驱动的 turn）进行中显示在消息流底部，
+     * complete/error 历史态不渲染。
+     */
+    const getBottomThinkingStates = computed(() => {
+      return (roomId: string): ThinkingState[] => {
+        if (!roomId) return []
+        const bucket = thinkingByTrigger.get(roomId)?.get('') ?? []
+        return bucket.filter((state) => state.status === 'thinking')
+      }
     })
 
     /** autoReply 消息标记集（内存，不持久化） */
@@ -1973,14 +1989,14 @@ export const useChatStore = defineStore(
       const aiclawId = payload.fromUid
       const key = `${roomId}:${aiclawId}`
 
-      // 如果该 aiclaw 在该房间已有未完成的思考，先归档旧的
+      // 如果该 aiclaw 在该房间已有未完成的思考，先标记为被覆盖
       const existing = thinkingStreams.get(key)
       if (existing) {
         if (existing.status === 'thinking') {
           existing.status = 'error'
           existing.errorMsg = 'Superseded by new thinking'
           existing.endTime = Date.now()
-          archiveThinking(existing)
+          upsertThinkingToTrigger(existing)
         }
         thinkingStreams.delete(key)
       }
@@ -1989,7 +2005,7 @@ export const useChatStore = defineStore(
       const groupStore = useGroupStore()
       const userInfo = groupStore.getUserInfo(String(aiclawId))
 
-      thinkingStreams.set(key, {
+      const state: ThinkingState = {
         thinkingId: payload.thinkingId,
         aiclawId,
         aiclawName: payload.aiclawName || userInfo?.name || 'AI',
@@ -1999,7 +2015,10 @@ export const useChatStore = defineStore(
         startTime: Date.now(),
         triggerMsgId: payload.triggerMsgId,
         collapsed: false
-      })
+      }
+
+      thinkingStreams.set(key, state)
+      upsertThinkingToTrigger(state)
     }
 
     /** 结束思考（THINKING_END 时调用） */
@@ -2014,48 +2033,91 @@ export const useChatStore = defineStore(
           state.durationMs = payload.durationMs
           state.errorMsg = payload.errorMsg
           state.collapsed = true
-          archiveThinking(state)
+          upsertThinkingToTrigger(state)
           thinkingStreams.delete(key)
           return
         }
       }
+
+      // 活跃流中未找到（例如历史元数据先加载，随后 WS END 到达），在 byTrigger 中更新
+      for (const roomMap of thinkingByTrigger.values()) {
+        for (const list of roomMap.values()) {
+          const state = list.find((s) => s.thinkingId === thinkingId)
+          if (state) {
+            state.status = payload.status
+            state.endTime = Date.now()
+            state.durationMs = payload.durationMs
+            state.errorMsg = payload.errorMsg
+            state.collapsed = true
+            return
+          }
+        }
+      }
     }
 
-    /** 归档已完成的思考（内部方法） */
-    const archiveThinking = (state: ThinkingState) => {
-      const roomId = state.roomId
-      if (!thinkingArchive.has(roomId)) {
-        thinkingArchive.set(roomId, [])
+    /** 把 ThinkingState 归位到 thinkingByTrigger 的对应 triggerMsgId 桶 */
+    const upsertThinkingToTrigger = (state: ThinkingState) => {
+      let roomMap = thinkingByTrigger.get(state.roomId)
+      if (!roomMap) {
+        roomMap = reactive(new Map<string, ThinkingState[]>())
+        thinkingByTrigger.set(state.roomId, roomMap)
       }
-      const archive = thinkingArchive.get(roomId)!
-      archive.unshift(state)
-      // 限制归档数量
-      if (archive.length > 10) {
-        archive.length = 10
+      const triggerKey = state.triggerMsgId ?? ''
+      let list = roomMap.get(triggerKey)
+      if (!list) {
+        list = reactive([])
+        roomMap.set(triggerKey, list)
       }
+      const idx = list.findIndex((s) => s.thinkingId === state.thinkingId)
+      if (idx === -1) {
+        list.push(state)
+      } else {
+        list[idx] = state
+      }
+      list.sort((a, b) => a.startTime - b.startTime)
     }
-
-    /** 已加载过历史归档的房间 ID 集合（#136：重启后按需回填，避免重复请求） */
-    const thinkingArchiveLoaded = reactive(new Set<string>())
-
-    /** 正在加载历史归档的房间 ID 集合 */
-    const thinkingArchiveLoading = reactive(new Set<string>())
 
     /**
-     * 将服务端 thinking 归档列表项合并到房间归档（去重 + 按结束时间倒序）
+     * 按已加载消息的 msgId 批量反查 thinking 元数据（REQ-014 / ADR-0007）
      */
-    const mergeServerThinkingArchive = (roomId: string, items: ThinkingArchiveItem[]) => {
-      if (!items?.length) return
+    const loadThinkingByTriggerForMessages = async (roomId: string, messages: MessageType[]) => {
+      if (!roomId || !messages?.length) return
 
-      const merged = new Map<string, ThinkingState>()
-      const existing = thinkingArchive.get(roomId) || []
-      for (const state of existing) {
-        merged.set(state.thinkingId, state)
+      let loadedSet = thinkingMetadataLoaded.get(roomId)
+      if (!loadedSet) {
+        loadedSet = reactive(new Set<string>())
+        thinkingMetadataLoaded.set(roomId, loadedSet)
       }
+
+      const msgIds = messages.map((msg) => msg.message?.id).filter((id): id is string => !!id && !loadedSet!.has(id))
+
+      if (!msgIds.length) return
+
+      const items = await loadThinkingByTrigger({
+        roomId: Number(roomId),
+        triggerMsgIds: msgIds
+      })
+
+      for (const id of msgIds) {
+        loadedSet.add(id)
+      }
+
+      if (!items?.length) return
 
       for (const item of items) {
         const thinkingId = String(item.id)
-        if (merged.has(thinkingId)) continue
+
+        // 与已有状态去重（可能 WS 已先到达）
+        let exists = false
+        outer: for (const roomMap of thinkingByTrigger.values()) {
+          for (const list of roomMap.values()) {
+            if (list.some((s) => s.thinkingId === thinkingId)) {
+              exists = true
+              break outer
+            }
+          }
+        }
+        if (exists) continue
 
         const aiclawId = Number(item.aiclawUid)
         const userInfo = groupStore.getUserInfo(String(aiclawId))
@@ -2063,7 +2125,7 @@ export const useChatStore = defineStore(
         const durationMs = item.durationMs ?? 0
         const startTime = durationMs > 0 ? endTime - durationMs : endTime
 
-        merged.set(thinkingId, {
+        upsertThinkingToTrigger({
           thinkingId,
           aiclawId,
           aiclawName: userInfo?.name || 'AI',
@@ -2077,67 +2139,37 @@ export const useChatStore = defineStore(
           collapsed: true
         })
       }
-
-      const sorted = Array.from(merged.values()).sort((a, b) => {
-        const aTime = a.endTime ?? a.startTime
-        const bTime = b.endTime ?? b.startTime
-        return bTime - aTime
-      })
-      thinkingArchive.set(roomId, sorted)
-    }
-
-    /**
-     * 从服务端按房间加载历史 thinking 归档（#136）
-     *
-     * 契约：GET /im/aiclaw/thinking/list?roomId=&cursor=&pageSize=
-     * 返回 CursorPageBaseResp<ThinkingArchiveItem>（元数据 only），展开时走现有单条 detail 接口。
-     */
-    const loadThinkingArchive = async (roomId: string): Promise<boolean> => {
-      if (!roomId || thinkingArchiveLoading.has(roomId) || thinkingArchiveLoaded.has(roomId)) {
-        return true
-      }
-      thinkingArchiveLoading.add(roomId)
-      try {
-        const { imRequest } = await import('@/utils/ImRequestUtils')
-        const { ImUrlEnum } = await import('@/enums')
-        type CursorPageBaseResp<T> = { list: T[]; cursor?: string; isLast?: boolean }
-        const resp = await imRequest<CursorPageBaseResp<ThinkingArchiveItem>>({
-          url: ImUrlEnum.AICLAW_THINKING_LIST,
-          // #136 spec: 懒加载不做全量回填/分页历史流，固定取最近 10 条
-          params: { roomId: Number(roomId), pageSize: 10 }
-        })
-        mergeServerThinkingArchive(roomId, resp?.list || [])
-        thinkingArchiveLoaded.add(roomId)
-        return true
-      } catch (error) {
-        console.error('[ChatStore] Failed to load thinking archive:', error)
-        return false
-      } finally {
-        thinkingArchiveLoading.delete(roomId)
-      }
     }
 
     /** 清理思考状态（切换房间或手动关闭时） */
     const clearThinking = (roomId?: string, aiclawId?: number) => {
       if (roomId && aiclawId) {
-        thinkingStreams.delete(`${roomId}:${aiclawId}`)
+        const key = `${roomId}:${aiclawId}`
+        const state = thinkingStreams.get(key)
+        if (state) {
+          const roomMap = thinkingByTrigger.get(roomId)
+          const triggerKey = state.triggerMsgId ?? ''
+          const list = roomMap?.get(triggerKey)
+          if (list) {
+            const idx = list.findIndex((s) => s.thinkingId === state.thinkingId)
+            if (idx !== -1) {
+              list.splice(idx, 1)
+            }
+          }
+        }
+        thinkingStreams.delete(key)
       } else if (roomId) {
         for (const [key, state] of thinkingStreams) {
           if (state.roomId === roomId) {
             thinkingStreams.delete(key)
           }
         }
+        thinkingByTrigger.delete(roomId)
+        thinkingMetadataLoaded.delete(roomId)
       } else {
         thinkingStreams.clear()
-      }
-    }
-
-    /** 切换思考卡片折叠状态 */
-    const toggleThinkingCollapse = (roomId: string, aiclawId: number) => {
-      const key = `${roomId}:${aiclawId}`
-      const state = thinkingStreams.get(key)
-      if (state) {
-        state.collapsed = !state.collapsed
+        thinkingByTrigger.clear()
+        thinkingMetadataLoaded.clear()
       }
     }
 
@@ -2208,17 +2240,16 @@ export const useChatStore = defineStore(
       tryReplaceStreamPlaceholder,
       // REQ-004 thinking
       thinkingStreams,
-      thinkingArchive,
-      thinkingArchiveLoaded,
-      thinkingArchiveLoading,
+      thinkingByTrigger,
+      thinkingMetadataLoaded,
       isCurrentRoomThinking,
-      currentRoomThinkings,
+      getThinkingStatesByTriggerMsg,
+      getBottomThinkingStates,
       autoReplyMessages,
       startThinking,
       finalizeThinking,
       clearThinking,
-      toggleThinkingCollapse,
-      loadThinkingArchive,
+      loadThinkingByTriggerForMessages,
       markMessageAsAutoReply,
       isAutoReplyMessage,
 

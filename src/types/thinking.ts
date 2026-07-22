@@ -35,11 +35,11 @@ export interface ThinkingState {
 }
 
 /**
- * 服务端 thinking 归档列表项（GET /im/aiclaw/thinking/list 返回的元数据）
+ * 服务端 thinking 元数据项（POST /im/aiclaw/thinking/by-trigger 返回）
  *
  * 不含全文 content；点开单条时再通过 AICLAW_THINKING_DETAIL 拉取全文。
  */
-export interface ThinkingArchiveItem {
+export interface ThinkingMetadataItem {
   /** thinkingId（展开时用于拉取全文） */
   id: number | string
   /** 产生 thinking 的 aiclaw uid */

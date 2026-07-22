@@ -10,8 +10,6 @@ const mockFns = vi.hoisted(() => ({
 const mockCurrentSession = ref<any>(null)
 const mockCurrentSessionRoomId = ref('')
 const mockIsGroup = ref(false)
-const mockIsCurrentRoomThinking = ref(false)
-const mockThinkingArchive = ref(new Map<string, any[]>())
 const mockGroupMembers = ref<Array<{ uid: string; userType?: number }>>([])
 
 vi.mock('@/utils/AiclawUtils', () => ({
@@ -27,9 +25,7 @@ vi.mock('@/stores/global', () => ({
 }))
 vi.mock('@/stores/chat', () => ({
   useChatStore: vi.fn(() => ({
-    isGroup: mockIsGroup.value,
-    isCurrentRoomThinking: mockIsCurrentRoomThinking.value,
-    thinkingArchive: mockThinkingArchive.value
+    isGroup: mockIsGroup.value
   }))
 }))
 vi.mock('@/stores/group', () => ({
@@ -48,8 +44,6 @@ describe('useAiclawSession', () => {
     mockCurrentSession.value = null
     mockCurrentSessionRoomId.value = ''
     mockIsGroup.value = false
-    mockIsCurrentRoomThinking.value = false
-    mockThinkingArchive.value = new Map()
     mockGroupMembers.value = []
   })
 
@@ -121,46 +115,48 @@ describe('useAiclawSession', () => {
     })
   })
 
-  it('showThinking：私聊 aiclaw 为 true', () => {
-    setPrivateSession('2001', true)
-    const session = useAiclawSession()
-    expect(session.showThinking.value).toBe(true)
+  describe('roomHasAiclaw', () => {
+    it('群聊无 aiclaw 成员为 false', () => {
+      setGroupSession('room-g1', [{ uid: '1001', userType: 1 }])
+      const session = useAiclawSession()
+      expect(session.roomHasAiclaw.value).toBe(false)
+    })
+
+    it('群聊有 aiclaw 成员为 true', () => {
+      mockFns.isAiclawByUserType.mockImplementation((userType) => userType === 4)
+      setGroupSession('room-g1', [
+        { uid: '1001', userType: 1 },
+        { uid: '2001', userType: 4 }
+      ])
+      const session = useAiclawSession()
+      expect(session.roomHasAiclaw.value).toBe(true)
+    })
   })
 
-  it('showThinking：普通私聊为 false', () => {
-    setPrivateSession('1001', false)
-    const session = useAiclawSession()
-    expect(session.showThinking.value).toBe(false)
-  })
+  describe('showThinkingSwitch（REQ-014 / CONTEXT.md room-has-aiclaw 术语）', () => {
+    it('aiclaw 私聊：显示开关', () => {
+      setPrivateSession('2001', true)
+      const session = useAiclawSession()
+      expect(session.showThinkingSwitch.value).toBe(true)
+    })
 
-  it('roomHasAiclaw：群聊无 aiclaw 成员为 false', () => {
-    setGroupSession('room-g1', [{ uid: '1001', userType: 1 }])
-    const session = useAiclawSession()
-    expect(session.roomHasAiclaw.value).toBe(false)
-  })
+    it('普通私聊：不显示开关', () => {
+      setPrivateSession('1001', false)
+      const session = useAiclawSession()
+      expect(session.showThinkingSwitch.value).toBe(false)
+    })
 
-  it('roomHasAiclaw：群聊有 aiclaw 成员为 true', () => {
-    mockFns.isAiclawByUserType.mockImplementation((userType) => userType === 4)
-    setGroupSession('room-g1', [
-      { uid: '1001', userType: 1 },
-      { uid: '2001', userType: 4 }
-    ])
-    const session = useAiclawSession()
-    expect(session.roomHasAiclaw.value).toBe(true)
-    expect(session.showThinking.value).toBe(true)
-  })
+    it('含 aiclaw 成员的群聊：显示开关', () => {
+      mockFns.isAiclawByUserType.mockImplementation((userType) => userType === 4)
+      setGroupSession('room-g1', [{ uid: '2001', userType: 4 }])
+      const session = useAiclawSession()
+      expect(session.showThinkingSwitch.value).toBe(true)
+    })
 
-  it('showThinking：群聊无成员但有活跃思考时为 true', () => {
-    setGroupSession('room-g1')
-    mockIsCurrentRoomThinking.value = true
-    const session = useAiclawSession()
-    expect(session.showThinking.value).toBe(true)
-  })
-
-  it('showThinking：群聊无成员但有思考归档时为 true', () => {
-    setGroupSession('room-g1')
-    mockThinkingArchive.value.set('room-g1', [{} as any])
-    const session = useAiclawSession()
-    expect(session.showThinking.value).toBe(true)
+    it('无 aiclaw 成员的群聊：不显示开关', () => {
+      setGroupSession('room-g1', [{ uid: '1001', userType: 1 }])
+      const session = useAiclawSession()
+      expect(session.showThinkingSwitch.value).toBe(false)
+    })
   })
 })

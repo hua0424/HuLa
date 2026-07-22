@@ -37,9 +37,6 @@
       </div>
     </Transition>
 
-    <!-- REQ-004 AI 助理 Thinking 面板（群聊含 aiclaw + 私聊 AI 助理） -->
-    <ThinkingPanel v-if="showThinkingPanel" />
-
     <!-- 聊天内容 -->
     <div class="flex flex-col flex-1 min-h-0">
       <div
@@ -101,8 +98,26 @@
                 :from-user="{ uid: item.fromUser.uid }"
                 :upload-progress="item.uploadProgress"
                 @jump2-reply="jumpToReplyMsg" />
+
+              <!-- REQ-014：思考卡内联锚定触发消息 -->
+              <InlineThinkingCard
+                v-for="thinking in chatStore.getThinkingStatesByTriggerMsg(
+                  globalStore.currentSessionRoomId,
+                  item.message.id
+                )"
+                :key="thinking.thinkingId"
+                :thinking="thinking"
+                class="w-full mt-8px"
+                data-testid="inline-thinking-card" />
             </div>
           </n-flex>
+          <!-- REQ-014：无触发消息的思考（TUI 驱动等）进行中显示在消息流底部，历史不渲染 -->
+          <InlineThinkingCard
+            v-for="thinking in chatStore.getBottomThinkingStates(globalStore.currentSessionRoomId)"
+            :key="thinking.thinkingId"
+            :thinking="thinking"
+            class="w-full mt-8px"
+            data-testid="inline-thinking-card" />
         </div>
       </div>
     </div>
@@ -266,9 +281,8 @@ import { useCachedStore } from '@/stores/cached'
 import { isMessageMultiSelectEnabled } from '@/utils/MessageSelect'
 import { isMac, isMobile, isWeb, isWindows } from '@/utils/PlatformConstants'
 import { buildDefaultWorkspaceDir } from '@/utils/aiclawGroupConfig'
-import { useAiclawSession } from '@/hooks/useAiclawSession'
 import FileUploadProgress from '@/components/rightBox/FileUploadProgress.vue'
-import ThinkingPanel from '@/components/rightBox/chatBox/ThinkingPanel.vue'
+import InlineThinkingCard from '@/components/rightBox/chatBox/InlineThinkingCard.vue'
 import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
 
 const selfEmit = defineEmits(['scroll'])
@@ -318,9 +332,6 @@ provide('popoverControls', { enableScroll })
 
 // 滚动意图状态
 const scrollIntent = ref<ScrollIntentEnum>(ScrollIntentEnum.NONE)
-
-// REQ-006-3：会话级 AI 判定 seam
-const { showThinking: showThinkingPanel } = useAiclawSession()
 
 // 计算属性
 const isGroup = computed<boolean>(() => chatStore.isGroup)

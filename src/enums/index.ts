@@ -859,10 +859,10 @@ export enum ImUrlEnum {
   AICLAW_GROUP_CONFIG_LIST = 'aiclawGroupConfigList',
   /** 更新 aiclaw 群聊配置 */
   AICLAW_GROUP_CONFIG_UPDATE = 'aiclawGroupConfigUpdate',
-  /** 按房间查询 aiclaw thinking 归档列表（元数据 only，#136） */
-  AICLAW_THINKING_LIST = 'aiclawThinkingList',
   /** 获取 aiclaw 思考完整内容（S7：思考全文不再走 WS，改为按需 REST 拉取） */
   AICLAW_THINKING_DETAIL = 'aiclawThinkingDetail',
+  /** 按触发消息批量反查 aiclaw thinking 元数据（REQ-014 / ADR-0007） */
+  AICLAW_THINKING_BY_TRIGGER = 'aiclawThinkingByTrigger',
 
   // 文件下载签名
   /** 文件下载签名（BL-003 sign-on-access：客户端传 msgId，服务端反查 roomId+objectKey 返回临时 URL） */

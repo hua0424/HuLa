@@ -131,6 +131,20 @@
         </n-popover>
       </div>
 
+      <div v-if="showThinkingSwitch" class="options-box">
+        <n-popover trigger="hover" :show-arrow="false" placement="bottom">
+          <template #trigger>
+            <n-switch
+              size="small"
+              data-testid="chat-header-show-thinking-switch"
+              :aria-label="t('home.chat_header.toolbar.show_thinking')"
+              :value="settingStore.chat?.showThinking ?? true"
+              @update:value="settingStore.setShowThinking" />
+          </template>
+          <span>{{ t('home.chat_header.toolbar.show_thinking') }}</span>
+        </n-popover>
+      </div>
+
       <div class="options-box" @click="sidebarShow = !sidebarShow">
         <svg>
           <use href="#more"></use>
@@ -793,7 +807,7 @@ const isChannel = computed(() => activeItem.value?.hotFlag === IsAllUserEnum.Yes
 // 是否为bot用户
 const isBotUser = computed(() => activeItem.value?.account === UserType.BOT)
 // REQ-006-3：AI 助理会话模式统一收敛到 seam
-const { headerMode } = useAiclawSession()
+const { headerMode, showThinkingSwitch } = useAiclawSession()
 const isAiclawSession = computed(() => headerMode.value === 'aiclaw')
 
 // AI 助理删除确认

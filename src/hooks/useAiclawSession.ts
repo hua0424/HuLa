@@ -8,10 +8,10 @@ export type AiclawHeaderMode = 'aiclaw' | 'normal'
 export type AllowedUploadType = 'image' | 'file' | 'voice'
 
 /**
- * REQ-006-3 / REQ-007-71：AI-会话判定的统一 seam。
+ * REQ-006-3 / REQ-007-71 / REQ-014：AI-会话判定的统一 seam。
  *
  * 把散落在 ChatMain/ChatFooter/ChatHeader/useChatMain 等处的
- * isAiclawSession/showThinking/disableComposer/headerMode 判定收敛到这里，
+ * isAiclawSession / roomHasAiclaw / disableComposer / headerMode 判定收敛到这里，
  * 保证语义单一、行为不变，并且变得可测。
  *
  * 注意：allowedUploadTypes 是上传能力的唯一 seam。
@@ -25,7 +25,6 @@ export const useAiclawSession = () => {
   const groupStore = useGroupStore()
 
   const session = computed(() => globalStore.currentSession)
-  const roomId = computed(() => globalStore.currentSessionRoomId)
 
   /** 显式判定：1:1 非群 + 对方是 aiclaw（消灭 isAiclawSession 的隐式漂移） */
   const isAiclawPrivateSession = computed(() => {
@@ -36,17 +35,8 @@ export const useAiclawSession = () => {
   /** 群聊中是否存在 aiclaw 成员 */
   const roomHasAiclaw = computed(() => {
     if (!chatStore.isGroup) return false
-    const members = groupStore.getUserListByRoomId(roomId.value)
+    const members = groupStore.getUserListByRoomId(globalStore.currentSessionRoomId)
     return members.some((m) => isAiclawByUserType(m.userType))
-  })
-
-  /** 是否显示思考面板：私聊 aiclaw ∨ 群有 aiclaw ∨ 当前正在思考 ∨ 有思考归档 */
-  const showThinking = computed(() => {
-    if (isAiclawPrivateSession.value) return true
-    if (roomHasAiclaw.value) return true
-    if (chatStore.isCurrentRoomThinking) return true
-    const archive = chatStore.thinkingArchive.get(roomId.value)
-    return !!archive && archive.length > 0
   })
 
   /**
@@ -73,12 +63,19 @@ export const useAiclawSession = () => {
   /** ChatHeader 的 AI 徽标 / RTC 操作 / aiclaw 删除对话框 模式 */
   const headerMode = computed<AiclawHeaderMode>(() => (isAiclawPrivateSession.value ? 'aiclaw' : 'normal'))
 
+  /**
+   * 「显示思考过程」开关可见性（REQ-014 / CONTEXT.md「room-has-aiclaw」术语）：
+   * 私聊 aiclaw 或群里有 aiclaw 成员时显示——私聊正是思考主场景。
+   * 不新造查询，由既有 isAiclawPrivateSession / roomHasAiclaw 派生。
+   */
+  const showThinkingSwitch = computed(() => roomHasAiclaw.value || isAiclawPrivateSession.value)
+
   return {
     isAiclawPrivateSession,
     roomHasAiclaw,
-    showThinking,
     allowedUploadTypes,
     disableComposer,
-    headerMode
+    headerMode,
+    showThinkingSwitch
   }
 }
