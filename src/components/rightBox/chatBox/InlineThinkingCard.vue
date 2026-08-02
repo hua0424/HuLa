@@ -1,6 +1,7 @@
 <template>
   <template v-if="shouldRender">
     <div
+      ref="cardRoot"
       class="inline-thinking-card w-full rounded-8px border border-#7c5cfc20 overflow-hidden transition-all duration-200"
       :class="cardBgClass">
       <!-- 头部：头像 + 名称 + 状态 -->
@@ -27,7 +28,7 @@
         <span v-else-if="thinking.status === 'error'" class="text-(11px [--danger-text])">
           {{ thinking.errorMsg || t('aiclaw.thinking.status.error') }}
         </span>
-        <!-- 展开/收起图标 -->
+        <!-- 展开/收起图标（默认展开，点击收起） -->
         <svg
           v-if="isExpandable"
           class="size-12px ml-auto text-#999 transition-transform duration-200"
@@ -39,7 +40,7 @@
       <!-- 内容区：仅在“显示思考过程”开启，或当前是 thinking 单行占位时渲染 -->
       <Transition name="thinking-collapse">
         <div v-if="showContent" class="px-12px pb-8px">
-          <!-- 已完成：按需拉取完整思考内容 -->
+          <!-- 已完成：入视野自动拉取完整思考内容 -->
           <template v-if="thinking.status === 'complete'">
             <div v-if="reviewLoading" class="text-(12px #999)">
               {{ t('aiclaw.thinking.review_loading') }}
@@ -52,24 +53,23 @@
               {{ t('aiclaw.thinking.review_error') }}
             </div>
             <template v-else-if="reviewLoaded">
-              <div
-                class="thinking-content text-(12px #666 dark:#aaa) whitespace-pre-wrap break-words overflow-y-auto max-h-120px">
-                {{ reviewContent }}
+              <!-- REQ-015 #187：内容随卡高自然展开，无内滚动；长文截断前段 + 查看全文 -->
+              <div class="thinking-content text-(12px #666 dark:#aaa) whitespace-pre-wrap break-words">
+                {{ displayContent }}
               </div>
+              <button
+                v-if="needsTruncation && !showFull"
+                type="button"
+                data-testid="thinking-view-full"
+                aria-label="查看全文"
+                class="mt-4px text-(11px #7c5cfc) bg-transparent border-none cursor-pointer p-0 hover:underline"
+                @click="showFull = true">
+                {{ t('aiclaw.thinking.view_full') }}
+              </button>
               <div v-if="reviewTruncated" data-testid="thinking-truncated-hint" class="mt-4px text-(11px #e6a23c)">
                 {{ t('aiclaw.thinking.truncated') }}
               </div>
             </template>
-            <button
-              v-else
-              type="button"
-              data-testid="thinking-review-button"
-              aria-label="查看思考内容"
-              class="flex items-center gap-4px text-(11px #7c5cfc) bg-transparent border-none cursor-pointer p-0 hover:underline"
-              @click="loadReview">
-              <svg class="size-12px"><use href="#robot" /></svg>
-              {{ t('aiclaw.thinking.review') }}
-            </button>
           </template>
           <!-- 思考中 / 错误：仅显示占位，不展示流式内容 -->
           <div v-else class="thinking-content text-(12px #666 dark:#aaa) whitespace-pre-wrap break-words">
@@ -84,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ImUrlEnum } from '@/enums'
 import { imRequest } from '@/utils/ImRequestUtils'
@@ -98,27 +98,29 @@ const props = defineProps<{
 const { t } = useI18n()
 const settingStore = useSettingStore()
 
+/** REQ-015 #187：长文截断阈值（实现时可调） */
+const TRUNCATE_THRESHOLD = 4000
+
 // “显示思考过程”全局开关：关闭时只保留 thinking 的单行状态
 const showThinkingProcess = computed(() => settingStore.chat?.showThinking ?? true)
 
 // 开关关闭时：只渲染 thinking 状态的单行状态；其余状态隐藏
 const shouldRender = computed(() => showThinkingProcess.value || thinking.status === 'thinking')
 
-// 展开/收起（仅完整模式下的 complete 卡片）
-const expanded = ref(false)
+// REQ-015 #187：默认展开；头部点击手动折叠/展开
+const expanded = ref(true)
 const toggleExpand = () => {
   expanded.value = !expanded.value
 }
 
-const isExpandable = computed(() => showThinkingProcess.value && thinking.status === 'complete')
+const isExpandable = computed(() => showThinkingProcess.value)
 
 // 内容区可见性：
 // - 开关关闭：隐藏内容区，仅保留头部单行状态
-// - 开关打开：thinking/error 直接展示；complete 通过展开/收起控制
+// - 开关打开：默认展开，可手动折叠
 const showContent = computed(() => {
   if (!showThinkingProcess.value) return false
-  if (thinking.status === 'complete') return expanded.value
-  return true
+  return expanded.value
 })
 
 // 回顾态：按需拉取的完整思考内容
@@ -127,6 +129,13 @@ const reviewLoaded = ref(false)
 const reviewError = ref(false)
 const reviewContent = ref('')
 const reviewTruncated = ref(false)
+
+// REQ-015 #187：长文截断（前段 + 查看全文；完整内容来自 detail 接口）
+const showFull = ref(false)
+const needsTruncation = computed(() => reviewContent.value.length > TRUNCATE_THRESHOLD)
+const displayContent = computed(() =>
+  needsTruncation.value && !showFull.value ? reviewContent.value.slice(0, TRUNCATE_THRESHOLD) : reviewContent.value
+)
 
 const thinking = props.thinking
 
@@ -160,7 +169,6 @@ const loadReview = async () => {
     // status === 4 表示内容过长被截断
     reviewTruncated.value = data?.status === 4
     reviewLoaded.value = true
-    expanded.value = true
   } catch (error) {
     console.error('[InlineThinkingCard] 拉取思考内容失败:', error)
     reviewError.value = true
@@ -168,6 +176,34 @@ const loadReview = async () => {
     reviewLoading.value = false
   }
 }
+
+// REQ-015 #187：历史卡全文拉取在进入视野时按需触发，避免一页 N 个并发请求
+const cardRoot = ref<HTMLElement | null>(null)
+let visibilityObserver: IntersectionObserver | null = null
+
+onMounted(() => {
+  if (thinking.status !== 'complete') return
+  // 环境不支持 IntersectionObserver 时降级为立即拉取
+  if (typeof IntersectionObserver === 'undefined') {
+    void loadReview()
+    return
+  }
+  visibilityObserver = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting)) {
+      visibilityObserver?.disconnect()
+      visibilityObserver = null
+      void loadReview()
+    }
+  })
+  if (cardRoot.value) {
+    visibilityObserver.observe(cardRoot.value)
+  }
+})
+
+onUnmounted(() => {
+  visibilityObserver?.disconnect()
+  visibilityObserver = null
+})
 </script>
 
 <style scoped>

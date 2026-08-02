@@ -100,7 +100,8 @@
     "review": "查看思考内容",
     "review_loading": "加载中...",
     "review_error": "加载思考内容失败",
-    "truncated": "内容过长已截断"
+    "truncated": "内容过长已截断",
+    "view_full": "查看全文"
   },
   "group_settings": {
     "title": "群聊设置",
