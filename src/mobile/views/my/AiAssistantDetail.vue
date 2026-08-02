@@ -25,6 +25,13 @@
                 :class="authBadgeClass(aiclawInfo?.authStatus)">
                 {{ t(`aiclaw.auth_status.${getAuthKey(aiclawInfo?.authStatus)}`) }}
               </span>
+              <!-- REQ-015 #186 F4: agent 类型徽标，原始值直显 -->
+              <span
+                v-if="aiclawInfo?.adapterType"
+                class="text-10px px-4px py-1px rounded-3px bg-#7c5cfc15 text-#7c5cfc"
+                data-testid="aiclaw-adapter-badge">
+                {{ aiclawInfo.adapterType }}
+              </span>
             </div>
           </div>
         </div>
@@ -54,6 +61,15 @@
 
         <!-- 功能入口 -->
         <div class="mx-16px mt-16px rounded-12px bg-white dark:bg-#1a1a1a overflow-hidden">
+          <!-- REQ-015 #186 F1: 编辑资料 -->
+          <div
+            class="flex items-center justify-between px-16px py-14px cursor-pointer active:bg-#f5f5f5"
+            data-testid="aiclaw-edit-profile-button"
+            @click="showEditProfile = true">
+            <span class="text-14px">{{ t('aiclaw.profile.edit') }}</span>
+            <svg class="size-16px text-#ccc"><use href="#right"></use></svg>
+          </div>
+          <div class="h-1px bg-#f0f0f0 mx-16px" />
           <!-- 好友管理 -->
           <div
             class="flex items-center justify-between px-16px py-14px cursor-pointer active:bg-#f5f5f5"
@@ -83,6 +99,15 @@
       </div>
     </template>
   </AutoFixHeightPage>
+
+  <!-- REQ-015 #186 F1: 编辑资料弹窗 -->
+  <AiclawEditProfileForm
+    v-if="aiclawInfo"
+    v-model:visible="showEditProfile"
+    :uid="uid"
+    :name="aiclawInfo.name"
+    :description="aiclawInfo.description"
+    @saved="handleProfileSaved" />
 </template>
 
 <script setup lang="ts">
@@ -90,6 +115,8 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { ImUrlEnum } from '@/enums'
 import { imRequest } from '@/utils/ImRequestUtils'
+import AiclawEditProfileForm from '@/components/aiclaw/AiclawEditProfileForm.vue'
+import { useGroupStore } from '@/stores/group'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -115,6 +142,9 @@ const aiclawInfo = ref<AiclawInfo | null>(null)
 const personaText = ref('')
 const originalPersona = ref('')
 const savingPersona = ref(false)
+// REQ-015 #186 F1：编辑资料弹窗
+const showEditProfile = ref(false)
+const groupStore = useGroupStore()
 
 // ISS-010 A1: 两个数据源分离 — activeStatus(实时在线) + authStatus(激活生命周期)
 const authStatusMap: Record<number, 'inactive' | 'activated' | 'deactivated'> = {
@@ -174,4 +204,13 @@ const handleSavePersona = async () => {
 onMounted(() => {
   fetchInfo()
 })
+
+// REQ-015 #186 F1：改名/简介保存成功后刷新本地展示与 groupStore 缓存
+const handleProfileSaved = ({ name, description }: { name: string; description: string }) => {
+  if (aiclawInfo.value) {
+    aiclawInfo.value.name = name
+    aiclawInfo.value.description = description
+  }
+  groupStore.patchCachedUserInfo(String(uid), { name })
+}
 </script>

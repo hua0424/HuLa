@@ -61,6 +61,13 @@
   "friendApply": {
     "title": "{name} wants to add your AI assistant {aiclawName} as a friend"
   },
+  "profile": {
+    "title": "Edit Profile",
+    "edit": "Edit Profile",
+    "save_success": "Profile saved",
+    "save_failed": "Failed to save profile"
+  },
+  "owner_excluded_hint": "The list excludes the owner (view your private chat with the AI assistant directly in Messages).",
   "detail": {
     "select_hint": "Select an AI Assistant",
     "persona": "Public Persona",

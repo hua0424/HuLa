@@ -60,6 +60,12 @@ vi.mock('@/stores/aiclaw', () => ({
   })
 }))
 
+vi.mock('@/stores/group', () => ({
+  useGroupStore: () => ({
+    patchCachedUserInfo: vi.fn()
+  })
+}))
+
 vi.mock('@/utils/ImRequestUtils', () => ({
   imRequest: vi.fn().mockResolvedValue([]),
   imRequestSilent: vi.fn().mockResolvedValue([])

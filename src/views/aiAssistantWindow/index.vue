@@ -36,6 +36,13 @@
                   :class="authBadgeClass(item.authStatus)">
                   {{ t(`aiclaw.auth_status.${getAuthKey(item.authStatus)}`) }}
                 </span>
+                <!-- REQ-015 #186 F4: agent 类型徽标，原始值直显 -->
+                <span
+                  v-if="item.adapterType"
+                  class="text-10px px-4px py-1px rounded-3px bg-#7c5cfc15 text-#7c5cfc"
+                  data-testid="aiclaw-adapter-badge">
+                  {{ item.adapterType }}
+                </span>
               </div>
             </div>
           </div>
@@ -62,7 +69,9 @@
       <!-- Detail content -->
       <div v-if="selectedItem && rightView === 'detail'" class="flex-1 overflow-auto">
         <!-- Top: avatar + name + status + description -->
-        <div class="flex items-center gap-16px p-24px border-b border-[--line-color]">
+        <div
+          class="flex items-center gap-16px p-24px border-b border-[--line-color]"
+          data-testid="aiclaw-detail-header">
           <n-avatar round :size="56" :src="selectedItem.avatar || '/logo.png'" fallback-src="/logo.png" />
           <div class="flex flex-col flex-1 min-w-0">
             <span class="text-18px font-600 text-[--text-color] truncate">{{ selectedItem.name }}</span>
@@ -84,8 +93,19 @@
                 :class="authBadgeClass(selectedItem.authStatus)">
                 {{ t(`aiclaw.auth_status.${getAuthKey(selectedItem.authStatus)}`) }}
               </span>
+              <!-- REQ-015 #186 F4: agent 类型徽标，原始值直显 -->
+              <span
+                v-if="selectedItem.adapterType"
+                class="text-11px font-500 px-8px py-2px rounded-4px bg-#7c5cfc15 text-#7c5cfc"
+                data-testid="aiclaw-adapter-badge">
+                {{ selectedItem.adapterType }}
+              </span>
             </div>
           </div>
+          <!-- REQ-015 #186 F1: 编辑资料入口 -->
+          <n-button size="small" secondary data-testid="aiclaw-edit-profile-button" @click="showEditProfile = true">
+            {{ t('aiclaw.profile.edit') }}
+          </n-button>
         </div>
 
         <!-- Persona section -->
@@ -196,6 +216,7 @@
             class="flex flex-col items-center justify-center h-full text-13px text-#999">
             <svg class="size-48px mb-12px opacity-20"><use href="#robot"></use></svg>
             <span>{{ t('aiclaw.conversations.empty') }}</span>
+            <span class="text-11px text-#bbb mt-6px px-24px text-center">{{ t('aiclaw.owner_excluded_hint') }}</span>
           </div>
           <div v-if="conversationLoading" class="flex justify-center py-20px">
             <n-spin size="medium" />
@@ -291,6 +312,7 @@
           <div v-else-if="!friendLoading" class="flex flex-col items-center justify-center h-full text-13px text-#999">
             <svg class="size-48px mb-12px opacity-20"><use href="#robot"></use></svg>
             <span>{{ t('aiclaw.friends.empty') }}</span>
+            <span class="text-11px text-#bbb mt-6px px-24px text-center">{{ t('aiclaw.owner_excluded_hint') }}</span>
           </div>
           <div v-if="friendLoading" class="flex justify-center py-20px">
             <n-spin size="medium" />
@@ -384,6 +406,15 @@
     <!-- Create form dialog -->
     <AiclawCreateForm v-model:visible="showCreateForm" @created="onCreated" />
 
+    <!-- REQ-015 #186 F1: Edit profile dialog -->
+    <AiclawEditProfileForm
+      v-if="selectedItem"
+      v-model:visible="showEditProfile"
+      :uid="selectedItem.uid"
+      :name="selectedItem.name"
+      :description="selectedItem.description"
+      @saved="handleProfileSaved" />
+
     <!-- Token dialog -->
     <AiclawTokenDialog
       v-model:visible="showTokenDialog"
@@ -437,6 +468,7 @@ import { useRoute } from 'vue-router'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import ActionBar from '@/components/windows/ActionBar.vue'
 import AiclawCreateForm from '@/components/aiclaw/AiclawCreateForm.vue'
+import AiclawEditProfileForm from '@/components/aiclaw/AiclawEditProfileForm.vue'
 import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
 import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
 import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
@@ -447,6 +479,7 @@ import { isDesktop, isWeb } from '@/utils/PlatformConstants'
 import { buildDefaultWorkspaceDir, buildGroupCardLabel, sortAiclawGroupConfigs } from '@/utils/aiclawGroupConfig'
 import { useChatStore } from '@/stores/chat'
 import { useAiclawStore } from '@/stores/aiclaw'
+import { useGroupStore } from '@/stores/group'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -511,6 +544,8 @@ type RightView = 'detail' | 'conversations' | 'conversationMessages' | 'friends'
 const showCreateForm = ref(false)
 const showTokenDialog = ref(false)
 const showDeleteDialog = ref(false)
+// REQ-015 #186 F1：编辑资料弹窗可见性
+const showEditProfile = ref(false)
 // #173 方案 b：添加到群选择器可见性
 const showAddToGroup = ref(false)
 const createdToken = ref('')
@@ -556,6 +591,7 @@ const groupConfigList = ref<
 >([])
 
 const chatStore = useChatStore()
+const groupStore = useGroupStore()
 
 // ISS-010 A1: 两个数据源分离
 // - activeStatus: 运行时在线状态 (Redis ZSET, 实时), 对应 i18n key `aiclaw.status.online/offline`
@@ -644,11 +680,12 @@ const fetchConversations = async () => {
   if (!selectedUid.value) return
   conversationLoading.value = true
   try {
-    const result = await imRequest<{ list: ConversationItem[] }>({
+    // REQ-015 #186 F3：后端返回数组形响应（不再按 {list: []} 解析）
+    const result = await imRequest<ConversationItem[]>({
       url: ImUrlEnum.AICLAW_CONVERSATIONS,
       params: { uid: selectedUid.value }
     })
-    conversationList.value = result?.list || []
+    conversationList.value = result || []
   } catch (error) {
     console.error('[AiAssistant] Failed to fetch conversations:', error)
   } finally {
@@ -923,6 +960,17 @@ const handleViewToken = (uid: string) => {
   createdToken.value = ''
   viewingUid.value = uid
   showTokenDialog.value = true
+}
+
+// REQ-015 #186 F1：改名/简介保存成功后刷新管理窗列表与本地缓存（contactStore/groupStore 中的展示名）
+const handleProfileSaved = ({ name, description }: { name: string; description: string }) => {
+  const item = aiclawList.value.find((a) => a.uid === selectedUid.value)
+  if (item) {
+    item.name = name
+    item.description = description
+  }
+  groupStore.patchCachedUserInfo(String(selectedUid.value), { name })
+  // contactStore 的展示名经 groupStore.getUserInfo 读取；联系人条目本身无 name 字段，无需另改
 }
 
 const handleDelete = (item: AiclawListItem) => {

@@ -246,6 +246,21 @@ export const useGroupStore = defineStore(
       friendInfoCache.set(uid, { ...(existing || {}), ...info, uid } as UserItem)
     }
 
+    /**
+     * 直接修补本地缓存中某用户的展示信息（REQ-015 #186：aiclaw 改名等场景）。
+     * 只改已有缓存项（好友缓存 + 各群成员列表），不播种新条目、不发请求；
+     * 与 updateUserItem 的整表重拉相比是轻量即时路径。
+     */
+    const patchCachedUserInfo = (uid: string, patch: Partial<Pick<UserItem, 'name' | 'avatar'>>) => {
+      const key = String(uid)
+      Object.values(userListMap).forEach((list) => {
+        const item = list.find((user) => String(user.uid) === key)
+        if (item) Object.assign(item, patch)
+      })
+      const cached = friendInfoCache.get(key)
+      if (cached) Object.assign(cached, patch)
+    }
+
     const getUserInfo = computed(() => (uid: string, roomId?: string) => {
       const targetRoomId = roomId ?? globalStore.currentSessionRoomId
       if (targetRoomId) {
@@ -902,6 +917,7 @@ export const useGroupStore = defineStore(
       updateMemberCache,
       getUserInfo,
       cacheFriendInfo,
+      patchCachedUserInfo,
       allUserInfo,
       getUserDisplayName,
       isCurrentLord,
