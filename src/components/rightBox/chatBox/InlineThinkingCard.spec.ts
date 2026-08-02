@@ -1,7 +1,7 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { reactive, ref } from 'vue'
 import type { ThinkingState } from '@/types/thinking'
 
 const imRequestMock = vi.hoisted(() => vi.fn())
@@ -221,6 +221,30 @@ describe('InlineThinkingCard 默认展开版（REQ-015 #187）', () => {
 
     await header.trigger('click')
     expect(wrapper.find('.thinking-content').exists()).toBe(true)
+  })
+
+  it('thinking 态挂载后转为 complete：注册入视野拉取，入视野自动拉全文', async () => {
+    imRequestMock.mockResolvedValue({ content: '实时完成的思考', status: 1, durationMs: 3000 })
+    // 生产环境 ThinkingState 来自 store 的 reactive Map，这里用 reactive 模拟同形响应式
+    const thinking = reactive(baseThinking({ status: 'thinking' }))
+    const wrapper = mountCard(thinking)
+    await flushPromises()
+
+    // thinking 态不注册 observer、不拉取
+    expect(ioInstances).toHaveLength(0)
+    expect(imRequestMock).not.toHaveBeenCalled()
+
+    // 实时流转为 complete（模拟 THINKING_END 后 store 状态变更）
+    thinking.status = 'complete'
+    thinking.durationMs = 3000
+    await flushPromises()
+
+    expect(ioInstances).toHaveLength(1)
+    triggerIntersect()
+    await flushPromises()
+
+    expect(imRequestMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('实时完成的思考')
   })
 
   describe('"显示思考过程"开关关闭时', () => {

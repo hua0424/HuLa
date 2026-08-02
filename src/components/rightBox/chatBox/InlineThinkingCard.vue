@@ -84,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ImUrlEnum } from '@/enums'
 import { imRequest } from '@/utils/ImRequestUtils'
@@ -181,8 +181,8 @@ const loadReview = async () => {
 const cardRoot = ref<HTMLElement | null>(null)
 let visibilityObserver: IntersectionObserver | null = null
 
-onMounted(() => {
-  if (thinking.status !== 'complete') return
+const setupVisibilityFetch = () => {
+  if (reviewLoaded.value || reviewLoading.value || visibilityObserver) return
   // 环境不支持 IntersectionObserver 时降级为立即拉取
   if (typeof IntersectionObserver === 'undefined') {
     void loadReview()
@@ -198,7 +198,24 @@ onMounted(() => {
   if (cardRoot.value) {
     visibilityObserver.observe(cardRoot.value)
   }
+}
+
+onMounted(() => {
+  if (thinking.status === 'complete') {
+    setupVisibilityFetch()
+  }
 })
+
+// 卡片可能以 thinking 态挂载后才完成（实时会话），完成时再注册入视野拉取
+watch(
+  () => thinking.status,
+  (status) => {
+    if (status === 'complete') {
+      setupVisibilityFetch()
+    }
+  },
+  { flush: 'post' }
+)
 
 onUnmounted(() => {
   visibilityObserver?.disconnect()
