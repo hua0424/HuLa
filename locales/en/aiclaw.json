@@ -95,7 +95,8 @@
   "conversations": {
     "title": "Conversation History",
     "empty": "No conversations yet",
-    "no_more": "No more messages"
+    "no_more": "No more messages",
+    "yesterday": "Yesterday"
   },
   "thinking": {
     "status": {

@@ -95,7 +95,8 @@
   "conversations": {
     "title": "对话记录",
     "empty": "暂无对话记录",
-    "no_more": "没有更多了"
+    "no_more": "没有更多了",
+    "yesterday": "昨天"
   },
   "thinking": {
     "status": {

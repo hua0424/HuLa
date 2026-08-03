@@ -49,6 +49,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { ImUrlEnum } from '@/enums'
 import { imRequest } from '@/utils/ImRequestUtils'
+import { formatAiclawConversationTime } from '@/utils/aiclawConversationTime'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -62,7 +63,8 @@ type ConversationItem = {
   friendAvatar: string
   lastMessage: {
     content: string
-    sendTime: number
+    /** sendTime 后端为 epoch milli，但可能为 null 或数字字符串（#189） */
+    sendTime: number | string
     type: number
   } | null
   roomId: string
@@ -71,21 +73,9 @@ type ConversationItem = {
 const conversations = ref<ConversationItem[]>([])
 const loading = ref(false)
 
-const formatTime = (timestamp?: number) => {
-  if (!timestamp) return ''
-  const date = new Date(timestamp)
-  const now = new Date()
-  const isToday = date.toDateString() === now.toDateString()
-  if (isToday) {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-  }
-  const yesterday = new Date(now)
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (date.toDateString() === yesterday.toDateString()) {
-    return '昨天'
-  }
-  return `${date.getMonth() + 1}/${date.getDate()}`
-}
+// #189：sendTime 可能为 null/数字字符串，统一走共享 util，非法显示「-」
+const formatTime = (timestamp?: number | string) =>
+  formatAiclawConversationTime(timestamp, t('aiclaw.conversations.yesterday'))
 
 const fetchConversations = async () => {
   loading.value = true
