@@ -477,6 +477,7 @@ import { ImUrlEnum } from '@/enums'
 import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
 import { isDesktop, isWeb } from '@/utils/PlatformConstants'
 import { buildDefaultWorkspaceDir, buildGroupCardLabel, sortAiclawGroupConfigs } from '@/utils/aiclawGroupConfig'
+import { formatAiclawConversationTime } from '@/utils/aiclawConversationTime'
 import { useChatStore } from '@/stores/chat'
 import { useAiclawStore } from '@/stores/aiclaw'
 import { useGroupStore } from '@/stores/group'
@@ -513,7 +514,8 @@ type ConversationItem = {
   friendUid: string
   friendName: string
   friendAvatar: string
-  lastMessage: { content: string; sendTime: number; type: number } | null
+  /** sendTime 后端为 epoch milli，但可能为 null 或数字字符串（#189） */
+  lastMessage: { content: string; sendTime: number | string; type: number } | null
   roomId: string
 }
 
@@ -659,21 +661,9 @@ const handleSavePersona = async () => {
   }
 }
 
-// 时间格式化
-const formatConversationTime = (timestamp?: number) => {
-  if (!timestamp) return ''
-  const date = new Date(timestamp)
-  const now = new Date()
-  if (date.toDateString() === now.toDateString()) {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-  }
-  const yesterday = new Date(now)
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (date.toDateString() === yesterday.toDateString()) {
-    return t('aiclaw.conversations.yesterday') || '昨天'
-  }
-  return `${date.getMonth() + 1}/${date.getDate()}`
-}
+// 时间格式化（#189：sendTime 可能为 null/数字字符串，统一走共享 util，非法显示「-」）
+const formatConversationTime = (timestamp?: number | string) =>
+  formatAiclawConversationTime(timestamp, t('aiclaw.conversations.yesterday'))
 
 // F17: 获取对话列表
 const fetchConversations = async () => {
