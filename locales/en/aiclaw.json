@@ -107,7 +107,8 @@
     "review": "View thinking content",
     "review_loading": "Loading...",
     "review_error": "Failed to load thinking content",
-    "truncated": "Content too long, truncated"
+    "truncated": "Content too long, truncated",
+    "view_full": "View full text"
   },
   "group_settings": {
     "title": "Group Chat Settings",
