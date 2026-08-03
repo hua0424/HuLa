@@ -61,6 +61,13 @@
   "friendApply": {
     "title": "{name} 想添加你的 AI 助理 {aiclawName} 为好友"
   },
+  "profile": {
+    "title": "编辑资料",
+    "edit": "编辑资料",
+    "save_success": "资料已保存",
+    "save_failed": "保存失败"
+  },
+  "owner_excluded_hint": "列表不包含主人（你与 AI 助理的私聊请直接在会话中查看）",
   "detail": {
     "select_hint": "请选择一个 AI 助理",
     "persona": "对外人设",

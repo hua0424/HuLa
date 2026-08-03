@@ -2,10 +2,7 @@
   <AutoFixHeightPage :show-footer="false">
     <template #header>
       <div class="bg-white" style="border-bottom: 1px solid; border-color: #dfdfdf">
-        <HeaderBar
-          :isOfficial="false"
-          :hidden-right="true"
-          :room-name="t('aiclaw.friends.title')" />
+        <HeaderBar :isOfficial="false" :hidden-right="true" :room-name="t('aiclaw.friends.title')" />
       </div>
     </template>
 
@@ -23,9 +20,7 @@
               <span v-if="item.relationDesc" class="text-12px text-#999 mt-2px truncate">
                 {{ item.relationDesc }}
               </span>
-              <span v-else class="text-12px text-#ccc mt-2px italic">
-                {{ t('aiclaw.friends.relation') }}：未设置
-              </span>
+              <span v-else class="text-12px text-#ccc mt-2px italic">{{ t('aiclaw.friends.relation') }}：未设置</span>
             </div>
             <div class="flex items-center gap-6px flex-shrink-0">
               <n-button size="tiny" secondary @click="handleEditRelation(item)">
@@ -42,6 +37,7 @@
         <div v-else-if="!loading" class="flex flex-col items-center justify-center flex-1 text-14px text-#999">
           <svg class="size-48px mb-12px opacity-30"><use href="#robot"></use></svg>
           <span>{{ t('aiclaw.friends.empty') }}</span>
+          <span class="text-12px text-#bbb mt-6px px-24px text-center">{{ t('aiclaw.owner_excluded_hint') }}</span>
         </div>
 
         <!-- 加载状态 -->

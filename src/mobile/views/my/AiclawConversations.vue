@@ -2,10 +2,7 @@
   <AutoFixHeightPage :show-footer="false">
     <template #header>
       <div class="bg-white" style="border-bottom: 1px solid; border-color: #dfdfdf">
-        <HeaderBar
-          :isOfficial="false"
-          :hidden-right="true"
-          :room-name="t('aiclaw.conversations.title')" />
+        <HeaderBar :isOfficial="false" :hidden-right="true" :room-name="t('aiclaw.conversations.title')" />
       </div>
     </template>
 
@@ -35,6 +32,7 @@
         <div v-else-if="!loading" class="flex flex-col items-center justify-center flex-1 text-14px text-#999">
           <svg class="size-48px mb-12px opacity-30"><use href="#robot"></use></svg>
           <span>{{ t('aiclaw.conversations.empty') }}</span>
+          <span class="text-12px text-#bbb mt-6px px-24px text-center">{{ t('aiclaw.owner_excluded_hint') }}</span>
         </div>
 
         <!-- 加载状态 -->
@@ -92,11 +90,12 @@ const formatTime = (timestamp?: number) => {
 const fetchConversations = async () => {
   loading.value = true
   try {
-    const result = await imRequest<{ list: ConversationItem[] }>({
+    // REQ-015 #186 F3：后端返回数组形响应（不再按 {list: []} 解析）
+    const result = await imRequest<ConversationItem[]>({
       url: ImUrlEnum.AICLAW_CONVERSATIONS,
       params: { uid }
     })
-    conversations.value = result?.list || []
+    conversations.value = result || []
   } catch (error) {
     console.error('[AiclawConversations] 获取对话列表失败:', error)
   } finally {

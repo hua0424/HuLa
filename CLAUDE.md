@@ -78,6 +78,8 @@ The Windows tester drives the desktop client via playwright-cli over CDP and **l
 | `aiclaw-group-config-rate-limit` / `aiclaw-group-config-daily-limit` / `aiclaw-group-config-respond-ai` / `aiclaw-group-config-mention` / `aiclaw-group-config-save` | aiclaw 群配置表单字段与保存按钮 | `components/aiclaw/AiclawGroupConfigForm.vue` |
 | `aiclaw-silent-badge` | 未批准 aiclaw 沉默标识（常驻群成员面板 + 抽屉 + 群成员管理页） | `components/rightBox/chatBox/ChatSidebar.vue` 等（逻辑 `hooks/useSilentAiclaw.ts`） |
 | `aiclaw-add-to-group-button` / `aiclaw-add-to-group-modal` / `aiclaw-add-to-group-select` / `aiclaw-add-to-group-confirm` / `aiclaw-add-to-group-empty` | AI 助理面板「添加到群」入口与选群弹窗 | `views/aiAssistantWindow/index.vue` / `components/aiclaw/AiclawAddToGroupModal.vue` |
+| `aiclaw-adapter-badge` | AI 助理 agent 类型徽标（管理列表卡片 + 详情页头部，adapterType 原始值直显） | `views/aiAssistantWindow/index.vue` / `mobile/views/my/AiAssistant.vue` / `mobile/views/my/AiAssistantDetail.vue` |
+| `aiclaw-edit-profile-button` / `aiclaw-edit-profile-name` / `aiclaw-edit-profile-description` / `aiclaw-edit-profile-save` | AI 助理「编辑资料」入口与弹窗名称/简介/保存 | `views/aiAssistantWindow/index.vue` / `mobile/views/my/AiAssistantDetail.vue` / `components/aiclaw/AiclawEditProfileForm.vue` |
 | `chat-footer-file` / `chat-footer-image` / `chat-footer-voice` | 桌面端底部文件/图片/语音上传按钮 | `components/rightBox/chatBox/ChatFooter.vue` |
 | `mobile-voice-button` / `mobile-emoji-button` / `mobile-more-button` / `mobile-send-button` | 移动端输入栏语音/表情/更多/发送按钮 | `components/rightBox/MsgInput.vue` |
 | `mobile-more-item-file` / `mobile-more-item-image` / `mobile-more-item-video` / `mobile-more-item-history` / `mobile-more-item-videocall` | 移动端更多面板功能入口 | `mobile/components/chat-room/panel/More.vue` |

@@ -26,10 +26,19 @@
                 class="flex flex-col flex-1 min-w-0 cursor-pointer"
                 @click="router.push(`/mobile/mobileMy/aiAssistant/${item.uid}`)">
                 <span class="text-15px font-500 truncate">{{ item.name }}</span>
-                <!-- ISS-010 A1: 主状态读 activeStatus (实时在线), authStatus 通过右侧按钮区已表达, 这里只显示运行时在线 -->
-                <span class="text-12px mt-2px" :class="onlineTextClass(item.activeStatus)">
-                  {{ t(`aiclaw.status.${getOnlineKey(item.activeStatus)}`) }}
-                </span>
+                <div class="flex items-center gap-6px mt-2px">
+                  <!-- ISS-010 A1: 主状态读 activeStatus (实时在线), authStatus 通过右侧按钮区已表达, 这里只显示运行时在线 -->
+                  <span class="text-12px" :class="onlineTextClass(item.activeStatus)">
+                    {{ t(`aiclaw.status.${getOnlineKey(item.activeStatus)}`) }}
+                  </span>
+                  <!-- REQ-015 #186 F4: agent 类型徽标，原始值直显 -->
+                  <span
+                    v-if="item.adapterType"
+                    class="text-10px px-4px py-1px rounded-3px bg-#7c5cfc15 text-#7c5cfc"
+                    data-testid="aiclaw-adapter-badge">
+                    {{ item.adapterType }}
+                  </span>
+                </div>
               </div>
               <div class="flex items-center gap-6px">
                 <!-- 未激活：查看激活码按钮 -->
