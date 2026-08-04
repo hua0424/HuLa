@@ -61,8 +61,13 @@ export const useAiclawGroupConfigStore = defineStore(StoresEnum.AICLAW_GROUP_CON
     modalError.value = ''
 
     try {
-      // 并行加载群配置与 aiclaw adapterType（后者通常已缓存）
-      const [ok] = await Promise.all([chatStore.loadAiclawGroupConfigs(Number(targetUid)), aiclawStore.ensureLoaded()])
+      // REQ-016 #196 F5：只查当前群（单数版）。复数版会遍历 userListMap 里 aiclaw 历史出现过的
+      // 所有房间，退群/解散后的陈旧房间 server membership 校验必炸 → 误报 toast + 整窗置错。
+      // 并行加载 aiclaw adapterType（通常已缓存）
+      const [ok] = await Promise.all([
+        chatStore.loadAiclawGroupConfig(Number(targetUid), roomId),
+        aiclawStore.ensureLoaded()
+      ])
       // 如果期间又打开了新弹窗，旧请求结果直接丢弃，避免覆盖新上下文
       if (callId !== openModalCallId) {
         return
@@ -71,8 +76,7 @@ export const useAiclawGroupConfigStore = defineStore(StoresEnum.AICLAW_GROUP_CON
         modalError.value = t('aiclaw.group_settings.load_failed')
         return
       }
-      const list = chatStore.getAiclawGroupConfigList(Number(targetUid))
-      const matched = list.find((cfg) => cfg.roomId === roomId)
+      const matched = chatStore.getAiclawGroupConfig(Number(targetUid), roomId)
       const adapterType = aiclawStore.getAdapterType(targetUid)
       const config = matched ?? defaultConfigFor(roomId)
       modalContext.value = {

@@ -68,6 +68,12 @@
     "save_failed": "保存失败"
   },
   "owner_excluded_hint": "列表不包含主人（你与 AI 助理的私聊请直接在会话中查看）",
+  "host_info": {
+    "title": "主机信息",
+    "hostname": "主机名",
+    "ip": "IP",
+    "owner_workspace": "主人私聊工作目录"
+  },
   "detail": {
     "select_hint": "请选择一个 AI 助理",
     "persona": "对外人设",
@@ -85,6 +91,7 @@
     "title": "好友管理",
     "empty": "暂无好友",
     "relation": "关系说明",
+    "dm_workspace": "私聊工作目录",
     "relation_placeholder": "例如：xxx 是主人的同事，负责前端开发",
     "relation_edit": "编辑关系",
     "relation_save_success": "关系说明已保存",

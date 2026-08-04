@@ -36,6 +36,25 @@
           </div>
         </div>
 
+        <!-- REQ-016 #196 F6: 主机信息（主机名/IP/主人私聊工作目录，null 显「-」） -->
+        <div class="mx-16px mt-16px p-16px rounded-12px bg-white dark:bg-#1a1a1a" data-testid="aiclaw-host-info">
+          <div class="text-14px font-500 mb-10px">{{ t('aiclaw.host_info.title') }}</div>
+          <div class="flex flex-col gap-8px text-13px">
+            <div class="flex items-center justify-between gap-12px">
+              <span class="text-#999 flex-shrink-0">{{ t('aiclaw.host_info.hostname') }}</span>
+              <span class="truncate">{{ aiclawInfo?.hostname || '-' }}</span>
+            </div>
+            <div class="flex items-center justify-between gap-12px">
+              <span class="text-#999 flex-shrink-0">{{ t('aiclaw.host_info.ip') }}</span>
+              <span class="truncate">{{ aiclawInfo?.ip || '-' }}</span>
+            </div>
+            <div class="flex items-center justify-between gap-12px">
+              <span class="text-#999 flex-shrink-0">{{ t('aiclaw.host_info.owner_workspace') }}</span>
+              <span class="truncate">{{ aiclawInfo?.ownerWorkspaceDir || '-' }}</span>
+            </div>
+          </div>
+        </div>
+
         <!-- 对外人设编辑 -->
         <div class="mx-16px mt-16px p-16px rounded-12px bg-white dark:bg-#1a1a1a">
           <div class="text-14px font-500 mb-10px">{{ t('aiclaw.detail.persona') }}</div>
@@ -136,6 +155,10 @@ type AiclawInfo = {
   adapterType: string
   publicPersona: string | null
   createTime: number
+  /** REQ-016 #196 F6：主机信息；openclaw/未上报/老后端为 null|undefined → 显「-」 */
+  hostname?: string | null
+  ip?: string | null
+  ownerWorkspaceDir?: string | null
 }
 
 const aiclawInfo = ref<AiclawInfo | null>(null)

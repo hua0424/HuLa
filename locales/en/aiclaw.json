@@ -68,6 +68,12 @@
     "save_failed": "Failed to save profile"
   },
   "owner_excluded_hint": "The list excludes the owner (view your private chat with the AI assistant directly in Messages).",
+  "host_info": {
+    "title": "Host Info",
+    "hostname": "Hostname",
+    "ip": "IP",
+    "owner_workspace": "Owner DM workspace"
+  },
   "detail": {
     "select_hint": "Select an AI Assistant",
     "persona": "Public Persona",
@@ -85,6 +91,7 @@
     "title": "Friend Management",
     "empty": "No friends yet",
     "relation": "Relation Description",
+    "dm_workspace": "DM workspace",
     "relation_placeholder": "e.g.: xxx is the owner's colleague, responsible for frontend development",
     "relation_edit": "Edit Relation",
     "relation_save_success": "Relation description saved",

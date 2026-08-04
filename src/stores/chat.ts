@@ -1867,11 +1867,16 @@ export const useChatStore = defineStore(
         const roomIds = groupStore.getRoomIdsByUid(String(aiclawUid))
         for (const roomId of roomIds) {
           try {
-            // server 返回字段为原始格式（boolean 字段可能是 1/0 integer）
-            const raw = await imRequest<Record<string, unknown>>({
-              url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
-              params: { aiclawUid, roomId: Number(roomId) }
-            })
+            // REQ-016 #196 F5：单房间失败静默——userListMap 残留（退群/解散后 aiclaw 仍挂旧房间）
+            // 会让陈旧房间 server 校验必炸，默认 showError:true 每个失败房间都弹全局 toast = 误报风暴；
+            // 由返回值 allSuccess 交给调用方裁决，单房间失败不连坐。
+            const raw = await imRequest<Record<string, unknown>>(
+              {
+                url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
+                params: { aiclawUid, roomId: Number(roomId) }
+              },
+              { showError: false }
+            )
             if (raw) {
               // #56：补群名 + 群号（account）供卡片显示「群名(群号)」。
               // 共享缓存命中即 no-op（零网络）；未命中 addGroupDetail 调现有端点拉一次。
@@ -1879,7 +1884,8 @@ export const useChatStore = defineStore(
               let groupName = raw.roomName as string | undefined
               let account: string | undefined
               try {
-                await groupStore.addGroupDetail(String(roomId))
+                // #196 F5：陈旧房间（退群/解散残留）取详情同样静默，不弹全局 toast
+                await groupStore.addGroupDetail(String(roomId), { showError: false })
                 const detail = groupStore.getGroupDetail(String(roomId))
                 if (detail) {
                   groupName = detail.groupName || groupName

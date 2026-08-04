@@ -44,6 +44,10 @@
                   {{ item.adapterType }}
                 </span>
               </div>
+              <!-- REQ-016 #196 F6: 主机名 + IP（null/未上报显「-」） -->
+              <span class="text-11px text-#bbb mt-2px truncate" data-testid="aiclaw-card-host">
+                {{ item.hostname || '-' }} · {{ item.ip || '-' }}
+              </span>
             </div>
           </div>
         </template>
@@ -106,6 +110,27 @@
           <n-button size="small" secondary data-testid="aiclaw-edit-profile-button" @click="showEditProfile = true">
             {{ t('aiclaw.profile.edit') }}
           </n-button>
+        </div>
+
+        <!-- REQ-016 #196 F6: 主机信息（主机名/IP/主人私聊工作目录，null 显「-」） -->
+        <div class="p-24px border-b border-[--line-color]" data-testid="aiclaw-host-info">
+          <div class="text-14px font-500 text-[--text-color] mb-12px">{{ t('aiclaw.host_info.title') }}</div>
+          <div class="flex flex-col gap-8px text-13px">
+            <div class="flex items-center justify-between gap-12px">
+              <span class="text-#999 flex-shrink-0">{{ t('aiclaw.host_info.hostname') }}</span>
+              <span class="text-[--text-color] truncate">{{ selectedItem.hostname || '-' }}</span>
+            </div>
+            <div class="flex items-center justify-between gap-12px">
+              <span class="text-#999 flex-shrink-0">{{ t('aiclaw.host_info.ip') }}</span>
+              <span class="text-[--text-color] truncate">{{ selectedItem.ip || '-' }}</span>
+            </div>
+            <div class="flex items-center justify-between gap-12px">
+              <span class="text-#999 flex-shrink-0">{{ t('aiclaw.host_info.owner_workspace') }}</span>
+              <span class="text-[--text-color] truncate" :title="selectedItem.ownerWorkspaceDir || ''">
+                {{ selectedItem.ownerWorkspaceDir || '-' }}
+              </span>
+            </div>
+          </div>
         </div>
 
         <!-- Persona section -->
@@ -298,6 +323,13 @@
                   {{ item.relationDesc }}
                 </span>
                 <span v-else class="text-12px text-#ccc mt-2px italic">{{ t('aiclaw.friends.relation') }}</span>
+                <!-- REQ-016 #196 F6: 与该好友私聊的工作目录（null 显「-」） -->
+                <span
+                  class="text-12px text-#bbb mt-2px truncate"
+                  :title="item.dmWorkspaceDir || ''"
+                  data-testid="aiclaw-friend-dm-dir">
+                  {{ t('aiclaw.friends.dm_workspace') }}：{{ item.dmWorkspaceDir || '-' }}
+                </span>
               </div>
               <div class="flex items-center gap-6px flex-shrink-0">
                 <n-button size="tiny" secondary @click="handleEditRelation(item)">
@@ -508,6 +540,11 @@ type AiclawListItem = {
   adapterType: string
   publicPersona: string | null
   createTime: number
+  /** REQ-016 #196 F6：node 上报的主机信息（存 im_aiclaw.adapter_config）；openclaw/未上报/老后端为 null|undefined → 显「-」 */
+  hostname?: string | null
+  ip?: string | null
+  /** 主人私聊工作目录（= <workspaceBase>/<uid>/owner，仅 node 系 driver 有） */
+  ownerWorkspaceDir?: string | null
 }
 
 type ConversationItem = {
@@ -539,6 +576,8 @@ type AiclawFriendItem = {
   activeStatus: number
   userType: number
   relationDesc: string | null
+  /** REQ-016 #196 F6：与该好友私聊的工作目录（server 按确定性规则拼接）；null → 显「-」 */
+  dmWorkspaceDir?: string | null
 }
 
 type RightView = 'detail' | 'conversations' | 'conversationMessages' | 'friends' | 'groupSettings'
