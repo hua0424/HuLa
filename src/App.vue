@@ -31,6 +31,7 @@ const info = isWeb() ? (..._args: any[]) => Promise.resolve() : tauriInfo
 import LockScreen from '@/views/LockScreen.vue'
 import MemoryMonitor from '@/components/common/MemoryMonitor.vue'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
+import { handleUserInfoChange, type UserInfoChangePayload } from '@/utils/userInfoChange'
 import {
   type LoginSuccessResType,
   type OnStatusChangeType,
@@ -286,6 +287,11 @@ useMitt.on(WsResponseMessageType.ROOM_INFO_CHANGE, async (data: { roomId: string
     name,
     avatar
   })
+})
+
+// REQ-016 #194：资料变更（改名/简介/头像/好友备注）→ 失效缓存重拉并 patch 各视图
+useMitt.on(WsResponseMessageType.USER_INFO_CHANGE, async (data: UserInfoChangePayload) => {
+  await handleUserInfoChange(data)
 })
 
 useMitt.on(WsResponseMessageType.TOKEN_EXPIRED, async (wsTokenExpire: WsTokenExpire) => {

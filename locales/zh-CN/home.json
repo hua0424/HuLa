@@ -272,6 +272,8 @@
     },
     "labels": {
       "account": "账号",
+      "uid": "UID",
+      "resume": "简介",
       "location": "所在地",
       "badges": "获得的徽章",
       "activities": "动态"

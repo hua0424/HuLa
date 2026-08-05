@@ -136,6 +136,9 @@ class WebSocketWebClient {
       case 'roomInfoChange':
         mitt.emit(WsResponseMessageType.ROOM_INFO_CHANGE, data)
         break
+      case 'userInfoChange':
+        mitt.emit(WsResponseMessageType.USER_INFO_CHANGE, data)
+        break
       case 'myRoomInfoChange':
         mitt.emit(WsResponseMessageType.MY_ROOM_INFO_CHANGE, data)
         break

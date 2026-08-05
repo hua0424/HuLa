@@ -7,36 +7,52 @@
     <n-flex align="center">
       <Transition name="loading" mode="out-in">
         <n-flex align="center">
-          <n-avatar
-            :class="[
-              'rounded-8px select-none',
-              { grayscale: activeItem?.type === RoomTypeEnum.SINGLE && !isOnline && !isBotUser && !isAiclawSession }
-            ]"
-            :size="28"
-            :color="themes.content === ThemeEnum.DARK ? '' : '#fff'"
-            :fallback-src="themes.content === ThemeEnum.DARK ? '/logoL.png' : '/logoD.png'"
-            :src="currentUserAvatar" />
-          <label class="flex-y-center gap-6px">
-            <p class="text-(16px [--text-color])">{{ groupStore.countInfo?.remark || activeItem?.name }}</p>
-            <p
-              v-if="activeItem?.type === RoomTypeEnum.GROUP && groupStore.countInfo?.memberNum"
-              class="text-(11px #808080)">
-              [{{ groupStore.countInfo?.memberNum }}]
-            </p>
-            <!-- bot用户标签 -->
-            <div
-              v-if="isBotUser"
-              class="dark:bg-[#13987f40] bg-[#e8f4f1] dark:border-(1px solid #13987f) border-(1px solid #13987f) flex-center px-8px py-4px rounded-6px">
-              <p class="text-(11px #13987f)">{{ t('home.chat_header.bot_tag') }}</p>
-            </div>
-            <!-- AI 助理标签 -->
-            <div
-              v-if="isAiclawSession"
-              data-testid="aiclaw-badge"
-              class="dark:bg-[#7c5cfc40] bg-[#7c5cfc15] dark:border-(1px solid #7c5cfc) border-(1px solid #7c5cfc) flex-center px-8px py-4px rounded-6px">
-              <p class="text-(11px #7c5cfc)">{{ t('aiclaw.badge') }}</p>
-            </div>
-          </label>
+          <!-- REQ-016 #194 F2：私聊头部头像/名字点出资料弹层（与消息列表头像同款 InfoPopover） -->
+          <n-popover
+            :show="showHeaderInfoPopover"
+            @clickoutside="showHeaderInfoPopover = false"
+            trigger="manual"
+            placement="bottom-start"
+            :show-arrow="false"
+            style="padding: 0; background: var(--bg-info)">
+            <template #trigger>
+              <n-flex align="center" :class="{ 'cursor-pointer': isSinglePeerSession }" @click="handleHeaderInfoClick">
+                <n-avatar
+                  :class="[
+                    'rounded-8px select-none',
+                    {
+                      grayscale: activeItem?.type === RoomTypeEnum.SINGLE && !isOnline && !isBotUser && !isAiclawSession
+                    }
+                  ]"
+                  :size="28"
+                  :color="themes.content === ThemeEnum.DARK ? '' : '#fff'"
+                  :fallback-src="themes.content === ThemeEnum.DARK ? '/logoL.png' : '/logoD.png'"
+                  :src="currentUserAvatar" />
+                <label class="flex-y-center gap-6px" :class="{ 'cursor-pointer': isSinglePeerSession }">
+                  <p class="text-(16px [--text-color])">{{ groupStore.countInfo?.remark || activeItem?.name }}</p>
+                  <p
+                    v-if="activeItem?.type === RoomTypeEnum.GROUP && groupStore.countInfo?.memberNum"
+                    class="text-(11px #808080)">
+                    [{{ groupStore.countInfo?.memberNum }}]
+                  </p>
+                  <!-- bot用户标签 -->
+                  <div
+                    v-if="isBotUser"
+                    class="dark:bg-[#13987f40] bg-[#e8f4f1] dark:border-(1px solid #13987f) border-(1px solid #13987f) flex-center px-8px py-4px rounded-6px">
+                    <p class="text-(11px #13987f)">{{ t('home.chat_header.bot_tag') }}</p>
+                  </div>
+                  <!-- AI 助理标签 -->
+                  <div
+                    v-if="isAiclawSession"
+                    data-testid="aiclaw-badge"
+                    class="dark:bg-[#7c5cfc40] bg-[#7c5cfc15] dark:border-(1px solid #7c5cfc) border-(1px solid #7c5cfc) flex-center px-8px py-4px rounded-6px">
+                    <p class="text-(11px #7c5cfc)">{{ t('aiclaw.badge') }}</p>
+                  </div>
+                </label>
+              </n-flex>
+            </template>
+            <InfoPopover v-if="showHeaderInfoPopover && headerInfoUid" :uid="headerInfoUid" />
+          </n-popover>
           <svg
             v-if="activeItem?.hotFlag === IsAllUserEnum.Yes"
             class="size-20px color-#13987f select-none outline-none">
@@ -809,6 +825,19 @@ const isBotUser = computed(() => activeItem.value?.account === UserType.BOT)
 // REQ-006-3：AI 助理会话模式统一收敛到 seam
 const { headerMode, showThinkingSwitch } = useAiclawSession()
 const isAiclawSession = computed(() => headerMode.value === 'aiclaw')
+
+// REQ-016 #194 F2：私聊头部头像/名字点出资料弹层
+const showHeaderInfoPopover = ref(false)
+const headerInfoUid = ref('')
+/** 单聊会话（含 aiclaw 私聊）才可点头像/名字出资料弹层；群聊头部保持纯展示 */
+const isSinglePeerSession = computed(() => activeItem.value?.type === RoomTypeEnum.SINGLE)
+const handleHeaderInfoClick = () => {
+  if (!isSinglePeerSession.value) return
+  const detailId = activeItem.value?.detailId
+  if (!detailId) return
+  headerInfoUid.value = String(detailId)
+  showHeaderInfoPopover.value = !showHeaderInfoPopover.value
+}
 
 // AI 助理删除确认
 const showAiclawDeleteDialog = ref(false)

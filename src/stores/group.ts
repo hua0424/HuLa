@@ -251,7 +251,7 @@ export const useGroupStore = defineStore(
      * 只改已有缓存项（好友缓存 + 各群成员列表），不播种新条目、不发请求；
      * 与 updateUserItem 的整表重拉相比是轻量即时路径。
      */
-    const patchCachedUserInfo = (uid: string, patch: Partial<Pick<UserItem, 'name' | 'avatar'>>) => {
+    const patchCachedUserInfo = (uid: string, patch: Partial<Pick<UserItem, 'name' | 'avatar' | 'resume'>>) => {
       const key = String(uid)
       Object.values(userListMap).forEach((list) => {
         const item = list.find((user) => String(user.uid) === key)
