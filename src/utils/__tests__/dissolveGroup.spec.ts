@@ -12,7 +12,8 @@ vi.mock('@/hooks/useMitt', () => ({
 }))
 
 const groupStoreMocks = vi.hoisted(() => ({
-  exitGroup: vi.fn().mockResolvedValue(undefined)
+  exitGroup: vi.fn().mockResolvedValue(undefined),
+  isRoomDissolved: vi.fn().mockReturnValue(false)
 }))
 vi.mock('@/stores/group', () => ({
   useGroupStore: () => groupStoreMocks
@@ -38,6 +39,7 @@ describe('dissolveGroupOptimistic（REQ-016 #195 F4）', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     groupStoreMocks.exitGroup.mockResolvedValue(undefined)
+    groupStoreMocks.isRoomDissolved.mockReturnValue(false)
     chatStoreMocks.addSession.mockResolvedValue(undefined)
     invokeMock.mockResolvedValue(undefined)
   })
@@ -71,5 +73,17 @@ describe('dissolveGroupOptimistic（REQ-016 #195 F4）', () => {
     chatStoreMocks.addSession.mockRejectedValue(new Error('session gone'))
 
     await expect(dissolveGroupOptimistic('room-1')).resolves.toBe(false)
+  })
+
+  // PR#55 裁决（P2 竞态）：server 已处理解散但 HTTP 响应丢失时，WS 已 markRoomDissolved，
+  // 回滚必须短路——addSession 重加 = 复活幽灵会话
+  it('HTTP 失败但房间已确认解散（isRoomDissolved）：回滚短路不重加，返回 true', async () => {
+    groupStoreMocks.exitGroup.mockRejectedValue(new Error('response lost'))
+    groupStoreMocks.isRoomDissolved.mockReturnValue(true)
+
+    await expect(dissolveGroupOptimistic('room-1')).resolves.toBe(true)
+
+    expect(chatStoreMocks.addSession).not.toHaveBeenCalled()
+    expect(invokeMock).not.toHaveBeenCalledWith('hide_contact_command', { data: { roomId: 'room-1', hide: false } })
   })
 })

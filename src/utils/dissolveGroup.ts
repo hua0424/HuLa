@@ -24,6 +24,11 @@ export const dissolveGroupOptimistic = async (roomId: string): Promise<boolean> 
     await groupStore.exitGroup(roomId)
     return true
   } catch (error) {
+    // PR#55 裁决（P2 竞态）：server 已处理解散但 HTTP 响应丢失时，WS 推送已 markRoomDissolved。
+    // 此时回滚（addSession 重加）= 复活幽灵会话——目标终态已达成，直接按成功收敛。
+    if (groupStore.isRoomDissolved(roomId)) {
+      return true
+    }
     console.error('[dissolveGroup] 解散失败，回滚会话:', error)
     // DELETE_SESSION 链路会把会话标记为隐藏（hide_contact_command hide:true），先解除再拉回
     try {
