@@ -42,6 +42,7 @@
   "session_not_exist": "The current conversation does not exist",
   "disband_channel_failed": "Failed to disband the channel",
   "group_disbanded": "Group has been disbanded",
+  "disband_failed": "Failed to disband the group, please try again",
   "leave_channel_failed": "Failed to leave the channel",
   "group_left": "You have left the group",
   "get_friend_info_failed": "Failed to get friend information",

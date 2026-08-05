@@ -269,6 +269,7 @@ import {
   updateRoomInfo
 } from '@/utils/ImRequestUtils'
 import { toFriendInfoPage } from '@/utils/RouterUtils'
+import { dissolveGroupOptimistic } from '@/utils/dissolveGroup'
 import { useI18n, I18nT } from 'vue-i18n'
 
 defineOptions({
@@ -395,6 +396,9 @@ const handleAiclawDeleteConfirm = async (_password: string) => {
 }
 
 // 退出登录逻辑
+/** REQ-016 #195 F4：解散群防重标志 */
+const dissolving = ref(false)
+
 async function handleExit() {
   // AI 助理使用强确认弹窗
   if (isCurrentAiclaw.value) {
@@ -424,11 +428,19 @@ async function handleExit() {
               return
             }
 
-            groupStore.exitGroup(currentSessionRoomId.value).then(() => {
-              window.$message.success(t('mobile_chat_setting.group_disbanded'))
-              // 删除当前的会话
-              useMitt.emit(MittEnum.DELETE_SESSION, currentSessionRoomId.value)
-            })
+            // REQ-016 #195 F4：防重 + 乐观移除（确认即移除会话，失败回滚+提示）
+            if (dissolving.value) return
+            dissolving.value = true
+            try {
+              const ok = await dissolveGroupOptimistic(currentSessionRoomId.value)
+              if (ok) {
+                window.$message.success(t('mobile_chat_setting.group_disbanded'))
+              } else {
+                window.$message.error(t('mobile_chat_setting.disband_failed'))
+              }
+            } finally {
+              dissolving.value = false
+            }
           } else {
             if (currentSessionRoomId.value === '1') {
               window.$message.warning(t('mobile_chat_setting.leave_channel_failed'))

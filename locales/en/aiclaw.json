@@ -139,6 +139,8 @@
     "save_success": "Settings saved",
     "save_failed": "Save failed",
     "load_failed": "Failed to load group chat settings",
+    "batch_load_partial_failed": "Some configs failed to load; defaults are shown",
+    "retry": "Retry",
     "config_changed": "AI assistant {name}'s group settings have been updated",
     "add_to_group": "Add to Group",
     "add_to_group_title": "Add to Group",

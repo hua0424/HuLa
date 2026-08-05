@@ -141,6 +141,8 @@
     "load_failed": "加载群聊配置失败",
     "batch_title": "AI 助理入群配置",
     "batch_subtitle": "请为新加入的 AI 助理批准入群并设置工作目录",
+    "batch_load_partial_failed": "部分配置加载失败，已按默认值显示",
+    "retry": "重试",
     "config_changed": "AI 助理 {name} 的群聊配置已更新",
     "add_to_group": "添加到群",
     "add_to_group_title": "添加到群",

@@ -243,6 +243,7 @@
       "delete_friend_success": "已删除好友",
       "dissolve_not_allowed": "无法解散频道",
       "dissolve_success": "已解散群聊",
+      "dissolve_failed": "解散群聊失败，请重试",
       "exit_not_allowed": "无法退出频道",
       "exit_success": "已退出群聊",
       "group_name_update_failed": "群名称更新失败"
@@ -476,6 +477,8 @@
   },
   "create_group": {
     "title": "创建群聊",
+    "group_name": "群名称",
+    "group_name_placeholder": "选填，不填按成员自动生成",
     "action": "创建",
     "success": "创建群聊成功",
     "fail": "创建群聊失败",

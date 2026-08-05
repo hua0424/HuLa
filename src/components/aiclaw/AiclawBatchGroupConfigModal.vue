@@ -8,15 +8,28 @@
         {{ t('aiclaw.group_settings.batch_subtitle') }}
       </div>
       <div class="flex-1 overflow-auto px-24px py-12px">
-        <div v-for="item in items" :key="item.uid" class="border-b border-[--line-color] py-16px first:pt-0">
-          <div class="text-(14px font-500 [--text-color]) mb-12px">{{ item.name || item.uid }}</div>
-          <AiclawGroupConfigForm
-            :config="item.config"
-            :saving="savingUid === item.uid"
-            :adapter-type="item.adapterType"
-            :default-workspace-dir="buildDefaultWorkspaceDir(item.uid, account)"
-            @save="(cfg) => handleSave(item.uid, cfg)" />
+        <!-- REQ-016 #195 F3：弹窗先开后补——加载中骨架 / 失败错误态+重试；保存不依赖异步补数据 -->
+        <div v-if="loading" class="flex flex-col gap-16px py-8px" data-testid="aiclaw-batch-config-loading">
+          <n-skeleton v-for="item in aiclawItems" :key="item.uid" text :repeat="3" />
         </div>
+        <template v-else>
+          <div
+            v-if="loadError"
+            class="flex items-center justify-between gap-8px mb-12px px-12px py-8px rounded-6px bg-#d0305015 text-(12px #d03050)"
+            data-testid="aiclaw-batch-config-error">
+            <span>{{ t('aiclaw.group_settings.batch_load_partial_failed') }}</span>
+            <n-button size="tiny" secondary @click="loadItems">{{ t('aiclaw.group_settings.retry') }}</n-button>
+          </div>
+          <div v-for="item in items" :key="item.uid" class="border-b border-[--line-color] py-16px first:pt-0">
+            <div class="text-(14px font-500 [--text-color]) mb-12px">{{ item.name || item.uid }}</div>
+            <AiclawGroupConfigForm
+              :config="item.config"
+              :saving="savingUid === item.uid"
+              :adapter-type="item.adapterType"
+              :default-workspace-dir="buildDefaultWorkspaceDir(item.uid, account)"
+              @save="(cfg) => handleSave(item.uid, cfg)" />
+          </div>
+        </template>
       </div>
       <n-flex justify="end" class="p-16px" :size="12">
         <n-button secondary @click="modelVisible = false">{{ t('home.chat_main.cancel') }}</n-button>
@@ -59,6 +72,9 @@ const modelVisible = computed({
 })
 
 const savingUid = ref<string | null>(null)
+/** REQ-016 #195 F3：弹窗先开后补的加载/失败态 */
+const loading = ref(false)
+const loadError = ref(false)
 
 /** 每个 aiclaw 的本地表单配置；打开时从 store 拉取，未命中则使用默认值 */
 const items = ref<
@@ -77,33 +93,41 @@ const buildDefaultConfig = (uid: string, adapterType?: string) => ({
 
 const loadItems = async () => {
   savingUid.value = null
+  loadError.value = false
   if (props.aiclawItems.length === 0) {
     items.value = []
     return
   }
 
-  // 确保有群名/群号兜底
+  loading.value = true
   try {
-    await groupStore.addGroupDetail(props.roomId)
-  } catch {
-    // 取不到 detail 时 account 由 props.account 兜底
-  }
-  const detail = groupStore.getGroupDetail(props.roomId)
-  const account = detail?.account || props.account
+    // 确保有群名/群号兜底（失败静默：account 由 props 兜底，但记入错误态给重试入口）
+    try {
+      await groupStore.addGroupDetail(props.roomId)
+    } catch {
+      loadError.value = true
+    }
+    const detail = groupStore.getGroupDetail(props.roomId)
+    const account = detail?.account || props.account
 
-  const result: typeof items.value = []
-  for (const item of props.aiclawItems) {
-    await chatStore.loadAiclawGroupConfigs(Number(item.uid))
-    const list = chatStore.getAiclawGroupConfigList(Number(item.uid))
-    const matched = list.find((cfg) => cfg.roomId === props.roomId)
-    result.push({
-      ...item,
-      config: matched
-        ? { ...matched, account: matched.account || account }
-        : { ...buildDefaultConfig(item.uid, item.adapterType), account }
-    })
+    // REQ-016 #195：单数版只查当前群——复数版会被 userListMap 残留房间的陈旧校验失败连坐
+    const result: typeof items.value = []
+    for (const item of props.aiclawItems) {
+      const ok = await chatStore.loadAiclawGroupConfig(Number(item.uid), props.roomId)
+      if (!ok) loadError.value = true
+      const matched = chatStore.getAiclawGroupConfig(Number(item.uid), props.roomId)
+      result.push({
+        ...item,
+        // 保存可用性不依赖异步补数据：roomId 已足够保存配置，未命中用默认值
+        config: matched
+          ? { ...matched, account: matched.account || account }
+          : { ...buildDefaultConfig(item.uid, item.adapterType), account }
+      })
+    }
+    items.value = result
+  } finally {
+    loading.value = false
   }
-  items.value = result
 }
 
 watch(
