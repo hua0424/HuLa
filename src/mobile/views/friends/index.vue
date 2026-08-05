@@ -95,15 +95,15 @@
                           :size="44"
                           class="grayscale"
                           :class="{
-                            'grayscale-0':
-                              item.activeStatus === OnlineEnum.ONLINE || isAiclawByUserType(item.userType)
+                            'grayscale-0': item.activeStatus === OnlineEnum.ONLINE || isAiclawByUserType(item.userType)
                           }"
                           :src="AvatarUtils.getAvatarUrl(groupStore.getUserInfo(item.uid)?.avatar!)"
                           fallback-src="/logo.png" />
 
                         <n-flex vertical justify="space-between" class="h-fit flex-1 truncate">
                           <span class="text-14px leading-tight flex-1 truncate">
-                            {{ groupStore.getUserInfo(item.uid)?.name }}
+                            <!-- REQ-016 #194：备注优先，空回退昵称 -->
+                            {{ item.remark || groupStore.getUserInfo(item.uid)?.name }}
                           </span>
 
                           <div class="text leading-tight text-12px flex-y-center gap-4px flex-1 truncate">
