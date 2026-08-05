@@ -136,6 +136,17 @@
             </n-tooltip>
           </n-flex>
         </n-flex>
+        <!-- UID（REQ-016 #194 F2） -->
+        <n-flex align="center" :size="10" data-testid="info-popover-uid">
+          <p class="text-[--info-text-color]">{{ t('home.profile_card.labels.uid') }}</p>
+          <span class="text-(12px [--chat-text-color])">{{ uid }}</span>
+        </n-flex>
+
+        <!-- 简介（REQ-016 #194 F2，空显「-」） -->
+        <n-flex align="center" :size="10" data-testid="info-popover-resume">
+          <p class="text-[--info-text-color]">{{ t('home.profile_card.labels.resume') }}</p>
+          <span class="text-(12px [--chat-text-color]) break-all">{{ resolvedUserInfo?.resume || '-' }}</span>
+        </n-flex>
       </n-flex>
 
       <!-- 地址 -->
@@ -222,6 +233,7 @@ import { useSettingStore } from '@/stores/setting'
 import { useUserStatusStore } from '@/stores/userStatus'
 import { useUserStore } from '@/stores/user'
 import { AvatarUtils } from '@/utils/AvatarUtils'
+import { getUserByIds } from '@/utils/ImRequestUtils'
 
 const { t } = useI18n()
 
@@ -355,6 +367,24 @@ const handleOpenMsgSession = async (uid: string) => {
   await openMsgSession(uid)
 }
 
+/**
+ * REQ-016 #194 F2：缓存无 resume 字段时按需补拉（getUserByIds 响应已含 resume）并回填缓存。
+ * 已有 resume（含空串）不重复请求；失败静默，简介行显「-」兜底。
+ */
+const maybeFetchResume = async () => {
+  const info = groupStore.getUserInfo(uid)
+  if (!info || info.resume !== undefined) return
+  try {
+    const users = await getUserByIds([String(uid)])
+    const fresh = users?.find((u) => String(u.uid) === String(uid))
+    if (fresh) {
+      groupStore.patchCachedUserInfo(String(uid), { resume: fresh.resume ?? '' })
+    }
+  } catch {
+    // 补拉失败：简介行显「-」兜底
+  }
+}
+
 onMounted(() => {
   // 注入 enableAllScroll 方法
   const popoverControls = inject('popoverControls', { enableScroll: () => {} })
@@ -363,6 +393,7 @@ onMounted(() => {
       popoverControls.enableScroll()
     }
   }
+  void maybeFetchResume()
 })
 </script>
 

@@ -276,6 +276,8 @@
     },
     "labels": {
       "account": "Account",
+      "uid": "UID",
+      "resume": "Bio",
       "location": "Location",
       "badges": "Badges",
       "activities": "Activities"

@@ -199,6 +199,8 @@ export type UserItem = {
   uid: string
   /** 归属地 */
   locPlace?: string
+  /** 个人简介（REQ-016 #194 F2：getUserByIds 响应已含，按需补拉回填） */
+  resume?: string
   /** 角色ID */
   roleId?: number
   /** 账号 */

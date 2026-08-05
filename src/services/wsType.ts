@@ -97,7 +97,9 @@ export enum WsResponseMessageType {
   /** AI 助理思考结束 */
   THINKING_END = 'thinkingEnd',
   /** AI 助理群聊配置变更通知 */
-  AICLAW_GROUP_CONFIG_UPDATE = 'groupConfigChange'
+  AICLAW_GROUP_CONFIG_UPDATE = 'groupConfigChange',
+  /** REQ-016 #194：资料变更通知（改名/简介/头像 profile；好友备注 remark） */
+  USER_INFO_CHANGE = 'userInfoChange'
 }
 
 export enum NoticeTypeEnum {

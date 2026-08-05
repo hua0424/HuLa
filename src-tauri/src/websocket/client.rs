@@ -763,6 +763,11 @@ impl WebSocketClient {
                 info!("My room info changed");
                 let _ = app_handle.emit_to("home", "ws-my-room-info-change", data);
             }
+            // REQ-016 #194: 资料变更（改名/简介/头像 profile；好友备注 remark）
+            "userInfoChange" => {
+                info!("User info changed");
+                let _ = app_handle.emit_to("home", "ws-user-info-change", data);
+            }
             "roomGroupNoticeMsg" => {
                 info!("Group notice published");
                 let _ = app_handle.emit_to("home", "ws-room-group-notice-msg", data);

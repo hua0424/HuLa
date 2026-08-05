@@ -349,6 +349,14 @@ class RustWebSocketClient {
       })
     )
 
+    // REQ-016 #194：资料变更（改名/简介/头像 profile；好友备注 remark）
+    this.listenerController.add(
+      await listen('ws-user-info-change', (event: any) => {
+        info(`资料变更: ${JSON.stringify(event.payload)}`)
+        useMitt.emit(WsResponseMessageType.USER_INFO_CHANGE, event.payload)
+      })
+    )
+
     this.listenerController.add(
       await listen('ws-room-group-notice-msg', (event: any) => {
         info(`发布群公告: ${JSON.stringify(event.payload)}`)
