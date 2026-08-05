@@ -21,6 +21,10 @@
                 {{ item.relationDesc }}
               </span>
               <span v-else class="text-12px text-#ccc mt-2px italic">{{ t('aiclaw.friends.relation') }}：未设置</span>
+              <!-- REQ-016 #196 F6: 与该好友私聊的工作目录（null 显「-」） -->
+              <span class="text-12px text-#bbb mt-2px truncate" data-testid="aiclaw-friend-dm-dir">
+                {{ t('aiclaw.friends.dm_workspace') }}：{{ item.dmWorkspaceDir || '-' }}
+              </span>
             </div>
             <div class="flex items-center gap-6px flex-shrink-0">
               <n-button size="tiny" secondary @click="handleEditRelation(item)">
@@ -90,6 +94,8 @@ type AiclawFriendItem = {
   activeStatus: number
   userType: number
   relationDesc: string | null
+  /** REQ-016 #196 F6：与该好友私聊的工作目录；null → 显「-」 */
+  dmWorkspaceDir?: string | null
 }
 
 const friends = ref<AiclawFriendItem[]>([])

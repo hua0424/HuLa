@@ -207,11 +207,11 @@ export const useGroupStore = defineStore(
       groupDetails.value = data
     }
 
-    const addGroupDetail = async (roomId: string) => {
+    const addGroupDetail = async (roomId: string, options?: { showError?: boolean }) => {
       if (groupDetails.value.find((item) => item.roomId === roomId)) {
         return
       }
-      const data = await ImRequestUtils.getGroupDetail(roomId)
+      const data = await ImRequestUtils.getGroupDetail(roomId, options)
       groupDetails.value.push(data)
     }
 

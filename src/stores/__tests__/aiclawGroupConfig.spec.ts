@@ -14,14 +14,16 @@ vi.mock('@/stores/global', () => ({
 }))
 
 const mockFns = vi.hoisted(() => ({
+  loadConfig: vi.fn(),
   loadConfigs: vi.fn(),
-  getConfigList: vi.fn(() => []),
+  getConfig: vi.fn(),
   saveConfig: vi.fn()
 }))
 
 vi.mock('@/stores/chat', () => ({
   useChatStore: vi.fn(() => ({
-    getAiclawGroupConfigList: mockFns.getConfigList,
+    getAiclawGroupConfig: mockFns.getConfig,
+    loadAiclawGroupConfig: mockFns.loadConfig,
     loadAiclawGroupConfigs: mockFns.loadConfigs,
     saveAiclawGroupConfig: mockFns.saveConfig
   }))
@@ -60,28 +62,31 @@ const mountStore = () => {
 
 describe('useAiclawGroupConfigStore', () => {
   beforeEach(() => {
+    mockFns.loadConfig.mockReset()
     mockFns.loadConfigs.mockReset()
-    mockFns.getConfigList.mockReset().mockReturnValue([])
+    mockFns.getConfig.mockReset().mockReturnValue(undefined)
     mockFns.saveConfig.mockReset()
   })
 
-  it('openModal 成功加载到当前群配置后写入 modalContext', async () => {
-    mockFns.loadConfigs.mockResolvedValue(true)
-    mockFns.getConfigList.mockReturnValue([
-      {
-        roomId: 'room-1',
-        rateLimitPerMinute: 20,
-        dailyLimit: 500,
-        respondToAi: false,
-        mentionRequired: false
-      }
-    ] as any)
+  // REQ-016 #196 F5：openModal 只查当前群（单数版），不遍历 aiclaw 历史出现过的所有房间——
+  // userListMap 残留（退群/解散后 aiclaw 仍挂旧房间）会让复数版对陈旧房间 server 校验必炸，
+  // 全局 toast + 整窗置错。
+  it('openModal 调单数版 loadAiclawGroupConfig 且只传当前 roomId', async () => {
+    mockFns.loadConfig.mockResolvedValue(true)
+    mockFns.getConfig.mockReturnValue({
+      roomId: 'room-1',
+      rateLimitPerMinute: 20,
+      dailyLimit: 500,
+      respondToAi: false,
+      mentionRequired: false
+    } as any)
 
     const wrapper = mountStore()
     await wrapper.vm.store.openModal('2001')
     await flushPromises()
 
-    expect(mockFns.loadConfigs).toHaveBeenCalledWith(2001)
+    expect(mockFns.loadConfig).toHaveBeenCalledWith(2001, 'room-1')
+    expect(mockFns.loadConfigs).not.toHaveBeenCalled()
     expect(wrapper.vm.store.modalVisible).toBe(true)
     expect(wrapper.vm.store.modalLoading).toBe(false)
     expect(wrapper.vm.store.modalError).toBe('')
@@ -94,17 +99,9 @@ describe('useAiclawGroupConfigStore', () => {
     })
   })
 
-  it('openModal 成功但无当前群配置时使用默认值', async () => {
-    mockFns.loadConfigs.mockResolvedValue(true)
-    mockFns.getConfigList.mockReturnValue([
-      {
-        roomId: 'room-other',
-        rateLimitPerMinute: 20,
-        dailyLimit: 500,
-        respondToAi: false,
-        mentionRequired: false
-      }
-    ] as any)
+  it('openModal 成功但缓存无当前群配置时使用默认值', async () => {
+    mockFns.loadConfig.mockResolvedValue(true)
+    mockFns.getConfig.mockReturnValue(undefined)
 
     const wrapper = mountStore()
     await wrapper.vm.store.openModal('2001')
@@ -120,7 +117,7 @@ describe('useAiclawGroupConfigStore', () => {
   })
 
   it('openModal 加载返回 false 时设置 error 且 modalContext 为空', async () => {
-    mockFns.loadConfigs.mockResolvedValue(false)
+    mockFns.loadConfig.mockResolvedValue(false)
 
     const wrapper = mountStore()
     await wrapper.vm.store.openModal('2001')
@@ -132,7 +129,7 @@ describe('useAiclawGroupConfigStore', () => {
   })
 
   it('openModal 抛异常时设置 error 且 modalContext 为空', async () => {
-    mockFns.loadConfigs.mockRejectedValue(new Error('network'))
+    mockFns.loadConfig.mockRejectedValue(new Error('network'))
 
     const wrapper = mountStore()
     await wrapper.vm.store.openModal('2001')
