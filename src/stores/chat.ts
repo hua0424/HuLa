@@ -778,6 +778,22 @@ export const useChatStore = defineStore(
       sortAndUniqueSessionList()
     }
 
+    // REQ-016 #195（PR#55 P1 裁决）：纯本地会话还原，供乐观移除失败回滚使用。
+    // 全程零网络——复用移除前捕获的快照对象插回原位置并重建 map 引用；
+    // 不走 addSession（其首行 getSessionDetail 是网络调用，断网回滚必失败）。
+    const restoreSession = (session: SessionItem, index?: number) => {
+      // 幂等：会话已被其他链路（如 WS 重拉/addSession）恢复时不重复插入
+      if (sessionMap.value[session.roomId]) return
+      const insertAt = index === undefined ? 0 : Math.min(Math.max(index, 0), sessionList.value.length)
+      sessionList.value.splice(insertAt, 0, session)
+      sessionMap.value[session.roomId] = session
+      // removeSession 清了未读缓存，按快照未读数回补，避免回滚后未读丢失
+      if (session.unreadCount) {
+        persistUnreadCount(session.roomId, session.unreadCount)
+      }
+      requestUnreadCountUpdate()
+    }
+
     // 通过房间ID获取会话信息
     const getSession = (roomId: string) => {
       if (!roomId) {
@@ -2222,6 +2238,7 @@ export const useChatStore = defineStore(
       getGroupSessions,
       removeSession,
       removeDissolvedSession,
+      restoreSession,
       isRoomInContactsSnapshot,
       changeRoom,
       addSession,
