@@ -27,7 +27,8 @@
                 :src="
                   props.type === 'friend'
                     ? avatarSrc(getUserInfo(item)?.avatar || '')
-                    : avatarSrc(groupDetailsMap[item.roomId]?.avatar || '/default-group-avatar.png')
+                    : // REQ-017 #204 B：优先直读 NoticeVO.groupAvatar，缺失回退回源缓存
+                      avatarSrc(item.groupAvatar || groupDetailsMap[item.roomId]?.avatar || '/default-group-avatar.png')
                 "
                 class="mr-10px" />
               <n-flex vertical :size="12" class="min-w-0 flex-1">
@@ -217,15 +218,16 @@ const applyMsg = computed(() => (item: NoticeItem) => {
       : t('home.apply_list.friend.request')
   }
 
-  const groupDetail = groupDetailsMap.value[item.roomId]
-  if (!groupDetail) {
+  // REQ-017 #204 B：优先直读 NoticeVO.groupName（server #203 内嵌），
+  // 缺失（旧 server/异常）才回退 per-row 回源——直读命中时零网络、不闪「加载中」
+  const directName = typeof item.groupName === 'string' && item.groupName ? item.groupName : undefined
+  const groupName = directName ?? groupDetailsMap.value[item.roomId]?.name?.toString()
+  if (groupName === undefined) {
     if (item.roomId && !loadingGroups.value.has(item.roomId)) {
       void getGroupDetail(item.roomId)
     }
     return t('home.apply_list.group.loading')
   }
-
-  const groupName = groupDetail.name?.toString() ?? ''
   if (item.eventType === NoticeType.AICLAW_GROUP_APPROVE) {
     const aiclawName = getUserInfo(item)?.name || t('home.apply_list.unknown_user')
     return t('aiclaw.notice.group_approve.title', { name: aiclawName, group: groupName })
@@ -421,15 +423,21 @@ const handleAiclawApprove = async (item: NoticeItem) => {
 }
 
 onMounted(() => {
-  // 组件挂载时刷新一次列表
-  contactStore.getApplyPage(props.type, true)
+  // 组件挂载时刷新一次列表（REQ-017 #204 A：数据收口此处；
+  // click=true 保留旧 handleApply 的「点击清空通知未读」语义，避免未读角标回潮）
+  contactStore.getApplyPage(props.type, true, true)
 })
 
 // 监听applyList变化，批量加载群组信息
 watch(
   () => applyList.value,
   (newList) => {
-    const roomIds = uniq(newList.filter((item) => item.roomId && Number(item.roomId) > 0).map((item) => item.roomId))
+    // REQ-017 #204 B：只对缺失直读字段（groupName/groupAvatar）的通知回源，直读命中零请求
+    const roomIds = uniq(
+      newList
+        .filter((item) => item.roomId && Number(item.roomId) > 0 && !(item.groupName && item.groupAvatar))
+        .map((item) => item.roomId)
+    )
 
     if (roomIds.length > 0) {
       // 批量加载群组信息

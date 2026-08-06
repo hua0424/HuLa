@@ -13,9 +13,10 @@
 
         <Details :content="detailsContent" v-else-if="detailsShow && isDetails && detailsContent?.type !== 'apply'" />
 
-        <!-- 好友申请列表 -->
+        <!-- 好友申请列表（REQ-017 #204 A2：:key 按类型销毁重建，切换 friend/group 重拉数据） -->
         <ApplyList
           v-else-if="detailsContent && isDetails && detailsContent.type === 'apply'"
+          :key="detailsContent.applyType"
           :type="detailsContent.applyType" />
 
         <!-- 聊天界面背景图标 -->
