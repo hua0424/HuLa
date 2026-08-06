@@ -718,11 +718,17 @@ export const useGroupStore = defineStore(
     }
 
     /**
-     * 移除 某个房间中的所有user 数据
+     * 移除 某个房间中的所有user 数据（REQ-017 #208：整键清除，含派生缓存）
+     *
+     * 房间生命周期终点（退群/解散/被踢）必须整键删除而非置空数组——
+     * 残留的 userListMap[roomId] 会让 getRoomIdsByUid 继续返回陈旧 roomId，
+     * 驱动 aiclaw 群配置遍历等下游打到 server 必炸（#196 治标/#202 审计定性）。
      * @param roomId
      */
     const removeAllUsers = (roomId: string) => {
-      setRoomMemberList(roomId, [])
+      delete userListMap[roomId]
+      delete memberOrderCounters[roomId]
+      delete onlineCountMap[roomId]
     }
 
     /**
@@ -798,10 +804,9 @@ export const useGroupStore = defineStore(
       // 退出（exit_failed / leave_failed）均有领域 toast，底层直出 = 双 toast（本 issue 报障场景）
       await ImRequestUtils.exitGroup({ roomId }, { showError: false })
 
-      // 更新群成员缓存，移除自己
-      const currentUserList = userListMap[roomId] || []
-      const updatedList = currentUserList.filter((user: UserItem) => user.uid !== userStore.userInfo!.uid)
-      setRoomMemberList(roomId, updatedList)
+      // REQ-017 #208：退群/解散后整键清除本房间成员缓存（治本）——
+      // 旧逻辑只过滤自己，其他成员（含 aiclaw）残留导致 getRoomIdsByUid 返回陈旧 roomId
+      removeAllUsers(roomId)
 
       // 删除对应的群详情缓存
       removeGroupDetail(roomId)

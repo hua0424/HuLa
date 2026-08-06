@@ -171,7 +171,7 @@
         "report": "Harassed? Report this user"
       },
       "group": {
-        "name_placeholder": "Enter group name (max 12 chars)",
+        "name_placeholder": "Enter group name (max 32 chars)",
         "official_badge": "Official group",
         "copy": "Copy",
         "qr": "QR",
@@ -241,7 +241,7 @@
       "shield_off": "Messages unblocked",
       "action_failed": "Operation failed",
       "group_name_empty": "Group name cannot be empty",
-      "group_name_too_long": "Group name cannot exceed 12 characters",
+      "group_name_too_long": "Group name cannot exceed 32 characters",
       "delete_history_success": "Chat history deleted",
       "delete_history_failed": "Failed to delete chat history",
       "delete_friend_success": "Friend removed",

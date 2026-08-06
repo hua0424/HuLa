@@ -168,7 +168,7 @@
         "report": "被骚扰了？举报该用户"
       },
       "group": {
-        "name_placeholder": "请输入群名称(最多12字)",
+        "name_placeholder": "请输入群名称(最多32字)",
         "official_badge": "官方群聊认证",
         "copy": "复制",
         "qr": "二维码",
@@ -238,7 +238,7 @@
       "shield_off": "已取消屏蔽",
       "action_failed": "设置失败",
       "group_name_empty": "群名称不能为空",
-      "group_name_too_long": "群名称不能超过12个字符",
+      "group_name_too_long": "群名称不能超过32个字符",
       "delete_history_success": "聊天记录已删除",
       "delete_friend_success": "已删除好友",
       "dissolve_not_allowed": "无法解散频道",
