@@ -168,7 +168,7 @@
                 <n-input
                   size="small"
                   style="border: none; text-align: right; outline: none; text-align: right"
-                  v-model="nicknameValue"
+                  v-model:value="nicknameValue"
                   @blur="handleInfoUpdate"
                   :placeholder="t('mobile_chat_setting.input.group_alias')" />
               </div>
@@ -182,7 +182,7 @@
               <span class="text-#6E6E6E ml-1">{{ t('mobile_chat_setting.remar_kprivate_visible') }}</span>
             </div>
             <n-input
-              v-model="remarkValue"
+              v-model:value="remarkValue"
               size="large"
               :placeholder="t('mobile_chat_setting.input.remark')"
               @blur="handleInfoUpdate" />
