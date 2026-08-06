@@ -24,6 +24,8 @@ export const useAiclawStore = defineStore(
     const myAiclawUids = ref<Set<string> | string[]>(new Set())
     /** uid → adapterType 映射，供群配置表单判断是否需要显示工作目录 */
     const myAiclawAdapterTypes = ref<Map<string, string>>(new Map())
+    /** uid → name 映射（REQ-016 #195：建群配置弹窗先开后补，aiclaw 名称不等群成员列表） */
+    const myAiclawNames = ref<Map<string, string>>(new Map())
 
     /**
      * 幂等地预取当前用户的 aiclaw 列表。
@@ -42,7 +44,7 @@ export const useAiclawStore = defineStore(
       const callGen = ++generation
       loading.value = true
       try {
-        const list = await imRequestSilent<Array<{ uid: string | number; adapterType?: string }>>({
+        const list = await imRequestSilent<Array<{ uid: string | number; adapterType?: string; name?: string }>>({
           url: ImUrlEnum.AICLAW_LIST
         })
         // 若此期间发生过 invalidate，则丢弃过期结果
@@ -51,6 +53,9 @@ export const useAiclawStore = defineStore(
         }
         myAiclawUids.value = new Set((list || []).map((item) => String(item.uid)))
         myAiclawAdapterTypes.value = new Map((list || []).map((item) => [String(item.uid), item.adapterType || '']))
+        myAiclawNames.value = new Map(
+          (list || []).filter((item) => item.name).map((item) => [String(item.uid), item.name as string])
+        )
         loaded.value = true
         invalidated.value = false
       } catch (err) {
@@ -96,6 +101,12 @@ export const useAiclawStore = defineStore(
       return myAiclawAdapterTypes.value.get(String(uid))
     }
 
+    /** 同步获取某 aiclaw 的名称；未加载或不存在返回 undefined（REQ-016 #195） */
+    const getName = (uid: string | number | undefined | null): string | undefined => {
+      if (!uid) return undefined
+      return myAiclawNames.value.get(String(uid))
+    }
+
     /** 使缓存失效，下次 ensureLoaded() 会重新拉取 */
     const invalidate = () => {
       generation++
@@ -103,6 +114,7 @@ export const useAiclawStore = defineStore(
       invalidated.value = true
       myAiclawUids.value = new Set()
       myAiclawAdapterTypes.value = new Map()
+      myAiclawNames.value = new Map()
       loading.value = false
     }
 
@@ -111,9 +123,11 @@ export const useAiclawStore = defineStore(
       loading,
       myAiclawUids,
       myAiclawAdapterTypes,
+      myAiclawNames,
       ensureLoaded,
       isMyAiclaw,
       getAdapterType,
+      getName,
       invalidate
     }
   },

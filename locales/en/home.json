@@ -247,6 +247,7 @@
       "delete_friend_success": "Friend removed",
       "dissolve_not_allowed": "Cannot disband channel",
       "dissolve_success": "Group disbanded",
+      "dissolve_failed": "Failed to disband the group, please try again",
       "exit_not_allowed": "Cannot leave channel",
       "exit_success": "Left group",
       "group_name_update_failed": "Failed to rename group"
@@ -480,6 +481,8 @@
   },
   "create_group": {
     "title": "Create Group Chat",
+    "group_name": "Group Name",
+    "group_name_placeholder": "Optional; auto-generated from members if empty",
     "action": "Create",
     "success": "Group chat created",
     "fail": "Failed to create group chat",

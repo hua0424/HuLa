@@ -83,9 +83,26 @@
     </div>
 
     <!-- 底部操作栏 -->
-    <div class="px-16px py-10px bg-white border-t border-gray-200 flex justify-between items-center">
-      <span class="text-14px">已选择 {{ selectedList.length }} 人</span>
-      <n-button type="primary" :disabled="selectedList.length === 0" @click="createGroup">发起群聊</n-button>
+    <div class="px-16px py-10px bg-white border-t border-gray-200 flex flex-col gap-8px">
+      <!-- REQ-016 #195 F3：群名输入（可空，空维持 server 默认命名） -->
+      <n-input
+        v-model:value="groupName"
+        size="small"
+        :maxlength="30"
+        :disabled="creating"
+        placeholder="群名称（选填，不填按成员自动生成）"
+        data-testid="create-group-name" />
+      <div class="flex justify-between items-center">
+        <span class="text-14px">已选择 {{ selectedList.length }} 人</span>
+        <n-button
+          type="primary"
+          :disabled="selectedList.length === 0 || creating"
+          :loading="creating"
+          data-testid="create-group-submit"
+          @click="createGroup">
+          发起群聊
+        </n-button>
+      </div>
     </div>
     <!-- 创建群聊后批量配置 owner aiclaw -->
     <AiclawBatchGroupConfigModal
@@ -103,18 +120,14 @@ import { useContactStore } from '@/stores/contacts'
 import { useGroupStore } from '@/stores/group'
 import { useUserStatusStore } from '@/stores/userStatus'
 import { AvatarUtils } from '@/utils/AvatarUtils'
-import * as ImRequestUtils from '@/utils/ImRequestUtils'
-import { useAiclawStore } from '@/stores/aiclaw'
 import AiclawBatchGroupConfigModal from '@/components/aiclaw/AiclawBatchGroupConfigModal.vue'
-import { useChatStore } from '@/stores/chat.ts'
+import { createGroupFlow } from '@/utils/createGroupFlow'
 import { useGlobalStore } from '@/stores/global.ts'
 
 const userStatusStore = useUserStatusStore()
 const { stateList } = storeToRefs(userStatusStore)
 const groupStore = useGroupStore()
-const chatStore = useChatStore()
 const globalStore = useGlobalStore()
-const aiclawStore = useAiclawStore()
 
 // 创建群聊后批量 aiclaw 配置弹窗
 const batchConfigModalVisible = ref(false)
@@ -173,69 +186,46 @@ const filteredContacts = computed(() => {
   })
 })
 
-// 点击发起群聊
+// 点击发起群聊（REQ-016 #195 F3：防重 + 群名 + 提速，流程体走共享 helper）
+const creating = ref(false)
+const groupName = ref('')
+
 const createGroup = async () => {
+  if (creating.value) return
   if (selectedList.value.length < 2) {
     window.$message.success('两个人无法建群哦')
     return
   }
 
+  creating.value = true
   try {
-    const result: any = await ImRequestUtils.createGroup({ uidList: selectedList.value })
-
-    await chatStore.getSessionList(true)
-
-    const resultRoomId = result?.roomId != null ? String(result.roomId) : undefined
-    const resultId = result?.id != null ? String(result.id) : undefined
-
-    const matchedSession = chatStore.sessionList.find((session) => {
-      const sessionRoomId = String(session.roomId)
-      const sessionDetailId = session.detailId != null ? String(session.detailId) : undefined
-      return (
-        (resultRoomId !== undefined && sessionRoomId === resultRoomId) ||
-        (resultId !== undefined && (sessionDetailId === resultId || sessionRoomId === resultId))
-      )
-    })
-
-    // #87：无论会话列表是否已刷新到新群，都使用创建返回的 roomId 作为兜底
-    const roomId = matchedSession?.roomId ?? resultRoomId ?? resultId
-    if (roomId) {
-      if (matchedSession?.roomId) {
-        globalStore.updateCurrentSessionRoomId(matchedSession.roomId)
-      }
-      await Promise.all([groupStore.addGroupDetail(roomId), groupStore.getGroupUserList(roomId, true)])
-
-      // #87：如果新建群中包含当前用户拥有的 aiclaw，弹出批量入群配置
-      await aiclawStore.ensureLoaded()
-      const detail = groupStore.getGroupDetail(roomId)
-      const account = detail?.account
-      const aiclawItems = selectedList.value
-        .filter((uid) => aiclawStore.isMyAiclaw(uid))
-        .map((uid) => {
-          const user = groupStore.userList.find((m) => String(m.uid) === uid)
-          return {
-            uid,
-            name: user?.name,
-            adapterType: aiclawStore.getAdapterType(uid)
-          }
-        })
-      if (aiclawItems.length > 0) {
+    await createGroupFlow({
+      uidList: selectedList.value,
+      groupName: groupName.value,
+      onOpenBatchConfig: (roomId, items) => {
         batchConfigRoomId.value = roomId
-        batchConfigAccount.value = account || ''
-        batchConfigAiclawItems.value = aiclawItems
+        batchConfigAccount.value = ''
+        batchConfigAiclawItems.value = items
         batchConfigModalVisible.value = true
+      },
+      onSessionReady: (roomId) => {
+        globalStore.updateCurrentSessionRoomId(roomId)
       }
-    }
+    })
 
     resetCreateGroupState()
     window.$message.success('创建群聊成功')
   } catch (error) {
+    console.error('[StartGroupChat] 创建群聊失败:', error)
     window.$message.error('创建群聊失败')
+  } finally {
+    creating.value = false
   }
 }
 
 const resetCreateGroupState = () => {
   selectedList.value = []
+  groupName.value = ''
   keyword.value = ''
 }
 </script>

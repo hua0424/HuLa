@@ -18,15 +18,15 @@ const i18n = createI18n({
 })
 
 const mockLoad = vi.fn()
-const mockGetList = vi.fn()
+const mockGetConfig = vi.fn()
 const mockSave = vi.fn()
 const mockAddGroupDetail = vi.fn()
 const mockGetGroupDetail = vi.fn()
 
 vi.mock('@/stores/chat', () => ({
   useChatStore: () => ({
-    loadAiclawGroupConfigs: mockLoad,
-    getAiclawGroupConfigList: mockGetList,
+    loadAiclawGroupConfig: mockLoad,
+    getAiclawGroupConfig: mockGetConfig,
     saveAiclawGroupConfig: mockSave
   })
 }))
@@ -46,12 +46,12 @@ describe('AiclawBatchGroupConfigModal', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     mockLoad.mockReset()
-    mockGetList.mockReset()
+    mockGetConfig.mockReset()
     mockSave.mockReset()
     mockAddGroupDetail.mockReset()
     mockGetGroupDetail.mockReset()
     mockLoad.mockResolvedValue(true)
-    mockGetList.mockReturnValue([])
+    mockGetConfig.mockReturnValue(undefined)
     mockGetGroupDetail.mockReturnValue({ account: 'hula_g1' })
   })
 
@@ -127,5 +127,69 @@ describe('AiclawBatchGroupConfigModal', () => {
     expect(roomId).toBe('room-1')
     expect(payload.approved).toBe(true)
     expect(payload.workspaceDir).toContain('~/.aichat/opencode/workspace/1001/group/hula_g1')
+  })
+
+  // REQ-016 #195 F3：弹窗先开后补的异常路径
+  it('加载中显示骨架，完成后渲染表单', async () => {
+    let release: (v: unknown) => void
+    mockLoad.mockReturnValue(new Promise((r) => (release = r)))
+
+    mountModal({
+      visible: true,
+      roomId: 'room-1',
+      account: 'hula_g1',
+      aiclawItems: [{ uid: '1001', name: 'OpenCode Bot', adapterType: 'opencode' }]
+    })
+    await flushPromises()
+
+    // 配置加载在途：骨架可见、表单未渲染
+    expect(document.querySelector('[data-testid="aiclaw-batch-config-loading"]')).not.toBeNull()
+    expect(document.querySelector('[data-testid="aiclaw-group-config-save"]')).toBeNull()
+
+    release!(true)
+    await flushPromises()
+    expect(document.querySelector('[data-testid="aiclaw-batch-config-loading"]')).toBeNull()
+    expect(document.querySelector('[data-testid="aiclaw-group-config-save"]')).not.toBeNull()
+  })
+
+  it('单数版只查当前 roomId（不遍历其他房间）', async () => {
+    mountModal({
+      visible: true,
+      roomId: 'room-1',
+      aiclawItems: [
+        { uid: '1001', name: 'A', adapterType: 'opencode' },
+        { uid: '1002', name: 'B', adapterType: 'cc' }
+      ]
+    })
+    await flushPromises()
+
+    expect(mockLoad).toHaveBeenCalledTimes(2)
+    expect(mockLoad).toHaveBeenNthCalledWith(1, 1001, 'room-1')
+    expect(mockLoad).toHaveBeenNthCalledWith(2, 1002, 'room-1')
+  })
+
+  it('配置加载失败显错误态且保存仍可用（默认配置兜底）；点重试重新加载', async () => {
+    mockLoad.mockResolvedValue(false)
+    mountModal({
+      visible: true,
+      roomId: 'room-1',
+      account: 'hula_g1',
+      aiclawItems: [{ uid: '1001', name: 'OpenCode Bot', adapterType: 'opencode' }]
+    })
+    await flushPromises()
+
+    // 错误态可见，表单仍按默认配置渲染（保存可用性不依赖异步补数据）
+    expect(document.querySelector('[data-testid="aiclaw-batch-config-error"]')).not.toBeNull()
+    expect(document.querySelector('[data-testid="aiclaw-group-config-save"]')).not.toBeNull()
+
+    // 重试：恢复成功后错误态消失
+    mockLoad.mockResolvedValue(true)
+    const retryBtn = Array.from(document.querySelectorAll('[data-testid="aiclaw-batch-config-error"] button')).pop() as
+      | HTMLElement
+      | undefined
+    retryBtn?.click()
+    await flushPromises()
+
+    expect(document.querySelector('[data-testid="aiclaw-batch-config-error"]')).toBeNull()
   })
 })

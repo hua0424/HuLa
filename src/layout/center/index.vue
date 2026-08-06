@@ -109,6 +109,18 @@
             <use href="#close"></use>
           </svg>
 
+          <!-- REQ-016 #195 F3：群名输入（可空，空维持 server 默认命名） -->
+          <n-flex align="center" class="px-16px pt-4px" :size="8">
+            <span class="text-(13px [--text-color]) flex-shrink-0">{{ t('home.create_group.group_name') }}</span>
+            <n-input
+              v-model:value="groupName"
+              size="small"
+              :maxlength="30"
+              :disabled="creating"
+              :placeholder="t('home.create_group.group_name_placeholder')"
+              data-testid="create-group-name" />
+          </n-flex>
+
           <n-transfer
             :key="`${isFromChatbox}-${preSelectedFriendId}`"
             source-filterable
@@ -127,7 +139,12 @@
             :render-target-label="renderLabel" />
 
           <n-flex align="center" justify="center" class="p-16px">
-            <n-button :disabled="selectedValue.length < 2" color="#13987f" @click="handleCreateGroup">
+            <n-button
+              :disabled="selectedValue.length < 2 || creating"
+              :loading="creating"
+              color="#13987f"
+              data-testid="create-group-submit"
+              @click="handleCreateGroup">
               {{ t('home.create_group.action') }}
             </n-button>
           </n-flex>
@@ -150,13 +167,10 @@ import { MittEnum } from '@/enums'
 import { useMitt } from '@/hooks/useMitt.ts'
 import { useWindow } from '@/hooks/useWindow'
 import router from '@/router'
-import { useChatStore } from '@/stores/chat.ts'
 import { useGlobalStore } from '@/stores/global.ts'
-import { useGroupStore } from '@/stores/group'
 import { useSettingStore } from '@/stores/setting.ts'
-import { useAiclawStore } from '@/stores/aiclaw'
 import AiclawBatchGroupConfigModal from '@/components/aiclaw/AiclawBatchGroupConfigModal.vue'
-import * as ImRequestUtils from '@/utils/ImRequestUtils'
+import { createGroupFlow } from '@/utils/createGroupFlow'
 import { isMac, isWeb, isWindows } from '@/utils/PlatformConstants'
 import { options, renderLabel, renderSourceList, renderTargetList } from './model.tsx'
 import { useI18n } from 'vue-i18n'
@@ -164,14 +178,15 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 const { createWebviewWindow } = useWindow()
 
-const chatStore = useChatStore()
 const settingStore = useSettingStore()
 const globalStore = useGlobalStore()
-const groupStore = useGroupStore()
 const { page } = storeToRefs(settingStore)
 const appWindow = isWeb() ? null : WebviewWindow.getCurrent()
 const selectedValue = ref<string[]>([])
 const createGroupModal = ref(false)
+/** REQ-016 #195 F3：群名（可空）+ 创建中状态（防重/loading） */
+const groupName = ref('')
+const creating = ref(false)
 const batchConfigModalVisible = ref(false)
 const batchConfigRoomId = ref('')
 const batchConfigAccount = ref('')
@@ -342,66 +357,39 @@ watch(selectedValue, (newValue) => {
 
 const resetCreateGroupState = () => {
   selectedValue.value = []
+  groupName.value = ''
   preSelectedFriendId.value = ''
   isFromChatbox.value = false
   createGroupModal.value = false
 }
 
 const handleCreateGroup = async () => {
+  // REQ-016 #195 F3：防重 + 提速——点击即置位，finally 复位；流程体在共享 helper
+  if (creating.value) return
   if (selectedValue.value.length < 2) return
+  creating.value = true
   try {
-    const result: any = await ImRequestUtils.createGroup({ uidList: selectedValue.value })
-
-    // 创建成功后刷新会话列表以显示新群聊
-    await chatStore.getSessionList(true)
-
-    const resultRoomId = result?.roomId != null ? String(result.roomId) : undefined
-    const resultId = result?.id != null ? String(result.id) : undefined
-
-    const matchedSession = chatStore.sessionList.find((session) => {
-      const sessionRoomId = String(session.roomId)
-      const sessionDetailId = session.detailId != null ? String(session.detailId) : undefined
-      return (
-        (resultRoomId !== undefined && sessionRoomId === resultRoomId) ||
-        (resultId !== undefined && (sessionDetailId === resultId || sessionRoomId === resultId))
-      )
-    })
-
-    // #87：无论会话列表是否已刷新到新群，都使用创建返回的 roomId 作为兜底
-    const roomId = matchedSession?.roomId ?? resultRoomId ?? resultId
-    if (roomId) {
-      if (matchedSession?.roomId) {
-        globalStore.updateCurrentSessionRoomId(matchedSession.roomId)
-      }
-      await Promise.all([groupStore.addGroupDetail(roomId), groupStore.getGroupUserList(roomId, true)])
-
-      // #87：如果新建群中包含当前用户拥有的 aiclaw，弹出批量入群配置
-      const aiclawStore = useAiclawStore()
-      await aiclawStore.ensureLoaded()
-      const detail = groupStore.getGroupDetail(roomId)
-      const account = detail?.account
-      const aiclawItems = selectedValue.value
-        .filter((uid) => aiclawStore.isMyAiclaw(uid))
-        .map((uid) => {
-          const user = groupStore.userList.find((m) => String(m.uid) === uid)
-          return {
-            uid,
-            name: user?.name,
-            adapterType: aiclawStore.getAdapterType(uid)
-          }
-        })
-      if (aiclawItems.length > 0) {
+    await createGroupFlow({
+      uidList: selectedValue.value,
+      groupName: groupName.value,
+      onOpenBatchConfig: (roomId, items) => {
+        // 先开配置弹窗：account 由弹窗内自补（群详情异步加载）
         batchConfigRoomId.value = roomId
-        batchConfigAccount.value = account || ''
-        batchConfigAiclawItems.value = aiclawItems
+        batchConfigAccount.value = ''
+        batchConfigAiclawItems.value = items
         batchConfigModalVisible.value = true
+      },
+      onSessionReady: (roomId) => {
+        globalStore.updateCurrentSessionRoomId(roomId)
       }
-    }
-
+    })
     resetCreateGroupState()
     window.$message.success(t('home.create_group.success'))
   } catch (error) {
+    console.error('[CreateGroup] 创建群聊失败:', error)
     window.$message.error(t('home.create_group.fail'))
+  } finally {
+    creating.value = false
   }
 }
 

@@ -493,7 +493,7 @@
         <span class="text-14px">{{ tips }}</span>
 
         <n-flex justify="end">
-          <n-button @click="handleConfirm" class="w-78px" color="#13987f">
+          <n-button @click="handleConfirm" class="w-78px" color="#13987f" :loading="dissolving" :disabled="dissolving">
             {{ t('home.chat_header.modal.confirm') }}
           </n-button>
           <n-button @click="handleCancel" class="w-78px" secondary>{{ t('home.chat_header.modal.cancel') }}</n-button>
@@ -670,6 +670,7 @@ import { useGlobalStore } from '@/stores/global'
 import { useGroupStore } from '@/stores/group.ts'
 import { useSettingStore } from '@/stores/setting'
 import { useUserStore } from '@/stores/user.ts'
+import { dissolveGroupOptimistic } from '@/utils/dissolveGroup'
 import { useAiclawStore } from '@/stores/aiclaw'
 import { AvatarUtils } from '@/utils/AvatarUtils'
 import { useSilentAiclaw } from '@/hooks/useSilentAiclaw'
@@ -1555,6 +1556,9 @@ const handleDelete = (label: RoomActEnum) => {
   }
 }
 
+/** REQ-016 #195 F4：解散群防重标志（确认按钮 loading/disabled + 分支入口守卫） */
+const dissolving = ref(false)
+
 const handleConfirm = async () => {
   const currentOption = optionsType.value
   const targetRoomId = currentSessionRoomId.value
@@ -1579,15 +1583,20 @@ const handleConfirm = async () => {
       return
     }
 
+    // REQ-016 #195 F4：防重 + 乐观移除——确认即关弹窗移除会话，不等 server 全链路；失败回滚+提示
+    if (dissolving.value) return
+    dissolving.value = true
+    modalShow.value = false
+    sidebarShow.value = false
     try {
-      await groupStore.exitGroup(targetRoomId)
-      window.$message.success(t('home.chat_header.toast.dissolve_success'))
-      // 删除当前的会话
-      useMitt.emit(MittEnum.DELETE_SESSION, targetRoomId)
-      modalShow.value = false
-      sidebarShow.value = false
-    } catch (error) {
-      console.error('解散群聊失败:', error)
+      const ok = await dissolveGroupOptimistic(targetRoomId)
+      if (ok) {
+        window.$message.success(t('home.chat_header.toast.dissolve_success'))
+      } else {
+        window.$message.error(t('home.chat_header.toast.dissolve_failed'))
+      }
+    } finally {
+      dissolving.value = false
     }
   } else if (currentOption === RoomActEnum.EXIT_GROUP) {
     if (targetRoomId === '1') {

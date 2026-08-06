@@ -54,6 +54,11 @@ export const useGroupStore = defineStore(
       if (roomId) dissolvedRoomIds.add(roomId)
     }
 
+    /** 房间是否已确认解散/失效（REQ-016 #195：解散回滚短路等场景读取） */
+    const isRoomDissolved = (roomId: string) => {
+      return dissolvedRoomIds.has(roomId)
+    }
+
     const getRoleSortWeight = (roleId?: number) => {
       switch (roleId) {
         case RoleEnum.LORD:
@@ -926,7 +931,8 @@ export const useGroupStore = defineStore(
       cleanupSession,
       suppressMemberFetchError,
       releaseMemberFetchError,
-      markRoomDissolved
+      markRoomDissolved,
+      isRoomDissolved
     }
   },
   {
