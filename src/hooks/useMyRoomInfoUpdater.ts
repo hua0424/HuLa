@@ -44,7 +44,9 @@ export const useMyRoomInfoUpdater = () => {
         updated = await cacheStore.updateMyRoomInfo(payload)
       }
     }
-    await updateMyRoomInfo(payload)
+    // REQ-017 #200：showError:false 静默底层 network_error——4 个调用方
+    // （Details 备注/本群昵称、ChatHeader 群资料、ChatSetting 设置）均有领域失败 toast
+    await updateMyRoomInfo(payload, { showError: false })
 
     groupStore.myNameInCurrentGroup = myName
     if (groupStore.countInfo) {

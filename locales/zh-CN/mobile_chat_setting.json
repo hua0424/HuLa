@@ -45,6 +45,7 @@
   "disband_failed": "解散群聊失败，请重试",
   "leave_channel_failed": "无法退出频道",
   "group_left": "已退出群聊",
+  "leave_failed": "退出群聊失败，请重试",
   "get_friend_info_failed": "无法获取好友信息",
   "delete_friend_success": "删除好友成功",
   "session_not_ready": "当前会话信息未就绪",

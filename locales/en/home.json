@@ -250,6 +250,7 @@
       "dissolve_failed": "Failed to disband the group, please try again",
       "exit_not_allowed": "Cannot leave channel",
       "exit_success": "Left group",
+      "exit_failed": "Failed to leave the group, please try again",
       "group_name_update_failed": "Failed to rename group"
     }
   },

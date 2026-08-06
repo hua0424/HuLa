@@ -1378,7 +1378,8 @@ const handleMedia = () => {
 const handleTop = (value: boolean) => {
   const session = activeItem.value
   if (!session) return
-  setSessionTop({ roomId: currentSessionRoomId.value, top: value })
+  // REQ-017 #200：showError:false 静默底层——catch 有领域 pin_failed toast
+  setSessionTop({ roomId: currentSessionRoomId.value, top: value }, { showError: false })
     .then(() => {
       // 更新本地会话状态
       chatStore.updateSession(currentSessionRoomId.value, { top: value })
@@ -1398,10 +1399,14 @@ const handleNotification = (value: boolean) => {
   if (session.shield) {
     handleShield(false)
   }
-  notification({
-    roomId: currentSessionRoomId.value,
-    type: newType
-  })
+  notification(
+    {
+      roomId: currentSessionRoomId.value,
+      type: newType
+    },
+    // REQ-017 #200：showError:false 静默底层——catch 有领域 action_failed toast
+    { showError: false }
+  )
     .then(() => {
       // 更新本地会话状态
       chatStore.updateSession(currentSessionRoomId.value, {
@@ -1429,10 +1434,14 @@ const handleNotification = (value: boolean) => {
 const handleShield = (value: boolean) => {
   const session = activeItem.value
   if (!session) return
-  shield({
-    roomId: currentSessionRoomId.value,
-    state: value
-  })
+  shield(
+    {
+      roomId: currentSessionRoomId.value,
+      state: value
+    },
+    // REQ-017 #200：showError:false 静默底层——catch 有领域 action_failed toast
+    { showError: false }
+  )
     .then(() => {
       // 更新本地会话状态
       chatStore.updateSession(currentSessionRoomId.value, {
@@ -1613,7 +1622,9 @@ const handleConfirm = async () => {
       modalShow.value = false
       sidebarShow.value = false
     } catch (error) {
+      // REQ-017 #200：底层已静默（store exitGroup showError:false），此处补领域失败 toast
       console.error('退出群聊失败:', error)
+      window.$message.error(t('home.chat_header.toast.exit_failed'))
     }
   } else if (currentOption === RoomActEnum.DELETE_RECORD) {
     await deleteRoomMessages(targetRoomId)
@@ -1670,11 +1681,14 @@ const saveGroupName = async () => {
   if (!trimmedName) return
 
   try {
-    // 调用更新群信息的API
-    await updateRoomInfo({
-      id: currentSessionRoomId.value,
-      name: trimmedName
-    })
+    // 调用更新群信息的API（REQ-017 #200：showError:false 静默底层——catch 有领域 group_name_update_failed toast）
+    await updateRoomInfo(
+      {
+        id: currentSessionRoomId.value,
+        name: trimmedName
+      },
+      { showError: false }
+    )
     // 清空待保存的群信息
     pendingGroupInfo.value = null
   } catch (error) {

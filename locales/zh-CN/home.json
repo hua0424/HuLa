@@ -246,6 +246,7 @@
       "dissolve_failed": "解散群聊失败，请重试",
       "exit_not_allowed": "无法退出频道",
       "exit_success": "已退出群聊",
+      "exit_failed": "退出群聊失败，请重试",
       "group_name_update_failed": "群名称更新失败"
     }
   },

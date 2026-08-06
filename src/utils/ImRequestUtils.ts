@@ -418,11 +418,17 @@ export async function inviteGroupMember(body: { roomId: string; uidList: string[
   })
 }
 
-export async function removeGroupMember(body: { roomId: string; uidList: string[] }) {
-  return await imRequest({
-    url: ImUrlEnum.REMOVE_GROUP_MEMBER,
-    body
-  })
+export async function removeGroupMember(
+  body: { roomId: string; uidList: string[] },
+  options?: { showError?: boolean }
+) {
+  return await imRequest(
+    {
+      url: ImUrlEnum.REMOVE_GROUP_MEMBER,
+      body
+    },
+    options
+  )
 }
 
 export async function getSessionDetail(params: { id: string }) {
@@ -439,11 +445,14 @@ export async function getSessionDetailWithFriends(params: { id: string; roomType
   })
 }
 
-export async function setSessionTop(body: { roomId: string; top: boolean }) {
-  return await imRequest({
-    url: ImUrlEnum.SET_SESSION_TOP,
-    body
-  })
+export async function setSessionTop(body: { roomId: string; top: boolean }, options?: { showError?: boolean }) {
+  return await imRequest(
+    {
+      url: ImUrlEnum.SET_SESSION_TOP,
+      body
+    },
+    options
+  )
 }
 
 export async function deleteSession(body: { roomId: string }) {
@@ -453,39 +462,57 @@ export async function deleteSession(body: { roomId: string }) {
   })
 }
 
-export async function notification(body: { roomId: string; type: NotificationTypeEnum }) {
-  return await imRequest({
-    url: ImUrlEnum.NOTIFICATION,
-    body
-  })
+export async function notification(
+  body: { roomId: string; type: NotificationTypeEnum },
+  options?: { showError?: boolean }
+) {
+  return await imRequest(
+    {
+      url: ImUrlEnum.NOTIFICATION,
+      body
+    },
+    options
+  )
 }
 
-export async function shield(body: { roomId: string; state: boolean }) {
-  return await imRequest({
-    url: ImUrlEnum.SHIELD,
-    body
-  })
+export async function shield(body: { roomId: string; state: boolean }, options?: { showError?: boolean }) {
+  return await imRequest(
+    {
+      url: ImUrlEnum.SHIELD,
+      body
+    },
+    options
+  )
 }
 
-export async function exitGroup(body: { roomId: string }) {
-  return await imRequest({
-    url: ImUrlEnum.EXIT_GROUP,
-    body
-  })
+export async function exitGroup(body: { roomId: string }, options?: { showError?: boolean }) {
+  return await imRequest(
+    {
+      url: ImUrlEnum.EXIT_GROUP,
+      body
+    },
+    options
+  )
 }
 
-export async function addAdmin(body: { roomId: string; uidList: string[] }) {
-  return await imRequest({
-    url: ImUrlEnum.ADD_ADMIN,
-    body
-  })
+export async function addAdmin(body: { roomId: string; uidList: string[] }, options?: { showError?: boolean }) {
+  return await imRequest(
+    {
+      url: ImUrlEnum.ADD_ADMIN,
+      body
+    },
+    options
+  )
 }
 
-export async function revokeAdmin(body: { roomId: string; uidList: string[] }) {
-  return await imRequest({
-    url: ImUrlEnum.REVOKE_ADMIN,
-    body
-  })
+export async function revokeAdmin(body: { roomId: string; uidList: string[] }, options?: { showError?: boolean }) {
+  return await imRequest(
+    {
+      url: ImUrlEnum.REVOKE_ADMIN,
+      body
+    },
+    options
+  )
 }
 
 export async function groupList() {
@@ -494,7 +521,10 @@ export async function groupList() {
   })
 }
 
-export async function updateRoomInfo(body: { id: string; name?: string; avatar?: string; allowScanEnter?: boolean }) {
+export async function updateRoomInfo(
+  body: { id: string; name?: string; avatar?: string; allowScanEnter?: boolean },
+  options?: { showError?: boolean }
+) {
   const chatStore = useChatStore()
   const groupStore = useGroupStore()
 
@@ -502,10 +532,13 @@ export async function updateRoomInfo(body: { id: string; name?: string; avatar?:
   body.avatar = body.avatar ?? groupStore.countInfo!.avatar
   body.allowScanEnter = body.allowScanEnter ?? groupStore.countInfo!.allowScanEnter
 
-  await imRequest({
-    url: ImUrlEnum.UPDATE_ROOM_INFO,
-    body
-  })
+  await imRequest(
+    {
+      url: ImUrlEnum.UPDATE_ROOM_INFO,
+      body
+    },
+    options
+  )
 
   chatStore.updateSession(body.id, body)
   groupStore.updateGroupDetail(body.id, body)
@@ -513,11 +546,17 @@ export async function updateRoomInfo(body: { id: string; name?: string; avatar?:
   window.$message.success('更新成功')
 }
 
-export async function updateMyRoomInfo(body: { id: string; myName: string; remark: string }) {
-  return await imRequest({
-    url: ImUrlEnum.UPDATE_MY_ROOM_INFO,
-    body
-  })
+export async function updateMyRoomInfo(
+  body: { id: string; myName: string; remark: string },
+  options?: { showError?: boolean }
+) {
+  return await imRequest(
+    {
+      url: ImUrlEnum.UPDATE_MY_ROOM_INFO,
+      body
+    },
+    options
+  )
 }
 
 export async function searchGroup(params: { account: string }) {
