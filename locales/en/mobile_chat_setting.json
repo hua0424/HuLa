@@ -45,6 +45,7 @@
   "disband_failed": "Failed to disband the group, please try again",
   "leave_channel_failed": "Failed to leave the channel",
   "group_left": "You have left the group",
+  "leave_failed": "Failed to leave the group, please try again",
   "get_friend_info_failed": "Failed to get friend information",
   "delete_friend_success": "Friend deleted successfully",
   "session_not_ready": "The current conversation information is not ready",

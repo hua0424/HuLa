@@ -730,7 +730,8 @@ export const useGroupStore = defineStore(
      * @param uidList 要添加为管理员的用户ID列表
      */
     const addAdmin = async (uidList: string[]) => {
-      await ImRequestUtils.addAdmin({ roomId: globalStore.currentSessionRoomId, uidList })
+      // REQ-017 #200：showError:false 静默底层 network_error——调用方（右键设管理）有领域失败 toast
+      await ImRequestUtils.addAdmin({ roomId: globalStore.currentSessionRoomId, uidList }, { showError: false })
       // 更新本地群成员列表中的角色信息
       const targetRoomId = globalStore.currentSessionRoomId
       if (!targetRoomId) return
@@ -750,7 +751,8 @@ export const useGroupStore = defineStore(
      * @param uidList 要撤销的管理员ID列表
      */
     const revokeAdmin = async (uidList: string[]) => {
-      await ImRequestUtils.revokeAdmin({ roomId: globalStore.currentSessionRoomId, uidList })
+      // REQ-017 #200：showError:false 静默底层 network_error——调用方（右键撤管理）有领域失败 toast
+      await ImRequestUtils.revokeAdmin({ roomId: globalStore.currentSessionRoomId, uidList }, { showError: false })
       // 更新本地群成员列表中的角色信息
       const targetRoomId = globalStore.currentSessionRoomId
       if (!targetRoomId) return
@@ -776,8 +778,8 @@ export const useGroupStore = defineStore(
         throw new Error('无法确定目标房间ID')
       }
 
-      // 调用踢人接口
-      await ImRequestUtils.removeGroupMember({ roomId: targetRoomId, uidList })
+      // 调用踢人接口（REQ-017 #200：showError:false 静默底层——踢人弹窗有领域失败 toast）
+      await ImRequestUtils.removeGroupMember({ roomId: targetRoomId, uidList }, { showError: false })
 
       // 更新本地群成员列表，移除被踢出的成员
       const currentUserList = userListMap[targetRoomId] || []
@@ -792,7 +794,9 @@ export const useGroupStore = defineStore(
     const exitGroup = async (roomId: string) => {
       if (!roomId) return
 
-      await ImRequestUtils.exitGroup({ roomId })
+      // REQ-017 #200：showError:false 静默底层 network_error——解散（dissolve_failed）/
+      // 退出（exit_failed / leave_failed）均有领域 toast，底层直出 = 双 toast（本 issue 报障场景）
+      await ImRequestUtils.exitGroup({ roomId }, { showError: false })
 
       // 更新群成员缓存，移除自己
       const currentUserList = userListMap[roomId] || []

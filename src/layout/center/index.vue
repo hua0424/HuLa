@@ -115,7 +115,7 @@
             <n-input
               v-model:value="groupName"
               size="small"
-              :maxlength="30"
+              :maxlength="32"
               :disabled="creating"
               :placeholder="t('home.create_group.group_name_placeholder')"
               data-testid="create-group-name" />

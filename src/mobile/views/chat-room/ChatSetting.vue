@@ -447,11 +447,18 @@ async function handleExit() {
               return
             }
 
-            groupStore.exitGroup(currentSessionRoomId.value).then(() => {
-              window.$message.success(t('mobile_chat_setting.group_left'))
-              // 删除当前的会话
-              useMitt.emit(MittEnum.DELETE_SESSION, currentSessionRoomId.value)
-            })
+            groupStore
+              .exitGroup(currentSessionRoomId.value)
+              .then(() => {
+                window.$message.success(t('mobile_chat_setting.group_left'))
+                // 删除当前的会话
+                useMitt.emit(MittEnum.DELETE_SESSION, currentSessionRoomId.value)
+              })
+              .catch((error: unknown) => {
+                // REQ-017 #200：底层已静默（store exitGroup showError:false），此处补领域失败 toast
+                console.error('退出群聊失败:', error)
+                window.$message.error(t('mobile_chat_setting.leave_failed'))
+              })
           }
         } else {
           const detailId = session.detailId

@@ -88,7 +88,7 @@
       <n-input
         v-model:value="groupName"
         size="small"
-        :maxlength="30"
+        :maxlength="32"
         :disabled="creating"
         placeholder="群名称（选填，不填按成员自动生成）"
         data-testid="create-group-name" />
