@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * REQ-016 #195 F4：解散群防重 + 乐观移除（PRD #190 裁决 3）。
- * 确认即 emit DELETE_SESSION（不等 HTTP）；失败回滚（取消隐藏 + 恢复会话）并返回 false。
+ * 确认即 emit DELETE_SESSION（不等 HTTP）；失败纯本地回滚（恢复会话，不发起任何 server 调用）并返回 false。
  */
 
 const emitMock = vi.hoisted(() => vi.fn())
@@ -57,22 +57,34 @@ describe('dissolveGroupOptimistic（REQ-016 #195 F4）', () => {
     expect(chatStoreMocks.addSession).not.toHaveBeenCalled()
   })
 
-  it('失败回滚：取消隐藏 + 恢复会话，返回 false', async () => {
+  // PR#55 裁决（P1）：回滚纯本地化——exit 失败说明请求未成功，server 从未 hide 过该会话，
+  // 无需 unhide；断网场景 unhide 本身也必然失败。只本地 addSession 拉回会话。
+  it('失败回滚：纯本地恢复会话，不发起任何 server 调用，返回 false', async () => {
     groupStoreMocks.exitGroup.mockRejectedValue(new Error('server error'))
 
     await expect(dissolveGroupOptimistic('room-1')).resolves.toBe(false)
 
     expect(emitMock).toHaveBeenCalledWith(MittEnum.DELETE_SESSION, 'room-1')
-    expect(invokeMock).toHaveBeenCalledWith('hide_contact_command', { data: { roomId: 'room-1', hide: false } })
+    expect(invokeMock).not.toHaveBeenCalled()
     expect(chatStoreMocks.addSession).toHaveBeenCalledWith('room-1')
   })
 
   it('回滚动作自身失败也不再抛出', async () => {
     groupStoreMocks.exitGroup.mockRejectedValue(new Error('server error'))
-    invokeMock.mockRejectedValue(new Error('invoke fail'))
     chatStoreMocks.addSession.mockRejectedValue(new Error('session gone'))
 
     await expect(dissolveGroupOptimistic('room-1')).resolves.toBe(false)
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
+
+  // PR#55 裁决（P1）：断网路径——exit 请求根本没到达 server，回滚同样不得发起任何 server 调用
+  it('断网失败：回滚不发起任何 server 调用（含 unhide）', async () => {
+    groupStoreMocks.exitGroup.mockRejectedValue(new Error('network offline'))
+
+    await expect(dissolveGroupOptimistic('room-1')).resolves.toBe(false)
+
+    expect(invokeMock).not.toHaveBeenCalled()
+    expect(chatStoreMocks.addSession).toHaveBeenCalledWith('room-1')
   })
 
   // PR#55 裁决（P2 竞态）：server 已处理解散但 HTTP 响应丢失时，WS 已 markRoomDissolved，
@@ -84,6 +96,6 @@ describe('dissolveGroupOptimistic（REQ-016 #195 F4）', () => {
     await expect(dissolveGroupOptimistic('room-1')).resolves.toBe(true)
 
     expect(chatStoreMocks.addSession).not.toHaveBeenCalled()
-    expect(invokeMock).not.toHaveBeenCalledWith('hide_contact_command', { data: { roomId: 'room-1', hide: false } })
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 })
