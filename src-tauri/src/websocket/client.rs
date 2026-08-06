@@ -335,8 +335,9 @@ impl WebSocketClient {
                 Ok(_) => {
                     info!("WebSocket connection established");
                     self.reconnect_attempts.store(0, Ordering::SeqCst);
-                    // 连接成功说明当前 token 有效，复位自愈计数
-                    self.auth_refresh_attempts.store(0, Ordering::SeqCst);
+                    // REQ-017 #198：注意这里【不】复位 auth_refresh_attempts——
+                    // 握手 101 成功不代表 token 有效（server 是接受后立刻 4001 才判定失效），
+                    // 自愈计数只在「收到服务端任意有效帧」（= token 真实可用）时复位，见消息接收任务。
 
                     // 监控连接状态，直到断开
                     while self.is_ws_connected.load(Ordering::SeqCst)
@@ -597,11 +598,15 @@ impl WebSocketClient {
             let consecutive_failures = self.consecutive_failures.clone();
             let is_ws_connected = self.is_ws_connected.clone();
             let auth_failed = self.auth_failed.clone();
+            let auth_refresh_attempts = self.auth_refresh_attempts.clone();
 
             tokio::spawn(async move {
                 while let Some(msg) = ws_receiver.next().await {
                     match msg {
                         Ok(Message::Text(text)) => {
+                            // REQ-017 #198：收到服务端有效帧 = 当前 token 真实可用，
+                            // 复位 refresh 自愈计数（唯一复位点，防 accept-then-4001 自愈死循环）
+                            auth_refresh_attempts.store(0, Ordering::SeqCst);
                             Self::handle_message_static(
                                 text.to_string(),
                                 &app_handle,
@@ -611,6 +616,7 @@ impl WebSocketClient {
                             .await;
                         }
                         Ok(Message::Binary(data)) => {
+                            auth_refresh_attempts.store(0, Ordering::SeqCst);
                             if let Ok(text) = String::from_utf8(data.to_vec()) {
                                 Self::handle_message_static(
                                     text,
