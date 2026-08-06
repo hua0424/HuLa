@@ -1428,6 +1428,8 @@ export const useChatStore = defineStore(
     const removeDissolvedSession = (roomId: string) => {
       removeSession(roomId)
       groupStore.removeGroupDetail(roomId)
+      // REQ-017 #208：解散/失效后整键清除成员缓存（治本，防 getRoomIdsByUid 陈旧遍历）
+      groupStore.removeAllUsers(roomId)
       // 标记房间已失效，后续任何迟到/重复的成员拉取直接短路，不再弹网络错误（#179 TC-03）
       groupStore.markRoomDissolved(roomId)
     }

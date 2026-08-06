@@ -250,7 +250,7 @@
                         @keydown.enter.stop="handleGroupNameChange"
                         size="tiny"
                         style="width: 100px; height: 22px"
-                        maxlength="12"
+                        maxlength="32"
                         spellCheck="false"
                         autoComplete="off"
                         autoCorrect="off"
@@ -1478,12 +1478,12 @@ const handleGroupNameChange = () => {
 
   // 检查名称是否有变化
   if (trimmedName !== session.name) {
-    // 检查名称是否为空或超过12个字符
+    // 检查名称是否为空或超过32个字符（server #202 统一上限 32）
     if (trimmedName === '') {
       window.$message.warning(t('home.chat_header.toast.group_name_empty'))
       return
     }
-    if (trimmedName.length > 12) {
+    if (trimmedName.length > 32) {
       window.$message.warning(t('home.chat_header.toast.group_name_too_long'))
       return
     }
