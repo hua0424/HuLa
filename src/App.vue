@@ -32,6 +32,7 @@ import LockScreen from '@/views/LockScreen.vue'
 import MemoryMonitor from '@/components/common/MemoryMonitor.vue'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 import { handleUserInfoChange, type UserInfoChangePayload } from '@/utils/userInfoChange'
+import { handleSessionExpired } from '@/utils/sessionExpired'
 import {
   type LoginSuccessResType,
   type OnStatusChangeType,
@@ -292,6 +293,11 @@ useMitt.on(WsResponseMessageType.ROOM_INFO_CHANGE, async (data: { roomId: string
 // REQ-016 #194：资料变更（改名/简介/头像/好友备注）→ 失效缓存重拉并 patch 各视图
 useMitt.on(WsResponseMessageType.USER_INFO_CHANGE, async (data: UserInfoChangePayload) => {
   await handleUserInfoChange(data)
+})
+
+// REQ-017 #198：WS 鉴权失败（4001 + refresh 自愈失败 / web 直连 4001）→ 跳登录重鉴（绝不假在线）
+useMitt.on(WsResponseMessageType.WS_AUTH_FAILED, async () => {
+  await handleSessionExpired()
 })
 
 useMitt.on(WsResponseMessageType.TOKEN_EXPIRED, async (wsTokenExpire: WsTokenExpire) => {

@@ -99,7 +99,12 @@ export enum WsResponseMessageType {
   /** AI 助理群聊配置变更通知 */
   AICLAW_GROUP_CONFIG_UPDATE = 'groupConfigChange',
   /** REQ-016 #194：资料变更通知（改名/简介/头像 profile；好友备注 remark） */
-  USER_INFO_CHANGE = 'userInfoChange'
+  USER_INFO_CHANGE = 'userInfoChange',
+  /**
+   * REQ-017 #198：WS 鉴权失败（server 4001 关闭码 + token 刷新自愈失败 / web 直连 4001）。
+   * 客户端应停止重连并跳登录重鉴。
+   */
+  WS_AUTH_FAILED = 'wsAuthFailed'
 }
 
 export enum NoticeTypeEnum {
@@ -170,6 +175,13 @@ export type WsTokenExpire = {
   uid: string
   ip: string
   client: string
+}
+
+/** REQ-017 #198：WS 鉴权失败载荷（Rust ws-auth-failed 事件 / web 4001 关闭） */
+export type WsAuthFailedPayload = {
+  /** 失败原因（如 refresh_token_failed / token_invalid） */
+  reason?: string
+  timestamp?: number
 }
 
 /** 用户状态 */
