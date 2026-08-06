@@ -31,10 +31,30 @@ fn is_auth_close_code(code: u16) -> bool {
     code == WS_CLOSE_CODE_AUTH_FAILED
 }
 
-/// 判断握手失败错误是否为鉴权拒绝（HTTP 401/403）。
-/// 对齐 plugins #184 的 auth-fatal 语义；其余非 101（如网关重启预热期 200）保持可重试。
+/// 判断握手失败错误是否为鉴权拒绝。
+/// 三条精确信号（REQ-017 #198 契约精化 B，manager 裁决）：
+/// 1. HTTP 401/403（对齐 plugins #184 auth-fatal 语义）；
+/// 2. HTTP 200 + body `{"code":406,...}`——网关 TokenContextFilter 对过期/非法 token
+///    的 WS 握手以 R.fail(JWT_TOKEN_EXCEED=406) 应答（HTTP 状态仍为 200）。
+/// 其余非 101（502/504 代理错误、网关预热期 200 无 406 body 等）一律保持可重试，绝不误判。
 fn is_auth_http_error(err: &tokio_tungstenite::tungstenite::Error) -> bool {
-    matches!(err, tokio_tungstenite::tungstenite::Error::Http(resp) if matches!(resp.status().as_u16(), 401 | 403))
+    let resp = match err {
+        tokio_tungstenite::tungstenite::Error::Http(resp) => resp,
+        _ => return false,
+    };
+    let status = resp.status().as_u16();
+    if matches!(status, 401 | 403) {
+        return true;
+    }
+    // 仅 HTTP 200 才看 body code（406 body 只在网关 200 应答里出现）
+    if status == 200 {
+        if let Some(bytes) = resp.body() {
+            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(bytes) {
+                return json.get("code").and_then(|c| c.as_i64()) == Some(406);
+            }
+        }
+    }
+    false
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1390,23 +1410,43 @@ mod tests {
         assert!(!is_auth_close_code(4002));
     }
 
-    /// REQ-017 #198：握手鉴权拒绝仅认 HTTP 401/403（对齐 plugins #184 auth-fatal 语义）。
-    /// 其余非 101（网关重启预热期 200/404/500 等）保持可重试，不得误判为鉴权失败。
+    /// REQ-017 #198（契约精化 B）：握手鉴权拒绝的三条精确信号——
+    /// HTTP 401/403，或 HTTP 200 + body code==406（网关 TokenContextFilter JWT_TOKEN_EXCEED 应答）。
+    /// 其余非 101（502/504、预热期 200 无 406 body、非 JSON body）保持可重试不误判。
     #[test]
-    fn auth_http_error_only_401_403() {
+    fn auth_http_error_precise_signals() {
         use tokio_tungstenite::tungstenite::Error;
 
-        let make = |status: u16| {
-            let resp: http::Response<Option<Vec<u8>>> =
-                http::Response::builder().status(status).body(None).unwrap();
+        let make = |status: u16, body: Option<&str>| {
+            let resp: http::Response<Option<Vec<u8>>> = http::Response::builder()
+                .status(status)
+                .body(body.map(|s| s.as_bytes().to_vec()))
+                .unwrap();
             Error::Http(Box::new(resp))
         };
 
-        assert!(is_auth_http_error(&make(401)));
-        assert!(is_auth_http_error(&make(403)));
-        assert!(!is_auth_http_error(&make(200)));
-        assert!(!is_auth_http_error(&make(404)));
-        assert!(!is_auth_http_error(&make(500)));
+        // 判鉴权失败：401 / 403 / 200+code406
+        assert!(is_auth_http_error(&make(401, None)));
+        assert!(is_auth_http_error(&make(403, None)));
+        assert!(is_auth_http_error(&make(
+            200,
+            Some(r#"{"code":406,"msg":"token已过期","success":false}"#)
+        )));
+
+        // 不误判：502/504 代理错误、预热期 200 无 body、200 非 406 code、200 非 JSON body、
+        // 406 状态但无 body code（判别条件精确到 401/403/406-body，不是「凡非 101 皆鉴权失败」）
+        assert!(!is_auth_http_error(&make(502, None)));
+        assert!(!is_auth_http_error(&make(
+            504,
+            Some("<html>Bad Gateway</html>")
+        )));
+        assert!(!is_auth_http_error(&make(200, None)));
+        assert!(!is_auth_http_error(&make(
+            200,
+            Some(r#"{"code":200,"success":true}"#)
+        )));
+        assert!(!is_auth_http_error(&make(200, Some("not json"))));
+        assert!(!is_auth_http_error(&make(406, None)));
         assert!(!is_auth_http_error(&Error::ConnectionClosed));
     }
 }
