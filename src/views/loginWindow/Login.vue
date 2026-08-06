@@ -58,7 +58,9 @@
               class="p-8px cursor-pointer hover:bg-#90909020 dark:hover:bg-#90909030 hover:rounded-6px">
               <div class="flex-between-center">
                 <n-avatar :src="AvatarUtils.getAvatarUrl(item.avatar)" color="#fff" class="size-28px rounded-50%" />
-                <p class="text-14px color-#505050 dark:color-#fefefe">{{ item.name ? `${item.name}(${item.account})` : item.account }}</p>
+                <p class="text-14px color-#505050 dark:color-#fefefe">
+                  {{ item.name ? `${item.name}(${item.account})` : item.account }}
+                </p>
                 <svg @click.stop="delAccount(item)" class="w-12px h-12px dark:color-#fefefe">
                   <use href="#close"></use>
                 </svg>
@@ -530,14 +532,40 @@ const openRemoteLoginModal = async (ip?: string) => {
   )
 }
 
+/** REQ-017 #198：WS 鉴权失败跳登录后，弹「登录状态已失效」提示（复用下线通知弹窗，sessionExpired 文案） */
+const openSessionExpiredModal = async () => {
+  if (!isDesktop()) {
+    return
+  }
+  await createModalWindow(
+    '登录失效提醒',
+    'modal-remoteLogin',
+    350,
+    310,
+    'login',
+    {
+      kind: 'sessionExpired'
+    },
+    {
+      minWidth: 350,
+      minHeight: 310
+    }
+  )
+}
+
 const handlePendingRemoteLoginPayload = async () => {
   if (!isDesktop()) {
     return
   }
   try {
-    const payload = await getWindowPayload<{ remoteLogin?: { ip?: string } }>('login')
+    const payload = await getWindowPayload<{ remoteLogin?: { ip?: string }; sessionExpired?: { timestamp?: number } }>(
+      'login'
+    )
     if (payload?.remoteLogin) {
       openRemoteLoginModal(payload.remoteLogin.ip)
+    }
+    if (payload?.sessionExpired) {
+      openSessionExpiredModal()
     }
   } catch (error) {
     console.error('处理异地登录载荷失败:', error)

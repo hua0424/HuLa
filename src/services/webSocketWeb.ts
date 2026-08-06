@@ -14,6 +14,8 @@ export enum WebConnectionState {
 const HEARTBEAT_INTERVAL = 9900
 const MAX_RECONNECT_DELAY = 30000
 const BASE_RECONNECT_DELAY = 1000
+/** REQ-017 #198 / server aichatoverview#206：token 失效专属 WS 关闭码（握手 uid==null → 服务端主动关闭） */
+const WS_CLOSE_CODE_AUTH_FAILED = 4001
 
 class WebSocketWebClient {
   private ws: WebSocket | null = null
@@ -78,6 +80,19 @@ class WebSocketWebClient {
       console.warn('[WebWS] 连接已关闭, code:', event.code)
       this.state = WebConnectionState.DISCONNECTED
       this.stopHeartbeat()
+      // REQ-017 #198：4001 = 服务端判定 token 失效。web 端无 refresh 流，
+      // 直接停止无限裸重连并通知跳登录重鉴（绝不伪装在线）
+      if (event.code === WS_CLOSE_CODE_AUTH_FAILED && this.shouldReconnect) {
+        console.warn('[WebWS] 收到 4001 鉴权失败关闭码，停止重连，跳登录重鉴')
+        this.shouldReconnect = false
+        if (this.reconnectTimer !== null) {
+          clearTimeout(this.reconnectTimer)
+          this.reconnectTimer = null
+        }
+        this.state = WebConnectionState.ERROR
+        useMitt.emit(WsResponseMessageType.WS_AUTH_FAILED, { reason: 'token_invalid', timestamp: Date.now() })
+        return
+      }
       if (this.shouldReconnect) {
         this.scheduleReconnect()
       }

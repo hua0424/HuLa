@@ -449,6 +449,14 @@ class RustWebSocketClient {
       })
     )
 
+    // REQ-017 #198：Rust 侧 WS 鉴权失败（4001 + refresh-token 自愈失败）→ 跳登录重鉴
+    this.listenerController.add(
+      await listen('ws-auth-failed', (event: any) => {
+        warn(`[RustWS] WS 鉴权失败，跳登录重鉴: ${JSON.stringify(event.payload)}`)
+        useMitt.emit(WsResponseMessageType.WS_AUTH_FAILED, event.payload)
+      })
+    )
+
     this.listenerController.add(
       await listen('ws-invalid-user', (event: any) => {
         info('无效用户')

@@ -20,7 +20,10 @@
                 </svg>
               </div>
             </div>
-            <div class="text-(13px centent [--text-color]) px-12px leading-loose mb-20px">
+            <div v-if="isSessionExpired" class="text-(13px centent [--text-color]) px-12px leading-loose mb-20px">
+              登录状态已失效，请重新登录
+            </div>
+            <div v-else class="text-(13px centent [--text-color]) px-12px leading-loose mb-20px">
               您的账号在其他设备
               <span class="text-#13987f">{{ ip }}</span>
               登录，如非本人登录，请尽快修改密码，建议联系管理员
@@ -44,6 +47,8 @@ import { useUserStore } from '@/stores/user.ts'
 import { isMac } from '@/utils/PlatformConstants'
 
 const ip = ref('未知IP')
+// REQ-017 #198：kind = sessionExpired 时显示「登录状态已失效」文案（WS 4001 跳登录重鉴）
+const isSessionExpired = ref(false)
 const showModal = ref(true)
 const settingStore = useSettingStore()
 const { themes } = storeToRefs(settingStore)
@@ -56,7 +61,13 @@ const userStore = useUserStore()
 
 const assignIpFromPayload = async () => {
   try {
-    const payload = await getWindowPayload<{ ip?: string }>('modal-remoteLogin')
+    const payload = await getWindowPayload<{ ip?: string; kind?: 'remoteLogin' | 'sessionExpired' }>(
+      'modal-remoteLogin'
+    )
+    if (payload?.kind === 'sessionExpired') {
+      isSessionExpired.value = true
+      return
+    }
     if (payload?.ip) {
       ip.value = payload.ip
     }

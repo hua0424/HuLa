@@ -18,6 +18,45 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tracing::{debug, error, info, warn};
 use url::Url;
 
+/// REQ-017 #198 / server aichatoverview#206：token 失效专属 WS 关闭码。
+/// server 在握手 uid==null（token 过期/被清）时以该码主动关闭连接，替代旧的 1007 通用码。
+const WS_CLOSE_CODE_AUTH_FAILED: u16 = 4001;
+
+/// REQ-017 #198：鉴权失败后 refresh-token 自愈的最大尝试次数。
+/// 防「refresh 成功但服务端仍 4001」（如刷新到的 token 同样已被清理）造成的自愈死循环。
+const MAX_AUTH_REFRESH_ATTEMPTS: u32 = 1;
+
+/// 判断 WS 关闭码是否为鉴权失败信号（4001）
+fn is_auth_close_code(code: u16) -> bool {
+    code == WS_CLOSE_CODE_AUTH_FAILED
+}
+
+/// 判断握手失败错误是否为鉴权拒绝。
+/// 三条精确信号（REQ-017 #198 契约精化 B，manager 裁决）：
+/// 1. HTTP 401/403（对齐 plugins #184 auth-fatal 语义）；
+/// 2. HTTP 200 + body `{"code":406,...}`——网关 TokenContextFilter 对过期/非法 token
+///    的 WS 握手以 R.fail(JWT_TOKEN_EXCEED=406) 应答（HTTP 状态仍为 200）。
+/// 其余非 101（502/504 代理错误、网关预热期 200 无 406 body 等）一律保持可重试，绝不误判。
+fn is_auth_http_error(err: &tokio_tungstenite::tungstenite::Error) -> bool {
+    let resp = match err {
+        tokio_tungstenite::tungstenite::Error::Http(resp) => resp,
+        _ => return false,
+    };
+    let status = resp.status().as_u16();
+    if matches!(status, 401 | 403) {
+        return true;
+    }
+    // 仅 HTTP 200 才看 body code（406 body 只在网关 200 应答里出现）
+    if status == 200 {
+        if let Some(bytes) = resp.body() {
+            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(bytes) {
+                return json.get("code").and_then(|c| c.as_i64()) == Some(406);
+            }
+        }
+    }
+    false
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AckMessage {
@@ -49,6 +88,10 @@ pub struct WebSocketClient {
     // 重连相关
     reconnect_attempts: Arc<AtomicU32>,
     is_reconnecting: Arc<AtomicBool>,
+
+    // REQ-017 #198：鉴权失败处理（4001 关闭码 / 握手 401·403 → refresh-token 自愈）
+    auth_failed: Arc<AtomicBool>,
+    auth_refresh_attempts: Arc<AtomicU32>,
 
     // 消息队列
     message_sender: Arc<RwLock<Option<mpsc::UnboundedSender<Message>>>>,
@@ -86,6 +129,8 @@ impl WebSocketClient {
             heartbeat_active: Arc::new(AtomicBool::new(false)),
             reconnect_attempts: Arc::new(AtomicU32::new(0)),
             is_reconnecting: Arc::new(AtomicBool::new(false)),
+            auth_failed: Arc::new(AtomicBool::new(false)),
+            auth_refresh_attempts: Arc::new(AtomicU32::new(0)),
             message_sender: Arc::new(RwLock::new(None)),
             pending_messages: Arc::new(RwLock::new(Vec::new())),
             should_stop: Arc::new(AtomicBool::new(false)),
@@ -119,6 +164,10 @@ impl WebSocketClient {
         // 更新配置
         *self.config.write().await = config;
         self.should_stop.store(false, Ordering::SeqCst);
+        // REQ-017 #198：新的连接意图（登录/重登/手动重连）——复位鉴权失败标记与自愈计数，
+        // 否则上一轮 give-up 的残留标记会让新连接永远进不了重连循环
+        self.auth_failed.store(false, Ordering::SeqCst);
+        self.auth_refresh_attempts.store(0, Ordering::SeqCst);
 
         // 开始连接循环
         self.connection_loop().await?;
@@ -168,6 +217,9 @@ impl WebSocketClient {
         self.consecutive_failures.store(0, Ordering::SeqCst);
         self.reconnect_attempts.store(0, Ordering::SeqCst);
         self.heartbeat_active.store(false, Ordering::SeqCst);
+        // REQ-017 #198：显式断开（登出/强制重连）时一并复位鉴权状态
+        self.auth_failed.store(false, Ordering::SeqCst);
+        self.auth_refresh_attempts.store(0, Ordering::SeqCst);
 
         info!("WebSocket connection completely disconnected");
     }
@@ -293,10 +345,19 @@ impl WebSocketClient {
                 break;
             }
 
+            // REQ-017 #198：上一轮连接被服务端判定 token 失效（4001 / 握手 401·403）——
+            // 先走 refresh-token 自愈；自愈失败则放弃重连并通知前端跳登录重鉴（绝不无限裸重连）
+            if self.auth_failed.load(Ordering::SeqCst) {
+                self.handle_auth_failure().await?;
+            }
+
             match self.try_connect().await {
                 Ok(_) => {
                     info!("WebSocket connection established");
                     self.reconnect_attempts.store(0, Ordering::SeqCst);
+                    // REQ-017 #198：注意这里【不】复位 auth_refresh_attempts——
+                    // 握手 101 成功不代表 token 有效（server 是接受后立刻 4001 才判定失效），
+                    // 自愈计数只在「收到服务端任意有效帧」（= token 真实可用）时复位，见消息接收任务。
 
                     // 监控连接状态，直到断开
                     while self.is_ws_connected.load(Ordering::SeqCst)
@@ -314,6 +375,12 @@ impl WebSocketClient {
                     continue;
                 }
                 Err(e) => {
+                    // REQ-017 #198：握手被鉴权拒绝（HTTP 401/403）——不做普通退避计数，
+                    // 直接进入 refresh 自愈（由循环顶部统一处理）
+                    if self.auth_failed.load(Ordering::SeqCst) {
+                        continue;
+                    }
+
                     // 当 max_reconnect_attempts 为 0 时表示无限重连，避免溢出使用饱和加
                     let attempts = self
                         .reconnect_attempts
@@ -366,6 +433,65 @@ impl WebSocketClient {
         Ok(())
     }
 
+    /// REQ-017 #198：WS 鉴权失败（4001 关闭码 / 握手 401·403）后的 refresh-token 自愈。
+    /// Ok = 刷新成功，可用新 token 继续重连；Err = 自愈失败/超次数上限，已通知前端跳登录重鉴。
+    async fn handle_auth_failure(&self) -> Result<()> {
+        let attempts = self.auth_refresh_attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        if attempts > MAX_AUTH_REFRESH_ATTEMPTS {
+            let reason = "auth refresh attempts exhausted".to_string();
+            self.give_up_auth(&reason).await;
+            return Err(anyhow::anyhow!(reason));
+        }
+
+        info!(
+            "WS auth failed (4001/401/403), attempting token refresh (attempt {}/{})",
+            attempts, MAX_AUTH_REFRESH_ATTEMPTS
+        );
+
+        let state: State<'_, AppData> = self.app_handle.state();
+        let mut rc = state.rc.lock().await;
+        match rc.start_refresh_token().await {
+            Ok(()) => {
+                // 刷新成功：把新 token 写回 WS 配置并复位标记，下一轮循环用新 token 重连
+                let new_token = rc.token.clone();
+                drop(rc);
+                if let Some(token) = new_token {
+                    self.config.write().await.token = Some(token);
+                }
+                self.auth_failed.store(false, Ordering::SeqCst);
+                self.reconnect_attempts.store(0, Ordering::SeqCst);
+                info!("Token refreshed after WS auth failure, retrying connection");
+                Ok(())
+            }
+            Err(e) => {
+                drop(rc);
+                let reason = format!("refresh_token_failed: {}", e);
+                self.give_up_auth(&reason).await;
+                Err(anyhow::anyhow!(reason))
+            }
+        }
+    }
+
+    /// REQ-017 #198：鉴权不可恢复——停重连、置 Error 态（UI 明确离线态）、通知前端跳登录重鉴
+    async fn give_up_auth(&self, reason: &str) {
+        warn!(
+            "WS authentication unrecoverable ({}), stopping reconnect and notifying frontend",
+            reason
+        );
+        self.should_stop.store(true, Ordering::SeqCst);
+        self.is_ws_connected.store(false, Ordering::SeqCst);
+        self.update_state(ConnectionState::Error, false).await;
+        if let Err(e) = self.app_handle.emit(
+            "ws-auth-failed",
+            serde_json::json!({
+                "reason": reason,
+                "timestamp": chrono::Utc::now().timestamp_millis()
+            }),
+        ) {
+            error!("Failed to emit ws-auth-failed event: {}", e);
+        }
+    }
+
     /// 清理连接状态
     async fn cleanup_connection_state(&self) {
         // 停止心跳
@@ -385,7 +511,22 @@ impl WebSocketClient {
 
     /// 尝试建立连接
     async fn try_connect(&self) -> Result<()> {
-        let config = self.config.read().await.clone();
+        let mut config = self.config.read().await.clone();
+
+        // REQ-017 #198：连接前从共享 HTTP 客户端同步最新 token。
+        // config.token 自 ws_init_connection 起冻结，而 HTTP 侧 406 自动刷新后 rc.token 已更新——
+        // 用冻结旧 token 重连只会被服务端反复 4001（假在线根因之一）。
+        {
+            let state: State<'_, AppData> = self.app_handle.state();
+            let rc = state.rc.lock().await;
+            if let Some(fresh) = rc.token.clone() {
+                if config.token.as_deref() != Some(fresh.as_str()) {
+                    info!("WS config token synced from shared HTTP client");
+                    config.token = Some(fresh.clone());
+                    self.config.write().await.token = Some(fresh);
+                }
+            }
+        }
 
         // 构建连接URL
         let mut url = Url::parse(&config.server_url)
@@ -403,9 +544,15 @@ impl WebSocketClient {
         self.update_state(ConnectionState::Connecting, false).await;
 
         // 建立连接
-        let (ws_stream, _) = connect_async(url_str)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to connect to WebSocket '{}': {}", url_str, e))?;
+        let (ws_stream, _) = connect_async(url_str).await.map_err(|e| {
+            // REQ-017 #198：握手被 HTTP 401/403 拒绝（网关/代理层鉴权失败）→
+            // 标记鉴权失败，由连接循环统一走 refresh-token 自愈而非无限裸重连
+            if is_auth_http_error(&e) {
+                warn!("WS handshake rejected with auth error: {}", e);
+                self.auth_failed.store(true, Ordering::SeqCst);
+            }
+            anyhow::anyhow!("Failed to connect to WebSocket '{}': {}", url_str, e)
+        })?;
 
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
 
@@ -470,11 +617,16 @@ impl WebSocketClient {
             let last_pong_time = self.last_pong_time.clone();
             let consecutive_failures = self.consecutive_failures.clone();
             let is_ws_connected = self.is_ws_connected.clone();
+            let auth_failed = self.auth_failed.clone();
+            let auth_refresh_attempts = self.auth_refresh_attempts.clone();
 
             tokio::spawn(async move {
                 while let Some(msg) = ws_receiver.next().await {
                     match msg {
                         Ok(Message::Text(text)) => {
+                            // REQ-017 #198：收到服务端有效帧 = 当前 token 真实可用，
+                            // 复位 refresh 自愈计数（唯一复位点，防 accept-then-4001 自愈死循环）
+                            auth_refresh_attempts.store(0, Ordering::SeqCst);
                             Self::handle_message_static(
                                 text.to_string(),
                                 &app_handle,
@@ -484,6 +636,7 @@ impl WebSocketClient {
                             .await;
                         }
                         Ok(Message::Binary(data)) => {
+                            auth_refresh_attempts.store(0, Ordering::SeqCst);
                             if let Ok(text) = String::from_utf8(data.to_vec()) {
                                 Self::handle_message_static(
                                     text,
@@ -494,7 +647,16 @@ impl WebSocketClient {
                                 .await;
                             }
                         }
-                        Ok(Message::Close(_)) => {
+                        Ok(Message::Close(frame)) => {
+                            // REQ-017 #198：4001 = 服务端判定 token 失效（#206 契约）。
+                            // 先置鉴权失败标记（必须先于 is_ws_connected=false，连接循环据此进 refresh 自愈）
+                            if let Some(ref close_frame) = frame {
+                                let code = u16::from(close_frame.code);
+                                if is_auth_close_code(code) {
+                                    warn!("Server closed WS with auth-failure code {}", code);
+                                    auth_failed.store(true, Ordering::SeqCst);
+                                }
+                            }
                             info!("WebSocket connection closed");
                             is_ws_connected.store(false, Ordering::SeqCst);
                             break;
@@ -1229,5 +1391,62 @@ impl WebSocketClient {
         });
 
         sync_messages(params, state).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// REQ-017 #198：4001 是唯一鉴权失败关闭码（server #206 契约）。
+    /// 1007（旧的 uid==null → BAD_DATA 通用码）不再视为鉴权信号——避免把协议错误误判成 token 失效。
+    #[test]
+    fn auth_close_code_only_4001() {
+        assert!(is_auth_close_code(4001));
+        assert!(!is_auth_close_code(1000));
+        assert!(!is_auth_close_code(1006));
+        assert!(!is_auth_close_code(1007));
+        assert!(!is_auth_close_code(4000));
+        assert!(!is_auth_close_code(4002));
+    }
+
+    /// REQ-017 #198（契约精化 B）：握手鉴权拒绝的三条精确信号——
+    /// HTTP 401/403，或 HTTP 200 + body code==406（网关 TokenContextFilter JWT_TOKEN_EXCEED 应答）。
+    /// 其余非 101（502/504、预热期 200 无 406 body、非 JSON body）保持可重试不误判。
+    #[test]
+    fn auth_http_error_precise_signals() {
+        use tokio_tungstenite::tungstenite::Error;
+
+        let make = |status: u16, body: Option<&str>| {
+            let resp: http::Response<Option<Vec<u8>>> = http::Response::builder()
+                .status(status)
+                .body(body.map(|s| s.as_bytes().to_vec()))
+                .unwrap();
+            Error::Http(Box::new(resp))
+        };
+
+        // 判鉴权失败：401 / 403 / 200+code406
+        assert!(is_auth_http_error(&make(401, None)));
+        assert!(is_auth_http_error(&make(403, None)));
+        assert!(is_auth_http_error(&make(
+            200,
+            Some(r#"{"code":406,"msg":"token已过期","success":false}"#)
+        )));
+
+        // 不误判：502/504 代理错误、预热期 200 无 body、200 非 406 code、200 非 JSON body、
+        // 406 状态但无 body code（判别条件精确到 401/403/406-body，不是「凡非 101 皆鉴权失败」）
+        assert!(!is_auth_http_error(&make(502, None)));
+        assert!(!is_auth_http_error(&make(
+            504,
+            Some("<html>Bad Gateway</html>")
+        )));
+        assert!(!is_auth_http_error(&make(200, None)));
+        assert!(!is_auth_http_error(&make(
+            200,
+            Some(r#"{"code":200,"success":true}"#)
+        )));
+        assert!(!is_auth_http_error(&make(200, Some("not json"))));
+        assert!(!is_auth_http_error(&make(406, None)));
+        assert!(!is_auth_http_error(&Error::ConnectionClosed));
     }
 }
