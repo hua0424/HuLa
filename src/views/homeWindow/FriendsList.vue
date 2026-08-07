@@ -234,9 +234,9 @@ const resetSelection = () => {
   })
 }
 
-const handleApply = async (applyType: 'friend' | 'group') => {
-  // 刷新好友申请列表
-  await contactStore.getApplyPage(applyType, true, true)
+const handleApply = (applyType: 'friend' | 'group') => {
+  // REQ-017 #204 A：面板先行、数据后到——点击即切面板（骨架/loading 立即渲染），
+  // 列表 HTTP 收口到 ApplyList 自己的 onMounted，这里不再预拉取（消除点击 5s+ 才切换的根因）
 
   // 更新未读数
   if (applyType === 'friend') {

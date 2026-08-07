@@ -660,6 +660,13 @@ export interface NoticeItem {
   isRead: boolean
   /** 创建时间 */
   createTime?: number
+  /**
+   * REQ-017 #204 B / server #203：群通知内嵌群名称（仅群通知有值，可空）。
+   * 列表行直接渲染，消除 per-row group/info N+1 回源；缺失（旧 server/异常）回退回源路径。
+   */
+  groupName?: string | null
+  /** REQ-017 #204 B / server #203：群通知内嵌群头像（可空，同上） */
+  groupAvatar?: string | null
 }
 
 /** 联系人的列表项 */
