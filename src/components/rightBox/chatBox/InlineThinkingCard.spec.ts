@@ -140,6 +140,8 @@ describe('InlineThinkingCard 默认展开版（REQ-015 #187）', () => {
     expect(wrapper.text()).toContain('完整的思考过程文本')
     const content = wrapper.find('.thinking-content')
     expect(content.exists()).toBe(true)
+    // 思考内容可选中复制（message-list 全局禁选，select-text 对齐气泡放开）
+    expect(content.classes()).toContain('select-text')
     expect(content.classes()).not.toContain('overflow-y-auto')
     expect(content.classes()).not.toContain('max-h-120px')
     expect(wrapper.find('[data-testid="thinking-truncated-hint"]').exists()).toBe(false)

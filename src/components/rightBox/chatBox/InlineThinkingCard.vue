@@ -54,7 +54,8 @@
             </div>
             <template v-else-if="reviewLoaded">
               <!-- REQ-015 #187：内容随卡高自然展开，无内滚动；长文截断前段 + 查看全文 -->
-              <div class="thinking-content text-(12px #666 dark:#aaa) whitespace-pre-wrap break-words">
+              <!-- select-text：message-list 全局禁选，思考内容对齐气泡显式放开选中复制 -->
+              <div class="thinking-content select-text text-(12px #666 dark:#aaa) whitespace-pre-wrap break-words">
                 {{ displayContent }}
               </div>
               <button
@@ -72,7 +73,7 @@
             </template>
           </template>
           <!-- 思考中 / 错误：仅显示占位，不展示流式内容 -->
-          <div v-else class="thinking-content text-(12px #666 dark:#aaa) whitespace-pre-wrap break-words">
+          <div v-else class="thinking-content select-text text-(12px #666 dark:#aaa) whitespace-pre-wrap break-words">
             <template v-if="thinking.status === 'thinking'">
               {{ t('aiclaw.thinking.waiting') }}
             </template>
