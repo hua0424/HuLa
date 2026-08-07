@@ -39,7 +39,7 @@ If the check fails the install aborts. On Linux, Tauri also needs system libs: `
 | Build desktop | `pnpm tauri:build` (`pnpm tb`) | Interactive (`scripts/interactive-build-inquirer.js`) |
 | Lint/format check | `pnpm check` | Biome, read-only |
 | Auto-fix | `pnpm check:write` / `pnpm format:all` | Biome (+ Prettier for `.vue` via `format:vue`) |
-| Tests | `pnpm test:run` (`test:ui`, `coverage`) | Vitest — currently no test files exist |
+| Tests | `pnpm test:run` (`test:ui`, `coverage`) | Vitest + happy-dom; specs live in `src/**/__tests__/` next to the code they cover |
 | Rust check (no host toolchain) | `docker/cargo-check/run.sh` | Containerized `cargo check` for `src-tauri/` — catch Rust compile errors pre-PR. **Linux target + common code only**; does NOT build a `.exe` and does NOT compile `#[cfg(target_os="windows")]` branches — Windows build stays with the tester. See `docker/cargo-check/README.md`. |
 | Commit | `pnpm commit` | Commitizen, enforces Conventional Commits |
 
@@ -85,6 +85,16 @@ The Windows tester drives the desktop client via playwright-cli over CDP and **l
 | `mobile-more-item-file` / `mobile-more-item-image` / `mobile-more-item-video` / `mobile-more-item-history` / `mobile-more-item-videocall` | 移动端更多面板功能入口 | `mobile/components/chat-room/panel/More.vue` |
 | `file-upload-confirm` / `file-upload-cancel` | 文件上传弹窗发送/取消按钮 | `components/rightBox/FileUploadModal.vue` |
 | `video-message` | 视频消息气泡根（含缩略图与播放入口） | `components/rightBox/renderMessage/Video.vue` |
+
+### Vitest unit-test gotchas (happy-dom)
+
+Hard-won traps (REQ-017) — each failure surfaces far from its cause, so check this list before treating a spec failure as a product bug:
+
+- **Identity-mocking `storeToRefs` breaks `.value`** — `vi.mock('pinia', () => ({ storeToRefs: (s) => s }))` leaves plain mock-store properties without `.value`, so `activeItem.value` is `undefined` deep in render. Give the mock store real `ref()`s instead (precedent: `mobile/components/chat-room/panel/__tests__/More.spec.ts`).
+- **Real `storeToRefs` only picks refs/reactive props** — with real pinia + a plain mock store object, non-ref properties are silently dropped from the destructured result (e.g. `themes` becomes `undefined`). Same fix: wrap mock values in `ref()`.
+- **naive-ui `<n-input>` needs `v-model:value`** — bare `v-model` compiles but never updates the model (this was the #197 product-code root cause, not a test issue). If a spec "can't type into" an input, suspect the component's binding first; a real-component spec is the fastest proof.
+- **`<n-virtual-list>` doesn't render slots under happy-dom** — stub by its internal component name `VirtualList` (not `n-virtual-list`) with `renderStubDefaultSlot: true` and a custom `props: ['items']` template forwarding items to the scoped slot (precedent: `components/rightBox/__tests__/ApplyList.aiclawNotice.spec.ts`).
+- **Module-level side effects run even for stubbed components** — stubbing a child in `mount()` doesn't stop its real module's top-level code (e.g. `new Worker()`, store instantiation); `vi.mock` the module itself (precedent: `layout/right/__tests__/applyListKey.spec.ts`).
 
 ## Architecture: platform abstraction is the central design
 
