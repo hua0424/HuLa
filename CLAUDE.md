@@ -39,7 +39,7 @@ If the check fails the install aborts. On Linux, Tauri also needs system libs: `
 | Build desktop | `pnpm tauri:build` (`pnpm tb`) | Interactive (`scripts/interactive-build-inquirer.js`) |
 | Lint/format check | `pnpm check` | Biome, read-only |
 | Auto-fix | `pnpm check:write` / `pnpm format:all` | Biome (+ Prettier for `.vue` via `format:vue`) |
-| Tests | `pnpm test:run` (`test:ui`, `coverage`) | Vitest + happy-dom; specs live in `src/**/__tests__/` next to the code they cover |
+| Tests | `pnpm test:run` (`test:ui`, `coverage`) | Vitest + happy-dom; 74 specs, mostly in `src/**/__tests__/`, a few next to the component they cover |
 | Rust check (no host toolchain) | `docker/cargo-check/run.sh` | Containerized `cargo check` for `src-tauri/` — catch Rust compile errors pre-PR. **Linux target + common code only**; does NOT build a `.exe` and does NOT compile `#[cfg(target_os="windows")]` branches — Windows build stays with the tester. See `docker/cargo-check/README.md`. |
 | Commit | `pnpm commit` | Commitizen, enforces Conventional Commits |
 
