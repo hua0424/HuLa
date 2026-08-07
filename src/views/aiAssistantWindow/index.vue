@@ -692,7 +692,12 @@ const handleSavePersona = async () => {
     if (item) {
       item.publicPersona = personaText.value
     }
-    window.$message?.success?.(t('aiclaw.detail.persona_save_success'))
+    window.$message?.success?.(
+      // REQ-018 #224：codex --resume 固化 system 层，改人设对既有会话不生效 → 保存时提示新会话生效；其余三家下一轮生效不提示
+      selectedItem.value?.adapterType?.toLowerCase() === 'codex'
+        ? t('aiclaw.detail.persona_save_success_codex')
+        : t('aiclaw.detail.persona_save_success')
+    )
   } catch (error) {
     console.error('[AiAssistant] Failed to save persona:', error)
   } finally {

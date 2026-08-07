@@ -80,6 +80,7 @@
     "persona_placeholder": "Define how the AI assistant behaves when chatting with other users, e.g.: You are a Python programming assistant, only answer programming-related questions.",
     "persona_save": "Save",
     "persona_save_success": "Public persona saved",
+    "persona_save_success_codex": "Public persona saved; for codex assistants the new persona takes effect in new sessions (the current session keeps the old persona)",
     "persona_clear_tip": "Leave empty to clear persona",
     "friends": "Friend Management",
     "conversations": "Conversation History",
