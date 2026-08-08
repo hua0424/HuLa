@@ -873,9 +873,8 @@ const handleBackToDetail = () => {
 }
 
 // REQ-004: 群聊配置
-const handleOpenGroupSettings = async () => {
+const reloadGroupConfigs = async () => {
   if (!selectedUid.value) return
-  rightView.value = 'groupSettings'
   groupConfigLoading.value = true
   try {
     await chatStore.loadAiclawGroupConfigs(Number(selectedUid.value))
@@ -887,19 +886,57 @@ const handleOpenGroupSettings = async () => {
   }
 }
 
+const handleOpenGroupSettings = async () => {
+  if (!selectedUid.value) return
+  rightView.value = 'groupSettings'
+  await reloadGroupConfigs()
+}
+
 // #173 方案 b：添加到群成功后，刷新该 aiclaw 的群配置列表，让新群卡片（未批准态）即时出现
 const handleAddedToGroup = async () => {
-  if (!selectedUid.value) return
-  groupConfigLoading.value = true
+  await reloadGroupConfigs()
+}
+
+// #210：tab 打开期间成员集合变化（被拉进新群 / 群解散，经 userListMap 跨窗收敛）时静默收敛。
+// 两道闸门：任一房间取数失败不替换（防卡片因瞬时故障消失）；仅配置 roomId 集合变化才替换
+// （防 AiclawGroupConfigForm 的 watch(props.config) 重置编辑中表单）。
+const groupConfigConverging = ref(false)
+const convergeGroupConfigs = async () => {
+  if (rightView.value !== 'groupSettings' || !selectedUid.value) return
+  if (groupConfigConverging.value) return
+  groupConfigConverging.value = true
   try {
-    await chatStore.loadAiclawGroupConfigs(Number(selectedUid.value))
-    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(selectedUid.value))
+    const before = groupConfigList.value
+      .map((c) => String(c.roomId))
+      .sort()
+      .join(',')
+    const allOk = await chatStore.loadAiclawGroupConfigs(Number(selectedUid.value))
+    if (!allOk) return
+    const next = chatStore.getAiclawGroupConfigList(Number(selectedUid.value))
+    const after = next
+      .map((c) => String(c.roomId))
+      .sort()
+      .join(',')
+    if (after !== before) {
+      groupConfigList.value = next
+    }
   } catch (error) {
-    console.error('[AiAssistant] Failed to reload group configs after add:', error)
+    console.error('[AiAssistant] 群设置静默收敛失败:', error)
   } finally {
-    groupConfigLoading.value = false
+    groupConfigConverging.value = false
   }
 }
+
+watch(
+  () =>
+    rightView.value === 'groupSettings' && selectedUid.value
+      ? groupStore.getRoomIdsByUid(String(selectedUid.value)).slice().sort().join(',')
+      : '',
+  (sig, prev) => {
+    // prev 为空 = tab 刚激活，激活路径已自带全量加载，不重复取数
+    if (sig && prev && sig !== prev) void convergeGroupConfigs()
+  }
+)
 
 const handleSaveGroupConfig = async (
   config: import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string }

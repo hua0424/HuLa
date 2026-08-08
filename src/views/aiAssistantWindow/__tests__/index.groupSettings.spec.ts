@@ -62,7 +62,9 @@ vi.mock('@/stores/aiclaw', () => ({
 
 vi.mock('@/stores/group', () => ({
   useGroupStore: () => ({
-    patchCachedUserInfo: vi.fn()
+    patchCachedUserInfo: vi.fn(),
+    // #210：群设置 tab 的成员签名 watch 依赖该方法
+    getRoomIdsByUid: () => []
   })
 }))
 
