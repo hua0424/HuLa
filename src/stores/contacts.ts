@@ -71,8 +71,9 @@ export const useContactStore = defineStore(StoresEnum.CONTACTS, () => {
       for (const item of data.list) {
         groupStore.cacheFriendInfo(item.uid, {
           activeStatus: item.activeStatus,
-          lastOptTime: item.lastOptTime,
           userType: item.userType,
+          // lastOptTime 类型上有、服务端实际不返回——undefined 展开进 merge 会抹掉缓存旧值
+          ...(item.lastOptTime != null ? { lastOptTime: item.lastOptTime } : {}),
           ...(item.name ? { name: item.name } : {}),
           ...(item.avatar ? { avatar: item.avatar } : {}),
           ...(item.account ? { account: item.account } : {})

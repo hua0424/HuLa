@@ -88,14 +88,27 @@ describe('#221/#222 getContactList 播种 friendInfoCache 名字段', () => {
     const groupStore = useGroupStore()
     groupStore.cacheFriendInfo('9002', { name: '安洁', avatar: 'old.png' } as any)
 
+    // 对齐真实旧 server 应答形态：缺失字段实际为 null（而非恰好不传）
     getFriendPageMock.mockResolvedValue(
-      pageWith([{ uid: '9002', remark: '', activeStatus: 2, lastOptTime: 0, userType: 4 }])
+      pageWith([{ uid: '9002', remark: '', activeStatus: 2, lastOptTime: 0, userType: null }])
     )
     await useContactStore().getContactList(true)
 
     const info = groupStore.getUserInfo('9002')
     expect(info?.name).toBe('安洁')
     expect(info?.avatar).toBe('old.png')
+  })
+
+  it('分页项缺 lastOptTime 时不覆盖已有缓存值（服务端实际不返回该字段，undefined 不得抹掉旧值）', async () => {
+    const groupStore = useGroupStore()
+    groupStore.cacheFriendInfo('9004', { name: 'CodexAI', lastOptTime: 1720000000000 } as any)
+
+    getFriendPageMock.mockResolvedValue(pageWith([{ uid: '9004', remark: '', activeStatus: 1, userType: 4 }]))
+    await useContactStore().getContactList(true)
+
+    const info = groupStore.getUserInfo('9004')
+    expect(info?.lastOptTime).toBe(1720000000000)
+    expect(info?.name).toBe('CodexAI')
   })
 
   it('分页项带新名时刷新缓存（改名经好友分页传播）', async () => {
