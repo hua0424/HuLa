@@ -210,21 +210,29 @@ export async function getAnnouncementList(roomId: string, page: number, pageSize
 }
 
 export async function getMsgReadCount(msgIds: number[]) {
-  return await imRequest({
-    url: ImUrlEnum.GET_MSG_READ_COUNT,
-    params: {
-      msgIds
-    }
-  })
+  return await imRequest(
+    {
+      url: ImUrlEnum.GET_MSG_READ_COUNT,
+      params: {
+        msgIds
+      }
+    },
+    // #209：ReadCountQueue 10s 轮询的后台调用，断网静默+日志（调用点已 catch），不弹裸 toast
+    { showError: false }
+  )
 }
 
 export async function markMsgRead(roomId: string) {
-  return await imRequest({
-    url: ImUrlEnum.MARK_MSG_READ,
-    body: {
-      roomId
-    }
-  })
+  return await imRequest(
+    {
+      url: ImUrlEnum.MARK_MSG_READ,
+      body: {
+        roomId
+      }
+    },
+    // #209：后台已读上报（chat store 队列 .catch 记日志；移动端滑动标记自带领域文案），不弹裸 toast
+    { showError: false }
+  )
 }
 
 export async function getFriendPage(options?: { pageSize?: number; cursor?: string }) {
