@@ -65,11 +65,17 @@ export const useContactStore = defineStore(StoresEnum.CONTACTS, () => {
       contactsOptions.value.cursor = data.cursor
       contactsOptions.value.isLast = data.isLast
       // 将联系人的在线状态和 userType 同步到 groupStore 缓存，确保 isAiclaw / useAiclawSession 能读取到正确状态
+      // #221/#222：分页响应（FriendResp）本已带 name/avatar/account，一并播种 friendInfoCache——
+      // 否则「无共同群的好友」（如只在单聊的 AI）进不了任何 userListMap，getUserInfo 三层查找落空，
+      // 穿梭框空名渲染（#221）、思考卡标题泛化「AI」（#222）。字段缺失时不覆盖已有缓存（防回退）。
       for (const item of data.list) {
         groupStore.cacheFriendInfo(item.uid, {
           activeStatus: item.activeStatus,
           lastOptTime: item.lastOptTime,
-          userType: item.userType
+          userType: item.userType,
+          ...(item.name ? { name: item.name } : {}),
+          ...(item.avatar ? { avatar: item.avatar } : {}),
+          ...(item.account ? { account: item.account } : {})
         })
       }
     } catch (error) {

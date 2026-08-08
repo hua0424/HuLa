@@ -24,9 +24,10 @@ export const options = computed(() => {
       }
 
       return {
-        label: userInfo?.name || item.remark,
+        // #221：item.name 兜底——好友分页响应自带，覆盖「无共同群好友」getUserInfo 落空的时序窗口
+        label: userInfo?.name || item.remark || item.name,
         value: item.uid,
-        avatar: AvatarUtils.getAvatarUrl(userInfo?.avatar || '/logoD.png')
+        avatar: AvatarUtils.getAvatarUrl(userInfo?.avatar || item.avatar || '/logoD.png')
       }
     })
     .filter(Boolean) as any

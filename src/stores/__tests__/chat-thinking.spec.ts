@@ -19,6 +19,7 @@ vi.hoisted(() => {
 })
 
 const loadThinkingByTriggerMock = vi.hoisted(() => vi.fn<(...args: any[]) => Promise<any[]>>(async () => []))
+const imRequestSilentMock = vi.hoisted(() => vi.fn<(...args: any[]) => Promise<any>>(async () => []))
 vi.mock('@/services/thinkingService', () => ({
   loadThinkingByTrigger: (...args: any[]) => loadThinkingByTriggerMock(...args)
 }))
@@ -46,7 +47,8 @@ vi.mock('vue-router', () => ({
 vi.mock('@/utils/ImRequestUtils', () => ({
   markMsgRead: vi.fn().mockResolvedValue(undefined),
   getSessionDetail: vi.fn().mockResolvedValue(undefined),
-  imRequest: vi.fn().mockResolvedValue({ list: [], cursor: '', isLast: true })
+  imRequest: vi.fn().mockResolvedValue({ list: [], cursor: '', isLast: true }),
+  imRequestSilent: (...args: any[]) => imRequestSilentMock(...args)
 }))
 vi.mock('@/utils/UnreadCountManager', () => ({
   unreadCountManager: {
@@ -64,6 +66,7 @@ vi.mock('@/utils/TauriInvokeHandler', () => ({
 import { useChatStore } from '@/stores/chat'
 import { useGlobalStore } from '@/stores/global'
 import { useGroupStore } from '@/stores/group'
+import { useAiclawStore } from '@/stores/aiclaw'
 import type { UserItem } from '@/services/types.ts'
 
 const ROOM_ID = '1001'
@@ -312,5 +315,74 @@ describe('useChatStore loadThinkingByTriggerForMessages (REQ-014)', () => {
     expect(bucket).toHaveLength(2)
     expect(bucket![0].thinkingId).toBe('3002')
     expect(bucket![1].thinkingId).toBe('3001')
+  })
+})
+
+/**
+ * aichatoverview#222：无共同群的 AI（CodexAI/ClaudeCodeAI 这类只存在于单聊的好友）
+ * 进不了 userListMap，思考卡标题曾泛化显示「AI」。回退链应为：
+ * payload.aiclawName → groupStore（成员表/friendInfoCache）→ aiclawStore 管理面板名 → 'AI'。
+ */
+describe('#222 思考卡标题名字回退链', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    loadThinkingByTriggerMock.mockReset().mockResolvedValue([])
+    imRequestSilentMock.mockReset().mockResolvedValue([])
+  })
+
+  const loadAiclawNames = async (list: Array<{ uid: string; name: string; adapterType?: string }>) => {
+    imRequestSilentMock.mockResolvedValue(list)
+    await useAiclawStore().ensureLoaded()
+  }
+
+  it('startThinking：payload 缺名时经 friendInfoCache 解析真名（getContactList 播种路径）', () => {
+    useGroupStore().cacheFriendInfo(String(AICLAW_ID), { name: 'CodexAI' } as any)
+
+    const store = useChatStore()
+    store.startThinking({ thinkingId: 'tk-ai-1', fromUid: AICLAW_ID, roomId: Number(ROOM_ID), triggerMsgId: MSG_ID })
+
+    const bucket = store.thinkingByTrigger.get(ROOM_ID)?.get(MSG_ID)
+    expect(bucket![0].aiclawName).toBe('CodexAI')
+  })
+
+  it('startThinking：groupStore 无任何信息时回退 aiclawStore 管理面板名，不泛化为 AI', async () => {
+    await loadAiclawNames([{ uid: String(AICLAW_ID), name: 'ClaudeCodeAI', adapterType: 'claudecode' }])
+
+    const store = useChatStore()
+    store.startThinking({ thinkingId: 'tk-ai-2', fromUid: AICLAW_ID, roomId: Number(ROOM_ID), triggerMsgId: MSG_ID })
+
+    const bucket = store.thinkingByTrigger.get(ROOM_ID)?.get(MSG_ID)
+    expect(bucket![0].aiclawName).toBe('ClaudeCodeAI')
+  })
+
+  it('历史元数据路径：无成员信息时同样回退 aiclawStore 管理面板名', async () => {
+    await loadAiclawNames([{ uid: String(AICLAW_ID), name: 'ClaudeCodeAI', adapterType: 'claudecode' }])
+    loadThinkingByTriggerMock.mockResolvedValueOnce([
+      {
+        id: 3001,
+        aiclawUid: AICLAW_ID,
+        triggerMsgId: MSG_ID,
+        status: 1,
+        durationMs: 1200,
+        createTime: '2026-07-20T10:00:00.000Z'
+      }
+    ])
+
+    const store = useChatStore()
+    await store.loadThinkingByTriggerForMessages(ROOM_ID, [{ message: { id: MSG_ID } } as any])
+
+    const bucket = store.thinkingByTrigger.get(ROOM_ID)?.get(MSG_ID)
+    expect(bucket![0].aiclawName).toBe('ClaudeCodeAI')
+  })
+
+  it('payload 自带 aiclawName 时保持最高优先级（既有行为不变）', async () => {
+    await loadAiclawNames([{ uid: String(AICLAW_ID), name: '面板名', adapterType: 'codex' }])
+    useGroupStore().cacheFriendInfo(String(AICLAW_ID), { name: '缓存名' } as any)
+
+    const store = useChatStore()
+    store.startThinking({ ...startPayload, thinkingId: 'tk-ai-3' })
+
+    const bucket = store.thinkingByTrigger.get(ROOM_ID)?.get(MSG_ID)
+    expect(bucket![0].aiclawName).toBe('TestBot')
   })
 })
