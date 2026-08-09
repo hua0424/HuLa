@@ -940,14 +940,19 @@ watch(
         `rooms:${groupStore.getRoomIdsByUid(String(selectedUid.value)).slice().sort().join(',')}`
       : '',
   (sig, prev) => {
+    // #67 P1 互斥契约：桌面端只走 MEMBER_CHANGE_EVENT 事件路径（本 watcher 短路），
+    // web/移动端只走本 watcher（broadcast 对 web no-op）。现状桌面端 watcher 恰好惰性
+    // 是依赖 pinia-shared-state 缺陷的经验行为——#230 修好后若双路径并发，watcher 的
+    // 整表替换会冲掉事件路径保护的编辑中表单。
+    if (isDesktop()) return
     // prev 为空 = tab 刚激活，激活路径已自带全量加载，不重复取数
     if (sig && prev && sig !== prev) void convergeGroupConfigs()
   }
 )
 
 // #210 二期（桌面多窗路径）：主窗 WS_MEMBER_CHANGE/ROOM_DISSOLUTION 经 Tauri 事件直驱收敛。
-// 与签名 watcher 不冲突：桌面端 userListMap 共享态失效（签名不变），watcher 惰性；web/移动
-// 端无此事件（broadcast 对 web no-op），watcher 是唯一路径。
+// 与签名 watcher 按平台互斥（#67 P1）：桌面端 watcher 首行短路，web/移动端无此事件
+// （broadcast 对 web no-op），watcher 是 web/移动端唯一收敛路径。
 const removeGroupConfigCard = (uid: string, roomId: string) => {
   chatStore.removeAiclawGroupConfig(Number(uid), roomId)
   if (groupConfigList.value.some((c) => String(c.roomId) === roomId)) {

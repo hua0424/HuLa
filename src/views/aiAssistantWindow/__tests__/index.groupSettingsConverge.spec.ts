@@ -9,11 +9,13 @@ import aiclawZh from '~/locales/zh-CN/aiclaw.json'
  *
  * groupConfigList 曾是 tab 激活时刻的快照：tab 打开期间该 aiclaw 被拉进新群
  * （WS_MEMBER_CHANGE → userListMap 经 pinia-shared-state 跨窗收敛）或群解散，
- * 卡片列表都不跟进，直到重开 tab。修复 = 两条互补路径：
- *  - 签名 watcher（web/移动端单上下文，userListMap 是活的）：签名变了才静默收敛
- *  - Tauri 事件 MEMBER_CHANGE_EVENT（桌面多窗）：真机诊断发现 pinia-shared-state
+ * 卡片列表都不跟进，直到重开 tab。修复 = 两条按平台互斥的路径（#67 P1 契约化）：
+ *  - 签名 watcher（仅 web/移动端单上下文，userListMap 是活的）：签名变了才静默收敛
+ *  - Tauri 事件 MEMBER_CHANGE_EVENT（仅桌面多窗）：真机诊断发现 pinia-shared-state
  *    收包 $patch 将 $state 的 reactive() 子树换成反序列化副本、首轮往返后跨窗同步
  *    失效（仅剩建窗快照），桌面端改由主窗 WS handler 经 Tauri 事件直驱增量收敛。
+ * 互斥的必要性：#230（pinia-shared-state 缺陷）修好后若双路径并发，watcher 的整表
+ * 替换会冲掉事件路径保护的编辑中表单——故 watcher 回调首行 isDesktop() 短路。
  * 闸门（两路径共用）：
  *  - 取数失败不加/不换卡（防卡片因瞬时故障消失）
  *  - 与选中 aiclaw 无关的成员变化不动列表（防 AiclawGroupConfigForm 重置编辑中表单）
@@ -41,10 +43,12 @@ vi.mock('@tauri-apps/api/event', () => ({
   })
 }))
 
-// 桌面窗口环境：MEMBER_CHANGE_EVENT 监听仅 isDesktop 挂载
+// 平台可切换：默认桌面（MEMBER_CHANGE_EVENT 监听仅 isDesktop 挂载）；
+// 签名 watcher 用例组切 web（watcher 桌面端短路，#67 P1 互斥契约）
+const platformState = vi.hoisted(() => ({ desktop: true }))
 vi.mock('@/utils/PlatformConstants', () => ({
-  isDesktop: () => true,
-  isWeb: () => false,
+  isDesktop: () => platformState.desktop,
+  isWeb: () => !platformState.desktop,
   isMobile: () => false
 }))
 
@@ -165,6 +169,7 @@ let errorSpy: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.clearAllMocks()
+  platformState.desktop = true
   roomIdsRef.value = ['room-1', 'room-2']
   loadAllOkRef.value = true
   configsRef.value = [makeConfig('room-1'), makeConfig('room-2', false)]
@@ -192,6 +197,12 @@ afterEach(() => {
 })
 
 describe('#210 群设置 tab 成员签名收敛', () => {
+  // 签名 watcher 是 web/移动端唯一收敛路径；桌面端回调首行短路（#67 P1 互斥），
+  // 本组统一在 web 平台上下文验证 watcher 行为
+  beforeEach(() => {
+    platformState.desktop = false
+  })
+
   it('tab 打开期间成员新增群 → 静默重取数，新群卡片即时出现', async () => {
     const wrapper = mountWindow()
     await flushPromises()
@@ -301,6 +312,22 @@ describe('#210 二期 桌面端 Tauri 事件直驱收敛', () => {
     listenRegistry.callbacks[MEMBER_CHANGE_EVENT]?.({ payload })
     await flushPromises()
   }
+
+  it('桌面端成员签名变化不触发 watcher 收敛（与事件路径互斥，防 #230 修复后双路径并发）', async () => {
+    const wrapper = mountWindow()
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="aiclaw-group-card"]')).toHaveLength(2)
+    expect(chatStoreMocks.loadAiclawGroupConfigs).toHaveBeenCalledTimes(1)
+
+    // 桌面端签名源变化（#230 修好后 userListMap 跨窗同步恢复时的形态）
+    roomIdsRef.value = ['room-1', 'room-2', 'room-3']
+    configsRef.value = [makeConfig('room-1'), makeConfig('room-2', false), makeConfig('room-3', false)]
+    await flushPromises()
+
+    // watcher 首行 isDesktop() 短路 → 不重取数、列表原样（收敛由 MEMBER_CHANGE_EVENT 路径负责）
+    expect(chatStoreMocks.loadAiclawGroupConfigs).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAll('[data-testid="aiclaw-group-card"]')).toHaveLength(2)
+  })
 
   it('挂载即注册 MEMBER_CHANGE_EVENT 监听（isDesktop 守卫通过）', async () => {
     mountWindow()
