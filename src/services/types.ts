@@ -685,6 +685,12 @@ export type FriendItem = {
   hideMyPosts: boolean
   /** 不看他（0-允许，1-禁止） */
   hideTheirPosts: boolean
+  /** 好友用户名（FriendResp 已返回，#221/#222 播种 friendInfoCache 用） */
+  name?: string
+  /** 好友头像（FriendResp 已返回） */
+  avatar?: string
+  /** 好友账号（FriendResp 已返回） */
+  account?: string
 }
 
 /** 是否全员展示的会话 0否 1是 */

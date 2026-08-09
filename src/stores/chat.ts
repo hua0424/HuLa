@@ -17,6 +17,7 @@ import { getSessionDetail, markMsgRead } from '@/utils/ImRequestUtils'
 import { renderReplyContent } from '@/utils/RenderReplyContent.ts'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useSessionUnreadStore } from '@/stores/sessionUnread'
+import { useAiclawStore } from '@/stores/aiclaw'
 import type { AiclawGroupConfig } from '@/services/wsType'
 import { loadThinkingByTrigger } from '@/services/thinkingService'
 import { normalizeAiclawGroupConfig } from '@/utils/aiclawGroupConfig'
@@ -70,6 +71,7 @@ export const useChatStore = defineStore(
     const feedStore = useFeedStore()
     const groupStore = useGroupStore()
     const sessionUnreadStore = useSessionUnreadStore()
+    const aiclawStore = useAiclawStore()
 
     // 会话列表
     const sessionList = ref<SessionItem[]>([])
@@ -2032,7 +2034,8 @@ export const useChatStore = defineStore(
       const state: ThinkingState = {
         thinkingId: payload.thinkingId,
         aiclawId,
-        aiclawName: payload.aiclawName || userInfo?.name || 'AI',
+        // #222：无共同群 AI 的 groupStore 查找会落空，回退管理面板（AICLAW_LIST）名字，最后才泛化 'AI'
+        aiclawName: payload.aiclawName || userInfo?.name || aiclawStore.getName(aiclawId) || 'AI',
         aiclawAvatar: payload.aiclawAvatar || userInfo?.avatar || '',
         roomId,
         status: 'thinking',
@@ -2152,7 +2155,8 @@ export const useChatStore = defineStore(
         upsertThinkingToTrigger({
           thinkingId,
           aiclawId,
-          aiclawName: userInfo?.name || 'AI',
+          // #222：历史元数据路径同 startThinking——groupStore 落空时回退管理面板名
+          aiclawName: userInfo?.name || aiclawStore.getName(aiclawId) || 'AI',
           aiclawAvatar: userInfo?.avatar || '',
           roomId,
           status: mapServerThinkingStatus(item.status),
