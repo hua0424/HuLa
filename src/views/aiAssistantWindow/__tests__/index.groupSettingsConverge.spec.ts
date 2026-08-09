@@ -9,10 +9,14 @@ import aiclawZh from '~/locales/zh-CN/aiclaw.json'
  *
  * groupConfigList 曾是 tab 激活时刻的快照：tab 打开期间该 aiclaw 被拉进新群
  * （WS_MEMBER_CHANGE → userListMap 经 pinia-shared-state 跨窗收敛）或群解散，
- * 卡片列表都不跟进，直到重开 tab。修复 = 监听 groupStore.getRoomIdsByUid 的
- * 成员签名变化，签名变了才静默收敛（重取数），且：
- *  - 仅配置 roomId 集合变化才替换列表（保住 AiclawGroupConfigForm 编辑中表单）
- *  - 任一房间取数失败（loadAiclawGroupConfigs=false）不收敛（防卡片因瞬时故障消失）
+ * 卡片列表都不跟进，直到重开 tab。修复 = 两条互补路径：
+ *  - 签名 watcher（web/移动端单上下文，userListMap 是活的）：签名变了才静默收敛
+ *  - Tauri 事件 MEMBER_CHANGE_EVENT（桌面多窗）：真机诊断发现 pinia-shared-state
+ *    收包 $patch 将 $state 的 reactive() 子树换成反序列化副本、首轮往返后跨窗同步
+ *    失效（仅剩建窗快照），桌面端改由主窗 WS handler 经 Tauri 事件直驱增量收敛。
+ * 闸门（两路径共用）：
+ *  - 取数失败不加/不换卡（防卡片因瞬时故障消失）
+ *  - 与选中 aiclaw 无关的成员变化不动列表（防 AiclawGroupConfigForm 重置编辑中表单）
  *  - tab 未打开时不取数
  */
 
@@ -23,8 +27,25 @@ vi.mock('vue-router', () => ({
   })
 }))
 
+// Tauri 事件注册表：捕获组件 listen 的回调，用例按事件名直发
+const listenRegistry = vi.hoisted(() => ({
+  callbacks: {} as Record<string, (event: { payload: unknown }) => void>
+}))
+
 vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn().mockResolvedValue(() => {})
+  listen: vi.fn((event: string, cb: (e: { payload: unknown }) => void) => {
+    listenRegistry.callbacks[event] = cb
+    return Promise.resolve(() => {
+      delete listenRegistry.callbacks[event]
+    })
+  })
+}))
+
+// 桌面窗口环境：MEMBER_CHANGE_EVENT 监听仅 isDesktop 挂载
+vi.mock('@/utils/PlatformConstants', () => ({
+  isDesktop: () => true,
+  isWeb: () => false,
+  isMobile: () => false
 }))
 
 vi.mock('@/router', () => ({
@@ -64,6 +85,8 @@ const loadAllOkRef = ref(true)
 const chatStoreMocks = vi.hoisted(() => ({
   loadAiclawGroupConfigs: vi.fn(),
   loadAiclawGroupConfig: vi.fn(),
+  loadAiclawGroupConfigDetail: vi.fn(),
+  removeAiclawGroupConfig: vi.fn(),
   getAiclawGroupConfigList: vi.fn(),
   saveAiclawGroupConfig: vi.fn()
 }))
@@ -91,6 +114,8 @@ vi.mock('@/utils/ImRequestUtils', () => ({
 }))
 
 import { imRequestSilent } from '@/utils/ImRequestUtils'
+import { ChangeTypeEnum } from '@/enums'
+import { MEMBER_CHANGE_EVENT } from '@/utils/memberChangeBroadcast'
 import AiAssistantWindow from '@/views/aiAssistantWindow/index.vue'
 
 const i18n = createI18n({
@@ -144,6 +169,7 @@ beforeEach(() => {
   loadAllOkRef.value = true
   configsRef.value = [makeConfig('room-1'), makeConfig('room-2', false)]
   chatStoreMocks.loadAiclawGroupConfigs.mockImplementation(() => Promise.resolve(loadAllOkRef.value))
+  chatStoreMocks.loadAiclawGroupConfigDetail.mockResolvedValue(true)
   chatStoreMocks.getAiclawGroupConfigList.mockImplementation(() => configsRef.value)
   vi.mocked(imRequestSilent).mockResolvedValue([
     {
@@ -199,6 +225,20 @@ describe('#210 群设置 tab 成员签名收敛', () => {
     expect(cards[0].text()).toContain('room-1 群')
   })
 
+  it('tab 打开期间被移出最后一个群（签名变空集）→ 最后一张卡片也消失', async () => {
+    const wrapper = mountWindow()
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="aiclaw-group-card"]')).toHaveLength(2)
+
+    roomIdsRef.value = []
+    configsRef.value = []
+    await flushPromises()
+
+    // 空集与「tab 未激活」不能共用空串签名：被移出最后一个群时也必须收敛
+    expect(chatStoreMocks.loadAiclawGroupConfigs).toHaveBeenCalledTimes(2)
+    expect(wrapper.findAll('[data-testid="aiclaw-group-card"]')).toHaveLength(0)
+  })
+
   it('成员签名变了但配置 roomId 集合未变 → 不替换列表对象（保住编辑中表单）', async () => {
     const wrapper = mountWindow()
     await flushPromises()
@@ -247,5 +287,117 @@ describe('#210 群设置 tab 成员签名收敛', () => {
     await flushPromises()
 
     expect(chatStoreMocks.loadAiclawGroupConfigs).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * #210 二期：桌面多窗下 pinia-shared-state 首轮往返后同步失效（reactive() 子树被
+ * $patch 换成反序列化副本），签名 watcher 收不到跨窗变化。桌面端改由主窗 WS handler
+ * 经 Tauri 事件 MEMBER_CHANGE_EVENT 直驱增量收敛——事件载荷自带 roomId/changeType/
+ * uidList，只动受影响的卡片，不整表替换（编辑中表单引用不被重置）。
+ */
+describe('#210 二期 桌面端 Tauri 事件直驱收敛', () => {
+  const fireMemberChange = async (payload: Record<string, unknown>) => {
+    listenRegistry.callbacks[MEMBER_CHANGE_EVENT]?.({ payload })
+    await flushPromises()
+  }
+
+  it('挂载即注册 MEMBER_CHANGE_EVENT 监听（isDesktop 守卫通过）', async () => {
+    mountWindow()
+    await flushPromises()
+    expect(listenRegistry.callbacks[MEMBER_CHANGE_EVENT]).toBeTypeOf('function')
+  })
+
+  it('广播「选中 aiclaw 被移出群」→ 卡片即时消失并逐出缓存（无需重开 tab）', async () => {
+    const wrapper = mountWindow()
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="aiclaw-group-card"]')).toHaveLength(2)
+
+    await fireMemberChange({ roomId: 'room-1', changeType: ChangeTypeEnum.REMOVE, uidList: ['1001'] })
+
+    expect(chatStoreMocks.removeAiclawGroupConfig).toHaveBeenCalledWith(1001, 'room-1')
+    const cards = wrapper.findAll('[data-testid="aiclaw-group-card"]')
+    expect(cards).toHaveLength(1)
+    expect(cards[0].text()).toContain('room-2 群')
+  })
+
+  it('被移出最后一个群 → 两张卡片全部消失', async () => {
+    const wrapper = mountWindow()
+    await flushPromises()
+
+    await fireMemberChange({ roomId: 'room-1', changeType: ChangeTypeEnum.REMOVE, uidList: ['1001'] })
+    await fireMemberChange({ roomId: 'room-2', changeType: ChangeTypeEnum.REMOVE, uidList: ['1001'] })
+
+    expect(wrapper.findAll('[data-testid="aiclaw-group-card"]')).toHaveLength(0)
+  })
+
+  it('广播「选中 aiclaw 被拉进新群」且取数成功 → 新群卡片即时出现', async () => {
+    const wrapper = mountWindow()
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="aiclaw-group-card"]')).toHaveLength(2)
+
+    // 模拟 detail 取数已写入 store 缓存：之后 getAiclawGroupConfigList 返回含 room-3 的列表
+    configsRef.value = [makeConfig('room-1'), makeConfig('room-2', false), makeConfig('room-3', false)]
+    await fireMemberChange({ roomId: 'room-3', changeType: ChangeTypeEnum.JOIN, uidList: ['1001'] })
+
+    expect(chatStoreMocks.loadAiclawGroupConfigDetail).toHaveBeenCalledWith(1001, 'room-3')
+    const cards = wrapper.findAll('[data-testid="aiclaw-group-card"]')
+    expect(cards).toHaveLength(3)
+    expect(cards.some((c) => c.text().includes('room-3 群'))).toBe(true)
+  })
+
+  it('拉人广播但取数失败（loadAiclawGroupConfigDetail=false）→ 不加卡，列表原样', async () => {
+    const wrapper = mountWindow()
+    await flushPromises()
+
+    chatStoreMocks.loadAiclawGroupConfigDetail.mockResolvedValueOnce(false)
+    await fireMemberChange({ roomId: 'room-3', changeType: ChangeTypeEnum.JOIN, uidList: ['1001'] })
+
+    expect(chatStoreMocks.loadAiclawGroupConfigDetail).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAll('[data-testid="aiclaw-group-card"]')).toHaveLength(2)
+  })
+
+  it('与选中 aiclaw 无关的成员变化 → 不取数、不逐出、列表对象不替换（保住编辑中表单）', async () => {
+    const wrapper = mountWindow()
+    await flushPromises()
+
+    const formsBefore = wrapper.findAllComponents({ name: 'AiclawGroupConfigFormStub' })
+    expect(formsBefore.length).toBeGreaterThan(0)
+    const originalConfig = formsBefore[0].props('config')
+
+    await fireMemberChange({ roomId: 'room-1', changeType: ChangeTypeEnum.REMOVE, uidList: ['9999'] })
+    await fireMemberChange({ roomId: 'room-9', changeType: ChangeTypeEnum.JOIN, uidList: ['9999'] })
+
+    expect(chatStoreMocks.loadAiclawGroupConfigDetail).not.toHaveBeenCalled()
+    expect(chatStoreMocks.removeAiclawGroupConfig).not.toHaveBeenCalled()
+    expect(wrapper.findAll('[data-testid="aiclaw-group-card"]')).toHaveLength(2)
+    const formsAfter = wrapper.findAllComponents({ name: 'AiclawGroupConfigFormStub' })
+    expect(formsAfter[0].props('config')).toBe(originalConfig)
+  })
+
+  it('广播「群解散」→ 对应卡片消失，且不触发取数', async () => {
+    const wrapper = mountWindow()
+    await flushPromises()
+
+    await fireMemberChange({ roomId: 'room-1', dissolved: true })
+
+    expect(chatStoreMocks.removeAiclawGroupConfig).toHaveBeenCalledWith(1001, 'room-1')
+    expect(chatStoreMocks.loadAiclawGroupConfigDetail).not.toHaveBeenCalled()
+    const cards = wrapper.findAll('[data-testid="aiclaw-group-card"]')
+    expect(cards).toHaveLength(1)
+    expect(cards[0].text()).toContain('room-2 群')
+  })
+
+  it('tab 未打开时收到广播 → 不动作（不取数、不逐出）', async () => {
+    const wrapper = mountWindow()
+    await flushPromises()
+
+    await wrapper.find('use[href="#left"]').trigger('click')
+    await flushPromises()
+
+    await fireMemberChange({ roomId: 'room-1', changeType: ChangeTypeEnum.REMOVE, uidList: ['1001'] })
+
+    expect(chatStoreMocks.loadAiclawGroupConfigDetail).not.toHaveBeenCalled()
+    expect(chatStoreMocks.removeAiclawGroupConfig).not.toHaveBeenCalled()
   })
 })

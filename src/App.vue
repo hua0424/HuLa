@@ -21,6 +21,7 @@ import { useGlobalShortcut } from '@/hooks/useGlobalShortcut.ts'
 import { useMitt } from '@/hooks/useMitt.ts'
 import { useGhostSessionGuard } from '@/hooks/useGhostSessionGuard.ts'
 import { armBootSuppression } from '@/utils/errorToastSuppression'
+import { broadcastMemberChange, broadcastRoomDissolution } from '@/utils/memberChangeBroadcast'
 import { useWindow } from '@/hooks/useWindow.ts'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { useGlobalStore } from '@/stores/global'
@@ -254,6 +255,9 @@ useMitt.on(
       await handleMemberAdd(param.userList, param.roomId)
     }
 
+    // #210 二期：跨窗直驱广播（pinia-shared-state 首轮往返后同步失效，见 memberChangeBroadcast.ts）
+    void broadcastMemberChange(param)
+
     groupStore.addGroupDetail(param.roomId)
     // 更新群内的总人数
     groupStore.updateGroupNumber(param.roomId, param.totalNum, param.onlineNum)
@@ -400,6 +404,8 @@ useMitt.on(WsResponseMessageType.ONLINE, async (onStatusChangeType: OnStatusChan
 useMitt.on(WsResponseMessageType.ROOM_DISSOLUTION, async (roomId: string) => {
   console.log('收到群解散通知', roomId)
   chatStore.removeDissolvedSession(roomId)
+  // #210 二期：跨窗直驱广播（管理窗群设置 tab 移除该群卡片）
+  void broadcastRoomDissolution(roomId)
 })
 
 // #179：权威联系人同步落地后的统一收尾（启动抑制窗关闭 + 恢复态幽灵优雅移除+轻提示）

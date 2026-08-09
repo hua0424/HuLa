@@ -505,9 +505,10 @@ import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
 import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
 import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
 import AiclawAddToGroupModal from '@/components/aiclaw/AiclawAddToGroupModal.vue'
-import { ImUrlEnum } from '@/enums'
+import { ImUrlEnum, ChangeTypeEnum } from '@/enums'
 import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
 import { isDesktop, isWeb } from '@/utils/PlatformConstants'
+import { MEMBER_CHANGE_EVENT, type MemberChangeBroadcastPayload } from '@/utils/memberChangeBroadcast'
 import { buildDefaultWorkspaceDir, buildGroupCardLabel, sortAiclawGroupConfigs } from '@/utils/aiclawGroupConfig'
 import { formatAiclawConversationTime } from '@/utils/aiclawConversationTime'
 import { useChatStore } from '@/stores/chat'
@@ -524,6 +525,7 @@ const windowLabel = ref('aiAssistant')
 const highlightRoomId = ref<string | null>(null)
 const groupConfigRefs = ref<Record<string, HTMLElement>>({})
 const approveTargetUnlisten = ref<UnlistenFn | null>(null)
+const memberChangeUnlisten = ref<UnlistenFn | null>(null)
 
 type AiclawListItem = {
   uid: string
@@ -897,9 +899,13 @@ const handleAddedToGroup = async () => {
   await reloadGroupConfigs()
 }
 
-// #210：tab 打开期间成员集合变化（被拉进新群 / 群解散，经 userListMap 跨窗收敛）时静默收敛。
-// 两道闸门：任一房间取数失败不替换（防卡片因瞬时故障消失）；仅配置 roomId 集合变化才替换
-// （防 AiclawGroupConfigForm 的 watch(props.config) 重置编辑中表单）。
+// #210：tab 打开期间成员集合变化时静默收敛，两条互补路径：
+//  - 签名 watcher（下方 watch）：web/移动端单上下文，userListMap 是活的，签名变了才收敛
+//  - Tauri 事件（MEMBER_CHANGE_EVENT）：桌面多窗——pinia-shared-state 收包 $patch 会把
+//    $state 的 reactive() 子树（userListMap 等）换成反序列化副本，首轮往返后跨窗同步失效
+//    （仅剩建窗快照），故桌面端由主窗 WS handler 经 Tauri 事件直驱，增量维护卡片。
+// 两道闸门：取数失败不加/不换卡（防卡片因瞬时故障消失）；与选中 aiclaw 无关的成员
+// 变化不动列表（防 AiclawGroupConfigForm 的 watch(props.config) 重置编辑中表单）。
 const groupConfigConverging = ref(false)
 const convergeGroupConfigs = async () => {
   if (rightView.value !== 'groupSettings' || !selectedUid.value) return
@@ -930,13 +936,59 @@ const convergeGroupConfigs = async () => {
 watch(
   () =>
     rightView.value === 'groupSettings' && selectedUid.value
-      ? groupStore.getRoomIdsByUid(String(selectedUid.value)).slice().sort().join(',')
+      ? // 'rooms:' 前缀：空集签名不能与「tab 未激活」共用空串，否则被移出最后一个群时不收敛
+        `rooms:${groupStore.getRoomIdsByUid(String(selectedUid.value)).slice().sort().join(',')}`
       : '',
   (sig, prev) => {
     // prev 为空 = tab 刚激活，激活路径已自带全量加载，不重复取数
     if (sig && prev && sig !== prev) void convergeGroupConfigs()
   }
 )
+
+// #210 二期（桌面多窗路径）：主窗 WS_MEMBER_CHANGE/ROOM_DISSOLUTION 经 Tauri 事件直驱收敛。
+// 与签名 watcher 不冲突：桌面端 userListMap 共享态失效（签名不变），watcher 惰性；web/移动
+// 端无此事件（broadcast 对 web no-op），watcher 是唯一路径。
+const removeGroupConfigCard = (uid: string, roomId: string) => {
+  chatStore.removeAiclawGroupConfig(Number(uid), roomId)
+  if (groupConfigList.value.some((c) => String(c.roomId) === roomId)) {
+    // filter 保留其余卡片对象引用 → 编辑中表单不被重置
+    groupConfigList.value = groupConfigList.value.filter((c) => String(c.roomId) !== roomId)
+  }
+}
+
+const handleMemberChangeBroadcast = async (payload: MemberChangeBroadcastPayload) => {
+  if (rightView.value !== 'groupSettings' || !selectedUid.value) return
+  const uid = String(selectedUid.value)
+  const roomId = String(payload.roomId)
+  if (payload.dissolved) {
+    // 群解散：该群卡片无条件移除（无论是否涉及选中 aiclaw）
+    removeGroupConfigCard(uid, roomId)
+    return
+  }
+  // 与选中 aiclaw 无关的成员变化 → 不动列表（编辑中表单不被冲掉）
+  if (!payload.uidList?.map(String).includes(uid)) return
+  if (payload.changeType === ChangeTypeEnum.JOIN) {
+    // 拉进新群：取数成功才加卡（闸门：失败不替换，防卡片因瞬时故障抖动）
+    const ok = await chatStore.loadAiclawGroupConfigDetail(Number(uid), roomId)
+    if (ok) {
+      // 缓存与列表自 tab 激活起由本路径增量维护，直接以缓存重铺（旧卡片对象引用不变）
+      groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
+    }
+  } else {
+    removeGroupConfigCard(uid, roomId)
+  }
+}
+
+const setupMemberChangeListener = async () => {
+  if (!isDesktop()) return
+  try {
+    memberChangeUnlisten.value = await listen<MemberChangeBroadcastPayload>(MEMBER_CHANGE_EVENT, (event) => {
+      if (event.payload?.roomId) void handleMemberChangeBroadcast(event.payload)
+    })
+  } catch (error) {
+    console.error('[AiAssistant] Failed to listen member change:', error)
+  }
+}
 
 const handleSaveGroupConfig = async (
   config: import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string }
@@ -1095,9 +1147,12 @@ onMounted(async () => {
 
   // REQ-009 #88: 监听来自通知的跳转事件（窗口已存在时）
   await setupApproveTargetListener()
+  // #210 二期：监听主窗广播的成员变化/群解散（桌面多窗收敛路径）
+  await setupMemberChangeListener()
 })
 
 onUnmounted(() => {
   approveTargetUnlisten.value?.()
+  memberChangeUnlisten.value?.()
 })
 </script>

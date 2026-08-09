@@ -1869,9 +1869,6 @@ export const useChatStore = defineStore(
 
     /** 加载 aiclaw 群配置（遍历 aiclaw 所在群逐一获取），返回是否全部成功 */
     const loadAiclawGroupConfigs = async (aiclawUid: number): Promise<boolean> => {
-      const { imRequest } = await import('@/utils/ImRequestUtils')
-      const { ImUrlEnum } = await import('@/enums')
-      const { normalizeAiclawGroupConfig } = await import('@/utils/aiclawGroupConfig')
       const groupStore = useGroupStore()
       let allSuccess = true
       try {
@@ -1884,52 +1881,71 @@ export const useChatStore = defineStore(
         // 获取 aiclaw 所在的所有群 roomId
         const roomIds = groupStore.getRoomIdsByUid(String(aiclawUid))
         for (const roomId of roomIds) {
-          try {
-            // REQ-016 #196 F5：单房间失败静默——userListMap 残留（退群/解散后 aiclaw 仍挂旧房间）
-            // 会让陈旧房间 server 校验必炸，默认 showError:true 每个失败房间都弹全局 toast = 误报风暴；
-            // 由返回值 allSuccess 交给调用方裁决，单房间失败不连坐。
-            const raw = await imRequest<Record<string, unknown>>(
-              {
-                url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
-                params: { aiclawUid, roomId: Number(roomId) }
-              },
-              { showError: false }
-            )
-            if (raw) {
-              // #56：补群名 + 群号（account）供卡片显示「群名(群号)」。
-              // 共享缓存命中即 no-op（零网络）；未命中 addGroupDetail 调现有端点拉一次。
-              // 单群取数失败不抛——走 buildGroupCardLabel 兜底阶梯，不影响整列表。
-              let groupName = raw.roomName as string | undefined
-              let account: string | undefined
-              try {
-                // #196 F5：陈旧房间（退群/解散残留）取详情同样静默，不弹全局 toast
-                await groupStore.addGroupDetail(String(roomId), { showError: false })
-                const detail = groupStore.getGroupDetail(String(roomId))
-                if (detail) {
-                  groupName = detail.groupName || groupName
-                  account = detail.account
-                }
-              } catch {
-                // 取数失败：保留 server raw.roomName（若有），account 留空，由显示层兜底
-              }
-              const normalized: AiclawGroupConfigItem = {
-                ...normalizeAiclawGroupConfig(raw),
-                roomId: String(raw.roomId ?? roomId),
-                roomName: groupName,
-                account
-              }
-              aiclawGroupConfigs.set(`${aiclawUid}:${roomId}`, normalized)
-            }
-          } catch {
-            // 单个群配置获取失败不影响其他群，但需让调用方知道本次加载不完整
-            allSuccess = false
-          }
+          // 单个群配置获取失败不影响其他群，但需让调用方知道本次加载不完整
+          if (!(await loadAiclawGroupConfigDetail(aiclawUid, roomId))) allSuccess = false
         }
       } catch (error) {
         console.error('[ChatStore] Failed to load aiclaw group configs:', error)
         return false
       }
       return allSuccess
+    }
+
+    /**
+     * 加载单个 aiclaw 群配置并补群名/群号（#210 二期：事件驱动收敛的增量取数原语，
+     * 与复数版共用同一套取数/归一化/兜底逻辑）。
+     * 单房间失败静默（showError:false，陈旧房间 server 校验必炸，弹全局 toast = 误报），
+     * 由返回 boolean 交给调用方裁决。
+     */
+    const loadAiclawGroupConfigDetail = async (aiclawUid: number, roomId: string | number): Promise<boolean> => {
+      const { imRequest } = await import('@/utils/ImRequestUtils')
+      const { ImUrlEnum } = await import('@/enums')
+      const { normalizeAiclawGroupConfig } = await import('@/utils/aiclawGroupConfig')
+      const groupStore = useGroupStore()
+      try {
+        // REQ-016 #196 F5：单房间失败静默——见复数版注释
+        const raw = await imRequest<Record<string, unknown>>(
+          {
+            url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
+            params: { aiclawUid, roomId: Number(roomId) }
+          },
+          { showError: false }
+        )
+        if (raw) {
+          // #56：补群名 + 群号（account）供卡片显示「群名(群号)」。
+          // 共享缓存命中即 no-op（零网络）；未命中 addGroupDetail 调现有端点拉一次。
+          // 单群取数失败不抛——走 buildGroupCardLabel 兜底阶梯，不影响整列表。
+          let groupName = raw.roomName as string | undefined
+          let account: string | undefined
+          try {
+            // #196 F5：陈旧房间（退群/解散残留）取详情同样静默，不弹全局 toast
+            await groupStore.addGroupDetail(String(roomId), { showError: false })
+            const detail = groupStore.getGroupDetail(String(roomId))
+            if (detail) {
+              groupName = detail.groupName || groupName
+              account = detail.account
+            }
+          } catch {
+            // 取数失败：保留 server raw.roomName（若有），account 留空，由显示层兜底
+          }
+          const existing = aiclawGroupConfigs.get(`${aiclawUid}:${roomId}`)
+          const normalized: AiclawGroupConfigItem = {
+            ...normalizeAiclawGroupConfig(raw),
+            roomId: String(raw.roomId ?? roomId),
+            roomName: groupName ?? existing?.roomName,
+            account: account ?? existing?.account
+          }
+          aiclawGroupConfigs.set(`${aiclawUid}:${roomId}`, normalized)
+        }
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    /** 逐出单个 aiclaw 群配置缓存（#210 二期：成员移除/群解散后缓存不得复活该房间） */
+    const removeAiclawGroupConfig = (aiclawUid: number, roomId: string | number) => {
+      aiclawGroupConfigs.delete(`${aiclawUid}:${roomId}`)
     }
 
     /** 加载单个 aiclaw 群配置（REQ-009 #86 成员列表按需拉取 approved） */
@@ -2282,6 +2298,8 @@ export const useChatStore = defineStore(
       aiclawGroupConfigs,
       loadAiclawGroupConfigs,
       loadAiclawGroupConfig,
+      loadAiclawGroupConfigDetail,
+      removeAiclawGroupConfig,
       getAiclawGroupConfig,
       updateAiclawGroupConfig,
       saveAiclawGroupConfig,

@@ -132,3 +132,52 @@ describe('chatStore.loadAiclawGroupConfigs（REQ-016 #196 F5 复数版静默）'
     expect(chatStore.getAiclawGroupConfig(1001, 'room-2')).toBeUndefined()
   })
 })
+
+describe('chatStore 单房间配置读写（#210 二期：事件驱动收敛的增量原语）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    imRequestMock.mockReset()
+    groupStoreMocks.getRoomIdsByUid.mockReset().mockReturnValue(['room-1', 'room-2'])
+    groupStoreMocks.addGroupDetail.mockClear()
+    groupStoreMocks.getGroupDetail.mockClear()
+  })
+
+  it('loadAiclawGroupConfigDetail：带 showError:false 取数并补群名/群号入库', async () => {
+    imRequestMock.mockResolvedValue({ roomId: 'room-9', rateLimitPerMinute: 10 })
+    groupStoreMocks.getGroupDetail.mockReturnValue({ groupName: '九号群', account: 'acc-9' })
+
+    const chatStore = useChatStore()
+    const ok = await chatStore.loadAiclawGroupConfigDetail(1001, 'room-9')
+
+    expect(ok).toBe(true)
+    expect(imRequestMock).toHaveBeenCalledTimes(1)
+    expect(imRequestMock.mock.calls[0][1]).toMatchObject({ showError: false })
+    expect(groupStoreMocks.addGroupDetail).toHaveBeenCalledWith('room-9', { showError: false })
+    const item = chatStore.getAiclawGroupConfig(1001, 'room-9')
+    expect(item).toMatchObject({ roomId: 'room-9', roomName: '九号群', account: 'acc-9' })
+  })
+
+  it('loadAiclawGroupConfigDetail：取数失败返回 false 且不落缓存（调用方闸门：失败不加卡）', async () => {
+    imRequestMock.mockRejectedValue(new Error('network down'))
+
+    const chatStore = useChatStore()
+    const ok = await chatStore.loadAiclawGroupConfigDetail(1001, 'room-9')
+
+    expect(ok).toBe(false)
+    expect(chatStore.getAiclawGroupConfig(1001, 'room-9')).toBeUndefined()
+  })
+
+  it('removeAiclawGroupConfig：逐出单房间缓存（成员移除/群解散后不得复活）', async () => {
+    imRequestMock
+      .mockResolvedValueOnce({ roomId: 'room-1', rateLimitPerMinute: 10 })
+      .mockResolvedValueOnce({ roomId: 'room-2', rateLimitPerMinute: 5 })
+    const chatStore = useChatStore()
+    await chatStore.loadAiclawGroupConfigs(1001)
+    expect(chatStore.getAiclawGroupConfig(1001, 'room-1')).toBeTruthy()
+
+    chatStore.removeAiclawGroupConfig(1001, 'room-1')
+
+    expect(chatStore.getAiclawGroupConfig(1001, 'room-1')).toBeUndefined()
+    expect(chatStore.getAiclawGroupConfigList(1001).map((c) => c.roomId)).toEqual(['room-2'])
+  })
+})
