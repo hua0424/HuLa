@@ -209,6 +209,20 @@ describe('InlineThinkingCard 默认展开版（REQ-015 #187）', () => {
     expect(wrapper.text()).toContain('重试成功')
   })
 
+  it('#241：拉取思考详情带 showError:false——断网失败不弹裸 toast（卡片自带可重试错误行）', async () => {
+    imRequestMock.mockRejectedValueOnce(new Error('network'))
+    const wrapper = mountCard(baseThinking({ status: 'complete', durationMs: 1000 }))
+    await flushPromises()
+
+    triggerIntersect()
+    await flushPromises()
+
+    expect(imRequestMock).toHaveBeenCalledTimes(1)
+    expect(imRequestMock.mock.calls[0][1]).toMatchObject({ showError: false })
+    // 失败仍走卡片内错误行（可点击重试），不靠 toast 提示
+    expect(wrapper.find('[data-testid="thinking-review-error"]').exists()).toBe(true)
+  })
+
   it('手动折叠：默认展开，点头部收起内容，再点重新展开', async () => {
     imRequestMock.mockResolvedValue({ content: '思考内容', status: 1 })
     const wrapper = mountCard(baseThinking({ status: 'complete', durationMs: 1000 }))

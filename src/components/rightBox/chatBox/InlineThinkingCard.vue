@@ -162,10 +162,15 @@ const loadReview = async () => {
   reviewLoading.value = true
   reviewError.value = false
   try {
-    const data = await imRequest<{ content?: string; status?: number; durationMs?: number }>({
-      url: ImUrlEnum.AICLAW_THINKING_DETAIL,
-      params: { thinkingId: thinking.thinkingId }
-    })
+    // #241：断网失败不弹裸 toast（#209/#229 同噪声类）——卡片自带可点击重试的错误行，
+    // 失败只记日志；web 端 webImRequest 本就不弹 toast，此选项仅作用于桌面 invoke 路径
+    const data = await imRequest<{ content?: string; status?: number; durationMs?: number }>(
+      {
+        url: ImUrlEnum.AICLAW_THINKING_DETAIL,
+        params: { thinkingId: thinking.thinkingId }
+      },
+      { showError: false }
+    )
     reviewContent.value = data?.content ?? ''
     // status === 4 表示内容过长被截断
     reviewTruncated.value = data?.status === 4
