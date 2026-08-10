@@ -156,6 +156,8 @@ describe('#240 GROUP_INVITE/GROUP_MEMBER_DELETE 行复用 #66 回退链', () => 
 
     const text = wrapper.text()
     expect(text).toContain('7701')
+    // 反向断言锁口径：label 路径也渲染 senderId，单断言 toContain(senderId) 会被污染成假锁
+    expect(text).not.toContain('7709')
     expect(text).not.toContain(unknownUserText)
   })
 
@@ -168,6 +170,8 @@ describe('#240 GROUP_INVITE/GROUP_MEMBER_DELETE 行复用 #66 回退链', () => 
     await flushPromises()
 
     expect(wrapper.text()).toContain('华血')
+    // 同上：锁「取的是 senderId 而非 operateId」
+    expect(wrapper.text()).not.toContain('7710')
   })
 
   it('GROUP_MEMBER_DELETE：store 查不到且无 senderName → 操作人回退 senderId', async () => {
