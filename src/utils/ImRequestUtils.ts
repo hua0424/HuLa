@@ -217,7 +217,8 @@ export async function getMsgReadCount(msgIds: number[]) {
         msgIds
       }
     },
-    // #209：ReadCountQueue 10s 轮询的后台调用，断网静默+日志（调用点已 catch），不弹裸 toast
+    // #209：后台调用断网静默+日志。#229 后注意：唯一调用方 ReadCountQueue 已确认为
+    // 整体死代码移除（无生产者无消费者），本 wrapper 暂无调用点，保留待已读计数功能复活时复用
     { showError: false }
   )
 }
@@ -235,14 +236,20 @@ export async function markMsgRead(roomId: string) {
   )
 }
 
-export async function getFriendPage(options?: { pageSize?: number; cursor?: string }) {
-  return await imRequest({
-    url: ImUrlEnum.GET_FRIEND_PAGE,
-    params: {
-      pageSize: options?.pageSize || 100,
-      cursor: options?.cursor || ''
-    }
-  })
+export async function getFriendPage(
+  options?: { pageSize?: number; cursor?: string },
+  requestOptions?: { showError?: boolean }
+) {
+  return await imRequest(
+    {
+      url: ImUrlEnum.GET_FRIEND_PAGE,
+      params: {
+        pageSize: options?.pageSize || 100,
+        cursor: options?.cursor || ''
+      }
+    },
+    { showError: requestOptions?.showError }
+  )
 }
 
 export async function getBadgeList() {
@@ -251,13 +258,16 @@ export async function getBadgeList() {
   })
 }
 
-export async function getBadgesBatch(body: CacheBadgeReq[]) {
-  return await imRequest({
-    url: ImUrlEnum.GET_BADGES_BATCH,
-    body: {
-      reqList: body
-    }
-  })
+export async function getBadgesBatch(body: CacheBadgeReq[], options?: { showError?: boolean }) {
+  return await imRequest(
+    {
+      url: ImUrlEnum.GET_BADGES_BATCH,
+      body: {
+        reqList: body
+      }
+    },
+    { showError: options?.showError }
+  )
 }
 
 export async function groupListMember(roomId: string, options?: { showError?: boolean }) {

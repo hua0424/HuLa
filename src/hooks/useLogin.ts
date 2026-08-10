@@ -7,7 +7,6 @@ import { useChatStore } from '@/stores/chat'
 import { useGlobalStore } from '@/stores/global.ts'
 import { LoginStatus, useWsLoginStore } from '@/stores/ws'
 import { isDesktop, isMac, isMobile, isWeb } from '@/utils/PlatformConstants'
-import { clearListener } from '@/utils/ReadCountQueue'
 import { ErrorType, invokeSilently, invokeWithErrorHandler } from '@/utils/TauriInvokeHandler.ts'
 import { useSettingStore } from '../stores/setting'
 import { useGroupStore } from '../stores/group'
@@ -177,8 +176,6 @@ export const useLogin = () => {
 
   /** 重置登录的状态 */
   const resetLoginState = async (isAutoLogin = false) => {
-    // 清理消息已读计数监听器
-    clearListener()
     // 1. 清理本地存储
     if (!isAutoLogin) {
       // TODO 未来这里需要区分账号，切换不同的account；用不同的REFRESH_TOKEN调用

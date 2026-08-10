@@ -7,7 +7,6 @@ import { isWeb } from '@/utils/PlatformConstants'
 import type { FriendItem, RequestFriendItem, SessionItem } from '@/services/types'
 import { useChatStore } from '@/stores/chat'
 import { useFeedStore } from '@/stores/feed'
-import { clearQueue, readCountQueue } from '@/utils/ReadCountQueue.ts'
 import { useMitt } from '@/hooks/useMitt.ts'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 
@@ -149,10 +148,6 @@ export const useGlobalStore = defineStore(
       const session = chatStore.getSession(val)
       if (session?.unreadCount) {
         info(`[global]当前会话发生实际变化: ${oldVal} -> ${val}`)
-        // 清理已读数查询队列
-        clearQueue()
-        // 延攱1秒后开始查询已读数
-        setTimeout(readCountQueue, 1000)
         chatStore.markSessionRead(val)
       }
 

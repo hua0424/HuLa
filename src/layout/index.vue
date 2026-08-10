@@ -45,7 +45,6 @@ import { useContactStore } from '@/stores/contacts.ts'
 import { useGlobalStore } from '@/stores/global.ts'
 import { isMobile, isWeb, isWindows } from '@/utils/PlatformConstants'
 import { MittEnum, MsgEnum, NotificationTypeEnum, TauriCommand } from '@/enums'
-import { clearListener, initListener, readCountQueue } from '@/utils/ReadCountQueue'
 import { emitTo, listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import { UserAttentionType } from '@tauri-apps/api/window'
@@ -244,19 +243,6 @@ timerWorker.onmessage = (e) => {
     checkUpdate('home')
   }
 }
-
-watch(
-  () => appWindow?.label === 'home',
-  (newValue) => {
-    if (newValue) {
-      // 初始化监听器
-      initListener()
-      // 读取消息队列
-      readCountQueue()
-    }
-  },
-  { immediate: true }
-)
 
 // 监听shrinkStatus的变化
 watch(shrinkStatus, (newValue) => {
@@ -696,7 +682,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   cleanupNativeFileDropListeners()
-  clearListener()
   // 清除Web Worker计时器
   timerWorker.postMessage({
     type: 'clearTimer',
