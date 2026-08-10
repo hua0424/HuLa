@@ -1,6 +1,7 @@
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { info } from '@tauri-apps/plugin-log'
 import { sendNotification } from '@tauri-apps/plugin-notification'
+import { homeWindowOnlyStorage } from '@/stores/persistHomeWindowOnly'
 import { orderBy, uniqBy } from 'es-toolkit'
 import pLimit from 'p-limit'
 import { defineStore } from 'pinia'
@@ -2311,9 +2312,21 @@ export const useChatStore = defineStore(
     }
   },
   {
+    // #239：B 类 Map/Set 键保持 reactive + omit——序列化恒 {}（探针 P3 固化），
+    // 跨窗只走既有 Tauri 事件路径（#237 终裁第 2 条）
     share: {
       enable: true,
-      initialize: true
-    }
+      initialize: true,
+      omit: [
+        'streamingMessages',
+        'thinkingStreams',
+        'thinkingByTrigger',
+        'thinkingMetadataLoaded',
+        'autoReplyMessages',
+        'aiclawGroupConfigs'
+      ]
+    },
+    // #239：只主窗持久化，辅窗 noop——防多窗 last-writer-wins 快照倒退（#237 终裁第 4 条）
+    persist: { storage: homeWindowOnlyStorage() }
   }
 )
