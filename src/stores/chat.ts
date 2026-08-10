@@ -649,9 +649,12 @@ export const useChatStore = defineStore(
                 {} as Record<string, SessionItem>
               )
             : undefined
+        // #229：断网静默（manager 裁决）——ISS-009 领域 UX 是兜底卡片+重试（isError 不动），
+        // 裸 toast 与之并存属冗余噪声，只收 toast；catch 路径已置 isError 并留日志
         const data: any = await invokeWithErrorHandler(TauriCommand.LIST_CONTACTS, undefined, {
           customErrorMessage: '获取会话列表失败',
-          errorType: ErrorType.Network
+          errorType: ErrorType.Network,
+          showError: false
         }).catch(() => {
           sessionOptions.isLoading = false
           sessionOptions.isError = true
