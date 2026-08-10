@@ -80,7 +80,8 @@ export const useChatStore = defineStore(
     const sessionMap = ref<Record<string, SessionItem>>({})
     // 会话列表的加载状态
     // isError: 最近一次 getSessionList 是否失败,用于 UI 显示加载失败兜底卡片+重试 (ISS-009)
-    const sessionOptions = reactive({ isLast: false, isLoading: false, isError: false, cursor: '' })
+    // #239 PR2：A 类键 reactive→ref——收包整键替换写穿 ref.value，跨窗活同步落地（#237 终裁第 1 条）
+    const sessionOptions = ref({ isLast: false, isLoading: false, isError: false, cursor: '' })
     // 消息同步加载状态（用于显示同步中的提示）
     const syncLoading = ref(false)
     // store 初始化时强制重置 syncLoading，防止从持久化中恢复错误状态
@@ -607,10 +608,10 @@ export const useChatStore = defineStore(
     // 获取会话列表
     const getSessionList = async (_isFresh = false) => {
       try {
-        if (sessionOptions.isLoading) return
-        sessionOptions.isLoading = true
+        if (sessionOptions.value.isLoading) return
+        sessionOptions.value.isLoading = true
         // 重置错误态,本次拉取若再失败再置 true (ISS-009)
-        sessionOptions.isError = false
+        sessionOptions.value.isError = false
         globalStore.unreadReady = false
 
         // Web 模式下使用 HTTP API 替代 Tauri invoke
@@ -619,8 +620,8 @@ export const useChatStore = defineStore(
           const { ImUrlEnum } = await import('@/enums')
           const data: any = await imRequest({ url: ImUrlEnum.GET_CONTACT_LIST, params: { pageSize: 100 } }).catch(
             () => {
-              sessionOptions.isLoading = false
-              sessionOptions.isError = true
+              sessionOptions.value.isLoading = false
+              sessionOptions.value.isError = true
               return null
             }
           )
@@ -634,7 +635,7 @@ export const useChatStore = defineStore(
           sessionList.value = [...list]
           rebuildSessionMap()
           sortAndUniqueSessionList()
-          sessionOptions.isLoading = false
+          sessionOptions.value.isLoading = false
           globalStore.unreadReady = true
           unreadCountManager.refreshBadge(globalStore.unReadMark, feedStore.unreadCount)
           return
@@ -654,8 +655,8 @@ export const useChatStore = defineStore(
           customErrorMessage: '获取会话列表失败',
           errorType: ErrorType.Network
         }).catch(() => {
-          sessionOptions.isLoading = false
-          sessionOptions.isError = true
+          sessionOptions.value.isLoading = false
+          sessionOptions.value.isError = true
           return null
         })
         if (!data) {
@@ -676,7 +677,7 @@ export const useChatStore = defineStore(
 
         sessionList.value = [...data]
         syncPersistedUnreadCounts()
-        sessionOptions.isLoading = false
+        sessionOptions.value.isLoading = false
 
         // 全量重建 sessionMap，清理已不在新列表中的幽灵 roomId
         rebuildSessionMap()
@@ -702,13 +703,13 @@ export const useChatStore = defineStore(
         unreadCountManager.refreshBadge(globalStore.unReadMark, feedStore.unreadCount)
       } catch (e) {
         console.error('获取会话列表失败11:', e)
-        sessionOptions.isLoading = false
-        sessionOptions.isError = true
+        sessionOptions.value.isLoading = false
+        sessionOptions.value.isError = true
         // 出错时也恢复未读展示，避免角标长时间隐藏
         globalStore.unreadReady = true
         unreadCountManager.refreshBadge(globalStore.unReadMark, feedStore.unreadCount)
       } finally {
-        sessionOptions.isLoading = false
+        sessionOptions.value.isLoading = false
       }
     }
 
@@ -775,7 +776,7 @@ export const useChatStore = defineStore(
       // 同步更新 sessionMap
       sessionMap.value[roomId] = resp
       // WS 推送拉到新会话,顺带清掉上次拉取失败的错误态,避免错误兜底卡片在已有会话时还顽固显示 (ISS-009)
-      sessionOptions.isError = false
+      sessionOptions.value.isError = false
       // 再同步未读数，此时 updateSession 可以正确找到会话并应用未读数修正
       syncPersistedUnreadCounts([resp])
       sortAndUniqueSessionList()

@@ -33,18 +33,19 @@ export const useFileStore = defineStore(
     // ==================== 状态定义 ====================
 
     /** 所有房间的文件数据 Map<roomId, Map<fileId, FileInfo>> */
-    const roomFilesMap = reactive<Record<string, Record<string, FileInfo>>>({})
+    // #239 PR2：A 类键 reactive→ref——收包整键替换写穿 ref.value，跨窗活同步落地（#237 终裁第 1 条）
+    const roomFilesMap = ref<Record<string, Record<string, FileInfo>>>({})
 
     // ==================== 计算属性 ====================
 
     /** 获取指定房间的所有文件 */
     const getRoomFiles = computed(() => (roomId: string) => {
-      return roomFilesMap[roomId] ? Object.values(roomFilesMap[roomId]) : []
+      return roomFilesMap.value[roomId] ? Object.values(roomFilesMap.value[roomId]) : []
     })
 
     /** 获取指定房间的所有文件，转换为 img 标签可用的格式 */
     const getRoomFilesForDisplay = async (roomId: string) => {
-      const files = roomFilesMap[roomId] ? Object.values(roomFilesMap[roomId]) : []
+      const files = roomFilesMap.value[roomId] ? Object.values(roomFilesMap.value[roomId]) : []
 
       if (files.length === 0) {
         return []
@@ -80,7 +81,7 @@ export const useFileStore = defineStore(
 
     /** 获取指定房间的文件总数 */
     const getRoomFileCount = computed(() => (roomId: string) => {
-      return roomFilesMap[roomId] ? Object.keys(roomFilesMap[roomId]).length : 0
+      return roomFilesMap.value[roomId] ? Object.keys(roomFilesMap.value[roomId]).length : 0
     })
 
     // ==================== 操作方法 ====================
@@ -91,19 +92,19 @@ export const useFileStore = defineStore(
     const addFile = (fileInfo: FileInfo) => {
       const { roomId, id } = fileInfo
 
-      if (!roomFilesMap[roomId]) {
-        roomFilesMap[roomId] = {}
+      if (!roomFilesMap.value[roomId]) {
+        roomFilesMap.value[roomId] = {}
       }
 
-      roomFilesMap[roomId][id] = fileInfo
+      roomFilesMap.value[roomId][id] = fileInfo
     }
 
     /**
      * 移除指定房间的文件
      */
     const removeFile = (roomId: string, fileId: string) => {
-      if (roomFilesMap[roomId] && roomFilesMap[roomId][fileId]) {
-        delete roomFilesMap[roomId][fileId]
+      if (roomFilesMap.value[roomId] && roomFilesMap.value[roomId][fileId]) {
+        delete roomFilesMap.value[roomId][fileId]
       }
     }
 
@@ -111,8 +112,8 @@ export const useFileStore = defineStore(
      * 清空指定房间的所有文件
      */
     const clearRoomFiles = (roomId: string) => {
-      if (roomFilesMap[roomId]) {
-        roomFilesMap[roomId] = {}
+      if (roomFilesMap.value[roomId]) {
+        roomFilesMap.value[roomId] = {}
       }
     }
 
@@ -120,7 +121,7 @@ export const useFileStore = defineStore(
      * 获取指定文件信息
      */
     const getFile = (roomId: string, fileId: string): FileInfo | undefined => {
-      return roomFilesMap[roomId]?.[fileId]
+      return roomFilesMap.value[roomId]?.[fileId]
     }
 
     /**
@@ -201,7 +202,9 @@ export const useFileStore = defineStore(
 
     return {
       // 状态
-      roomFilesMap: readonly(roomFilesMap),
+      // #239 PR2：去掉 readonly 包装——readonly(ref) 会阻断 pinia-shared-state 收包
+      // 整键替换的 ref.value 写穿（readonly ref 的 set 被拦），必须暴露裸 ref
+      roomFilesMap,
 
       // 计算属性
       getRoomFiles,

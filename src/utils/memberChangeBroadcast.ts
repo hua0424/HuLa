@@ -5,11 +5,15 @@ import { isWeb } from '@/utils/PlatformConstants'
  * #210 二期：群成员变化的跨窗广播。
  *
  * 背景：管理窗（aiAssistant）群设置 tab 的实时收敛原设计依赖 pinia-shared-state
- * 跨窗同步 group store 的 userListMap。真机诊断发现该同步在首轮往返后失效——
- * 插件收包路径 store.$patch(state => keys.forEach(k => state[k] = JSON副本)) 会把
- * $state 中的 reactive() 子树（userListMap 等）整体替换为反序列化副本，此后该
- * 子树的深层 mutation 不再触发 $subscribe 的 deep watcher，广播沉寂，仅剩建窗
- * 时刻的初始化快照。故成员变化改由主窗 WS handler 经 Tauri 事件直驱各窗。
+ * 跨窗同步 group store 的 userListMap。#230 审计实证：插件收包路径
+ * store.$patch(state => keys.forEach(k => state[k] = JSON副本)) 对 reactive() 子树
+ * （userListMap 等）的整键替换只写 $state 容器节点，闭包原对象成孤儿——收包更新
+ * 从未对任何读路径可见（且毒化本窗外播/持久化），故成员变化改由主窗 WS handler
+ * 经 Tauri 事件直驱各窗。
+ *
+ * #239 PR2 后：userListMap 已 ref 化，收包整键替换写穿 ref.value、跨窗活同步真正
+ * 落地。本事件路径按 #67 P1 互斥契约保留——桌面端签名 watcher 短路（防活同步与
+ * 事件双写），事件路径继续负责增量维护与编辑中表单保护。
  *
  * web 端无多窗（且 aiAssistant 以路由形式打开时 userListMap 同上下文是活的），
  * 广播 no-op，web/移动端走原签名 watcher 路径。
