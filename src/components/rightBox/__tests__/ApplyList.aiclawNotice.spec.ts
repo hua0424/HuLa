@@ -119,6 +119,80 @@ const mountList = () =>
     }
   })
 
+describe('#240 GROUP_INVITE/GROUP_MEMBER_DELETE 行复用 #66 回退链', () => {
+  const unknownUserText = homeZh.apply_list.unknown_user
+
+  const makeNotice = (over: Partial<NoticeItem>): NoticeItem => ({
+    id: 'n-x',
+    eventType: NoticeType.GROUP_INVITE,
+    type: 1,
+    senderId: '9001',
+    senderName: undefined,
+    receiverId: '1001',
+    applyId: '0',
+    roomId,
+    operateId: '9001',
+    content: 'Test Group',
+    status: RequestNoticeAgreeStatus.UNTREATED,
+    isRead: false,
+    createTime: Date.now(),
+    ...over
+  })
+
+  afterEach(() => {
+    requestFriendsListRef.value = [aiclawNotice]
+    getUserInfoMock.mockImplementation((uid: string): any =>
+      String(uid) === aiclawUid ? { name: '安洁', avatar: '' } : null
+    )
+  })
+
+  it('GROUP_INVITE：store 查不到邀请人 → 回退 operateId（不再渲染「未知用户」）', async () => {
+    requestFriendsListRef.value = [makeNotice({ id: 'n-inv', operateId: '7701' })]
+    const wrapper = mountList()
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('7701')
+    expect(text).not.toContain(unknownUserText)
+  })
+
+  it('GROUP_INVITE：store 命中 → 仍显示名字（既有行为回归锁）', async () => {
+    getUserInfoMock.mockImplementation((uid: string): any =>
+      String(uid) === '7702' ? { name: '华血', avatar: '' } : null
+    )
+    requestFriendsListRef.value = [makeNotice({ id: 'n-inv2', operateId: '7702' })]
+    const wrapper = mountList()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('华血')
+  })
+
+  it('GROUP_MEMBER_DELETE：store 查不到且无 senderName → 操作人回退 senderId', async () => {
+    // operateId = 被踢成员（行首主体，走 noticeUid 链回退 uid）；senderId = 操作人（踢人文案位）
+    requestFriendsListRef.value = [
+      makeNotice({ id: 'n-del', eventType: NoticeType.GROUP_MEMBER_DELETE, senderId: '8801', operateId: '8809' })
+    ]
+    const wrapper = mountList()
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('8801')
+    expect(text).not.toContain(unknownUserText)
+  })
+
+  it('GROUP_MEMBER_DELETE：store 查不到但有 senderName → 仍用 senderName', async () => {
+    requestFriendsListRef.value = [
+      makeNotice({ id: 'n-del2', eventType: NoticeType.GROUP_MEMBER_DELETE, senderId: '8802', senderName: '安洁' })
+    ]
+    const wrapper = mountList()
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('安洁')
+    expect(text).not.toContain(unknownUserText)
+  })
+})
+
 describe('ApplyList #88 AI 助理入群待批准通知', () => {
   beforeEach(() => {
     createWebviewWindow.mockClear()

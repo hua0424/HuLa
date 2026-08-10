@@ -239,9 +239,9 @@ const applyMsg = computed(() => (item: NoticeItem) => {
     return t('home.apply_list.group.apply', { group: groupName })
   }
   if (item.eventType === NoticeType.GROUP_INVITE) {
-    const inviterName = item.operateId ? groupStore.getUserInfo(item.operateId)?.name : undefined
+    // #240：复用 #66 回退链——历史数据/store 未命中时回退 uid，不再裸渲染「未知用户」
     return t('home.apply_list.group.invite', {
-      name: inviterName ?? t('home.apply_list.unknown_user'),
+      name: resolveNameOrUid(item.operateId),
       group: groupName
     })
   }
@@ -251,9 +251,9 @@ const applyMsg = computed(() => (item: NoticeItem) => {
       : t('home.apply_list.group.invite_you', { group: groupName })
   }
   if (item.eventType === NoticeType.GROUP_MEMBER_DELETE) {
-    const operatorName = item.senderId ? groupStore.getUserInfo(item.senderId)?.name : undefined
+    // #240：复用 #66 回退链——历史数据/store 未命中时回退 uid，不再裸渲染「未知用户」
     return t('home.apply_list.group.kicked', {
-      operator: operatorName ?? t('home.apply_list.unknown_user'),
+      operator: resolveNameOrUid(item.senderId, item.senderName),
       group: groupName
     })
   }
