@@ -312,7 +312,6 @@ import { validateAlphaNumeric, validateSpecialChar } from '@/utils/Validate'
 import { useMitt } from '../hooks/useMitt'
 import { WsResponseMessageType } from '../services/wsType'
 import { useSettingStore } from '../stores/setting'
-import { clearListener } from '../utils/ReadCountQueue'
 import { useLogin } from '../hooks/useLogin'
 import { useI18n } from 'vue-i18n'
 import { useI18nGlobal } from '@/services/i18n'
@@ -723,7 +722,6 @@ onBeforeMount(async () => {
   if (!login.value.autoLogin) {
     localStorage.removeItem('TOKEN')
     localStorage.removeItem('REFRESH_TOKEN')
-    clearListener()
     return
   }
 

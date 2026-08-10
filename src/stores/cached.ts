@@ -15,13 +15,13 @@ export const useCachedStore = defineStore(StoresEnum.CACHED, () => {
   })
 
   const getAllBadgeList = async () => {
-    await getBadgesBatch([])
+    // #229：登录初始化后台拉取，断网静默+日志（修复前双层提示：imRequest toast + $message.error）
+    await getBadgesBatch([], { showError: false })
       .then((data) => {
         badgeList.value = data
       })
       .catch((e) => {
         console.error('获取徽章列表失败', e)
-        window.$message.error('获取徽章列表失败')
       })
   }
 

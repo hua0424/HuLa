@@ -46,7 +46,9 @@ export const useContactStore = defineStore(StoresEnum.CONTACTS, () => {
     }
     contactsOptions.value.isLoading = true
     try {
-      const data = await getFriendPage({ cursor: contactsOptions.value.cursor })
+      // #229：getContactList 全部调用点均为 WS 推送 / 窗口初始化 / 操作后顺带刷新（后台路径），
+      // 断网失败由下方 catch console.error 留痕即可，不弹裸 network_error toast
+      const data = await getFriendPage({ cursor: contactsOptions.value.cursor }, { showError: false })
 
       if (!data) return
       // 刷新模式下替换整个列表，否则追加到列表末尾
