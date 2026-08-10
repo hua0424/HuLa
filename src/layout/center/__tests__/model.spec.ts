@@ -94,3 +94,49 @@ describe('#221 穿梭框源列表 label 兜底链', () => {
     expect(opt.label).toBe('缓存名')
   })
 })
+
+/**
+ * aichatoverview#236：踢出群后邀请弹窗该成员名字空白+头像退化（PR#67 冒烟 incidental）。
+ * 复现基线不含 #64：踢出后该 uid 退出 userListMap，friendInfoCache 只剩旧形态条目
+ * （activeStatus/userType，无 name/avatar），label 链 `userInfo?.name || item.remark` 落空 →
+ * 空白名 + '/logoD.png'。当前 dev 的 #64 链（friendInfoCache 重播种 + item.name/item.avatar
+ * 兜底）覆盖该场景——踢出唯一共同群后等价于 #221「无共同群好友」。本组锁定等价性防回退。
+ */
+describe('#236 踢出群成员在邀请弹窗的名字/头像解析（#64 链等价覆盖）', () => {
+  beforeEach(() => {
+    contactsListRef.value = []
+    getUserInfoMock.mockReset()
+  })
+
+  it('friendInfoCache 只剩旧形态条目（无 name/avatar）时，回退好友分页的 name/avatar', () => {
+    // 旧形态：#64 前 getContactList 只播种 activeStatus/lastOptTime/userType
+    contactsListRef.value = [
+      { uid: '9001', name: 'CodexAI', avatar: 'https://x/codex.png', remark: '', account: 'codexai' }
+    ]
+    getUserInfoMock.mockReturnValue({ uid: '9001', activeStatus: 1, userType: 4 })
+
+    const opt = (options.value as any[]).find((o) => o.value === '9001')
+    expect(opt.label).toBe('CodexAI')
+    expect(opt.avatar).toBe('https://x/codex.png')
+  })
+
+  it('弹窗 getContactList 重播种后 friendInfoCache 带名时，缓存名/头像优先（实时路径）', () => {
+    contactsListRef.value = [
+      { uid: '9001', name: '分页旧名', avatar: 'https://x/old.png', remark: '', account: 'codexai' }
+    ]
+    getUserInfoMock.mockReturnValue({ uid: '9001', name: 'CodexAI', avatar: 'https://x/codex.png', account: 'codexai' })
+
+    const opt = (options.value as any[]).find((o) => o.value === '9001')
+    expect(opt.label).toBe('CodexAI')
+    expect(opt.avatar).toBe('https://x/codex.png')
+  })
+
+  it('分页项 name 缺失（服务端 null 形态）且缓存无名时仍空 label——记录边界，防静默改语义', () => {
+    contactsListRef.value = [{ uid: '9001', name: null, avatar: null, remark: '', account: 'codexai' }]
+    getUserInfoMock.mockReturnValue({ uid: '9001', activeStatus: 1, userType: 4 })
+
+    const opt = (options.value as any[]).find((o) => o.value === '9001')
+    expect(opt.label).toBeFalsy()
+    expect(opt.avatar).toBe('/logoD.png')
+  })
+})
