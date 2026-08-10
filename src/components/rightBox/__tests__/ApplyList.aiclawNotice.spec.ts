@@ -1,5 +1,6 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
+import { ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NoticeItem } from '@/services/types'
 import { NoticeType, RequestNoticeAgreeStatus } from '@/services/types'
@@ -27,6 +28,18 @@ const aiclawNotice: NoticeItem = {
   createTime: Date.now()
 }
 
+// #211：2026-07-13 前的历史通知缺 senderName/senderAvatar 字段
+const historicalNotice: NoticeItem = {
+  ...aiclawNotice,
+  id: 'n-old',
+  senderName: undefined,
+  senderAvatar: undefined
+}
+
+// ref-driven：让各用例独立控制通知列表与 store 查找结果
+const requestFriendsListRef = ref<NoticeItem[]>([aiclawNotice])
+const getUserInfoMock = vi.fn((uid: string): any => (String(uid) === aiclawUid ? { name: '安洁', avatar: '' } : null))
+
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn() })
 }))
@@ -37,7 +50,9 @@ vi.mock('@/stores/user', () => ({
 
 vi.mock('@/stores/contacts', () => ({
   useContactStore: () => ({
-    requestFriendsList: [aiclawNotice],
+    get requestFriendsList() {
+      return requestFriendsListRef.value
+    },
     applyPageOptions: { isLast: true },
     getApplyPage: vi.fn(),
     onHandleInvite: vi.fn()
@@ -46,12 +61,7 @@ vi.mock('@/stores/contacts', () => ({
 
 vi.mock('@/stores/group', () => ({
   useGroupStore: () => ({
-    getUserInfo: vi.fn((uid: string) => {
-      if (String(uid) === aiclawUid) {
-        return { name: '安洁', avatar: '' }
-      }
-      return null
-    })
+    getUserInfo: (uid: string) => getUserInfoMock(uid)
   })
 }))
 
@@ -168,5 +178,37 @@ describe('ApplyList #88 AI 助理入群待批准通知', () => {
     expect(emitTo).toHaveBeenCalledTimes(1)
     expect(emitTo).toHaveBeenCalledWith('aiAssistant', 'aiclaw:approve-target', { aiclawUid, roomId })
     expect(setFocus).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('#211 历史通知缺 senderName 的名字回退链', () => {
+  beforeEach(() => {
+    requestFriendsListRef.value = [historicalNotice]
+    getUserInfoMock.mockReset().mockReturnValue(null)
+  })
+
+  afterEach(() => {
+    requestFriendsListRef.value = [aiclawNotice]
+    getUserInfoMock
+      .mockReset()
+      .mockImplementation((uid: string): any => (String(uid) === aiclawUid ? { name: '安洁', avatar: '' } : null))
+  })
+
+  it('store 查不到且无 senderName → 回退 operateId（不再渲染「未知用户」）', async () => {
+    const wrapper = mountList()
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain(aiclawUid)
+    expect(text).not.toContain('未知用户')
+  })
+
+  it('store 查不到但有 senderName → 仍用 senderName（既有 fallback 回归锁）', async () => {
+    requestFriendsListRef.value = [aiclawNotice]
+    const wrapper = mountList()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('安洁')
+    expect(wrapper.text()).not.toContain('未知用户')
   })
 })

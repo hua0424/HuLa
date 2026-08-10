@@ -41,7 +41,8 @@
                     {{
                       item.eventType === NoticeType.GROUP_MEMBER_DELETE && item.operateId == item.receiverId
                         ? t('home.apply_list.you')
-                        : getUserInfo(item)?.name || t('home.apply_list.unknown_user')
+                        : // #211：历史通知缺 senderName 时回退主体 uid 标识
+                          getUserInfo(item)?.name || resolveNameOrUid(noticeUid(item))
                     }}
                   </p>
 
@@ -62,7 +63,8 @@
                 <p v-else class="text-(12px [--text-color])">
                   {{
                     t('home.apply_list.handler_label', {
-                      name: groupStore.getUserInfo(item.senderId)?.name || t('home.apply_list.unknown_user')
+                      // #211：历史通知缺 senderName 时回退 senderId 标识
+                      name: resolveNameOrUid(item.senderId, item.senderName)
                     })
                   }}
                 </p>
@@ -229,7 +231,8 @@ const applyMsg = computed(() => (item: NoticeItem) => {
     return t('home.apply_list.group.loading')
   }
   if (item.eventType === NoticeType.AICLAW_GROUP_APPROVE) {
-    const aiclawName = getUserInfo(item)?.name || t('home.apply_list.unknown_user')
+    // #211：历史通知缺 senderName 时回退 operateId 标识（getUserInfo 已含 senderName fallback）
+    const aiclawName = getUserInfo(item)?.name || resolveNameOrUid(item.operateId)
     return t('aiclaw.notice.group_approve.title', { name: aiclawName, group: groupName })
   }
   if (item.eventType === NoticeType.GROUP_APPLY) {
@@ -283,26 +286,43 @@ const isCurrentUser = (uid: string) => {
 }
 
 /**
- * 获取当前用户查询视角
- * @param item 通知消息
+ * #211：历史通知（2026-07-13 前数据）缺 senderName、且群成员缓存查不到时，
+ * 回退 uid 标识而不是渲染「未知用户」。
  */
-const getUserInfo = (item: any) => {
-  let info: any
+const resolveNameOrUid = (uid: string | undefined, senderName?: string) => {
+  const name = (uid ? groupStore.getUserInfo(uid)?.name : undefined) || senderName
+  if (name) return name
+  return uid ? String(uid) : t('home.apply_list.unknown_user')
+}
+
+/**
+ * 通知主体身份 uid：审批/操作类看 operateId，邀请/申请类看 senderId
+ * （与 getUserInfo 的查询视角一致，供 #211 uid 回退复用）
+ */
+const noticeUid = (item: any): string | undefined => {
   switch (item.eventType) {
     case NoticeType.AICLAW_GROUP_APPROVE:
     case NoticeType.FRIEND_APPLY:
     case NoticeType.GROUP_MEMBER_DELETE:
     case NoticeType.GROUP_SET_ADMIN:
     case NoticeType.GROUP_RECALL_ADMIN:
-      info = groupStore.getUserInfo(item.operateId)
-      break
+      return item.operateId
     case NoticeType.ADD_ME:
     case NoticeType.GROUP_INVITE:
     case NoticeType.GROUP_INVITE_ME:
     case NoticeType.GROUP_APPLY:
-      info = groupStore.getUserInfo(item.senderId)
-      break
+      return item.senderId
   }
+  return undefined
+}
+
+/**
+ * 获取当前用户查询视角
+ * @param item 通知消息
+ */
+const getUserInfo = (item: any) => {
+  const uid = noticeUid(item)
+  const info: any = uid ? groupStore.getUserInfo(uid) : undefined
   // 如果 groupStore 中没有用户信息，用通知中的 sender 信息作为 fallback
   if (!info?.name && item.senderName) {
     return { name: item.senderName, avatar: item.senderAvatar || '' }
