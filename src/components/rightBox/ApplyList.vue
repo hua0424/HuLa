@@ -239,9 +239,10 @@ const applyMsg = computed(() => (item: NoticeItem) => {
     return t('home.apply_list.group.apply', { group: groupName })
   }
   if (item.eventType === NoticeType.GROUP_INVITE) {
-    // #240：复用 #66 回退链——历史数据/store 未命中时回退 uid，不再裸渲染「未知用户」
+    // #240：复用 #66 回退链——历史数据/store 未命中时回退 uid，不再裸渲染「未知用户」。
+    // 帧语义：senderId=邀请发起人（本行要显示的人）、operateId=被邀请人（#73 复审修正）
     return t('home.apply_list.group.invite', {
-      name: resolveNameOrUid(item.operateId),
+      name: resolveNameOrUid(item.senderId, item.senderName),
       group: groupName
     })
   }

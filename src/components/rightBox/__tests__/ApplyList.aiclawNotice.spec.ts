@@ -126,12 +126,14 @@ describe('#240 GROUP_INVITE/GROUP_MEMBER_DELETE 行复用 #66 回退链', () => 
     id: 'n-x',
     eventType: NoticeType.GROUP_INVITE,
     type: 1,
+    // 帧语义区分（#73 复审）：senderId=邀请发起人/操作人，operateId=被邀请人/被操作对象，
+    // 默认值必须不同，否则用例无法锁「取的是哪一个 uid」
     senderId: '9001',
     senderName: undefined,
     receiverId: '1001',
     applyId: '0',
     roomId,
-    operateId: '9001',
+    operateId: '9002',
     content: 'Test Group',
     status: RequestNoticeAgreeStatus.UNTREATED,
     isRead: false,
@@ -146,8 +148,9 @@ describe('#240 GROUP_INVITE/GROUP_MEMBER_DELETE 行复用 #66 回退链', () => 
     )
   })
 
-  it('GROUP_INVITE：store 查不到邀请人 → 回退 operateId（不再渲染「未知用户」）', async () => {
-    requestFriendsListRef.value = [makeNotice({ id: 'n-inv', operateId: '7701' })]
+  it('GROUP_INVITE：store 查不到邀请人 → 回退 senderId（不再渲染「未知用户」）', async () => {
+    // senderId=7701（邀请发起人，应显示）；operateId=7709（被邀请人，不应出现在文案位）
+    requestFriendsListRef.value = [makeNotice({ id: 'n-inv', senderId: '7701', operateId: '7709' })]
     const wrapper = mountList()
     await flushPromises()
 
@@ -160,7 +163,7 @@ describe('#240 GROUP_INVITE/GROUP_MEMBER_DELETE 行复用 #66 回退链', () => 
     getUserInfoMock.mockImplementation((uid: string): any =>
       String(uid) === '7702' ? { name: '华血', avatar: '' } : null
     )
-    requestFriendsListRef.value = [makeNotice({ id: 'n-inv2', operateId: '7702' })]
+    requestFriendsListRef.value = [makeNotice({ id: 'n-inv2', senderId: '7702', operateId: '7710' })]
     const wrapper = mountList()
     await flushPromises()
 
