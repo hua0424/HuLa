@@ -42,7 +42,7 @@
             <div
               @click="isCurrentUser(item.senderId) ? (currentUserId = item.operateId) : (currentUserId = item.senderId)"
               class="flex justify-between text-14px text-#2DA38D">
-              {{ getUserInfo(item)?.name || t('mobile_mymessage.unknown_user') }}
+              {{ getUserInfo(item)?.name || resolveNameOrUid(noticeUid(item)) }}
             </div>
             <div class="flex text-gray-500 text-12px min-w-0">
               <span class="truncate w-full block">
@@ -68,7 +68,7 @@
                 expand-trigger="click"
                 :line-clamp="1"
                 style="max-width: 100%">
-                {{ groupStore.getUserInfo(item.senderId)?.name || t('mobile_mymessage.unknown_user') }}
+                {{ resolveNameOrUid(item.senderId, item.senderName) }}
               </n-ellipsis>
             </div>
           </div>
@@ -221,12 +221,10 @@ const applyMsg = computed(() => (item: any) => {
   if (props.type === 'friend') {
     // 好友申请目标是 AI 助理时，显示专属文案
     if (item.eventType === NoticeType.ADD_ME && item.receiverUserType === 4) {
-      const senderName = getUserInfo(item)?.name || t('mobile_mymessage.unknown_user')
-      // aiclaw 名称：优先从 operateId 查缓存，fallback 到 receiverName
-      const aiclawName =
-        (item.operateId && groupStore.getUserInfo(item.operateId)?.name) ||
-        item.receiverName ||
-        t('mobile_mymessage.unknown_user')
+      // #232：历史通知缺 senderName 时回退主体 uid 标识（getUserInfo 已含 senderName fallback）
+      const senderName = getUserInfo(item)?.name || resolveNameOrUid(item.senderId)
+      // aiclaw 名称：优先从 operateId 查缓存，fallback 到 receiverName，最后 operateId 标识
+      const aiclawName = resolveNameOrUid(item.operateId, item.receiverName)
       return t('aiclaw.friendApply.title', { name: senderName, aiclawName })
     }
     return isCurrentUser(item.senderId)
@@ -244,20 +242,23 @@ const applyMsg = computed(() => (item: any) => {
     }
 
     if (item.eventType === NoticeType.AICLAW_GROUP_APPROVE) {
-      const aiclawName = getUserInfo(item)?.name || item.senderName || t('mobile_mymessage.unknown_user')
+      // #232：历史通知缺 senderName 时回退 operateId 标识（getUserInfo 已含 senderName fallback）
+      const aiclawName = getUserInfo(item)?.name || resolveNameOrUid(item.operateId)
       return t('aiclaw.notice.group_approve.title', { name: aiclawName, group: groupDetail.name })
     }
     if (item.eventType === NoticeType.GROUP_APPLY) {
       return t('mobile_mymessage.group.apply_to_join', { name: groupDetail.name })
     } else if (item.eventType === NoticeType.GROUP_INVITE) {
-      const inviter = groupStore.getUserInfo(item.operateId)?.name || t('mobile_mymessage.unknown_user')
+      // #232：历史通知缺 senderName 时邀请人回退 operateId 标识
+      const inviter = resolveNameOrUid(item.operateId)
       return t('mobile_mymessage.group.invited_to_join', { inviter, group: groupDetail.name })
     } else if (isFriendApplyOrGroupInvite(item)) {
       return isCurrentUser(item.senderId)
         ? t('mobile_mymessage.group.joined_group', { group: groupDetail.name })
         : t('mobile_mymessage.group.invited_curr_to_join', { group: groupDetail.name })
     } else if (item.eventType === NoticeType.GROUP_MEMBER_DELETE) {
-      const operator = groupStore.getUserInfo(item.senderId)?.name || t('mobile_mymessage.unknown_user')
+      // #232：历史通知缺 senderName 时操作人回退 senderId 标识
+      const operator = resolveNameOrUid(item.senderId, item.senderName)
       return t('mobile_mymessage.group.kicked_out', { operator, group: groupDetail.name })
     } else if (item.eventType === NoticeType.GROUP_SET_ADMIN) {
       return t('mobile_mymessage.group.set_as_admin', { group: groupDetail.name })
@@ -280,6 +281,37 @@ const dropdownOptions = [
 ]
 
 const avatarSrc = (url: string) => AvatarUtils.getAvatarUrl(url)
+
+/**
+ * #232：历史通知（2026-07-13 前数据）缺 senderName、且群成员缓存查不到时，
+ * 回退 uid 标识而不是渲染「未知用户」（对齐桌面 #211/#66 resolveNameOrUid 模式）。
+ */
+const resolveNameOrUid = (uid: string | undefined, senderName?: string) => {
+  const name = (uid ? groupStore.getUserInfo(uid)?.name : undefined) || senderName
+  if (name) return name
+  return uid ? String(uid) : t('mobile_mymessage.unknown_user')
+}
+
+/**
+ * 通知主体身份 uid：审批/操作类看 operateId，邀请/申请类看 senderId
+ * （与 getUserInfo 的查询视角一致，供 #232 uid 回退复用）
+ */
+const noticeUid = (item: any): string | undefined => {
+  switch (item.eventType) {
+    case NoticeType.AICLAW_GROUP_APPROVE:
+    case NoticeType.FRIEND_APPLY:
+    case NoticeType.GROUP_MEMBER_DELETE:
+    case NoticeType.GROUP_SET_ADMIN:
+    case NoticeType.GROUP_RECALL_ADMIN:
+      return item.operateId
+    case NoticeType.ADD_ME:
+    case NoticeType.GROUP_INVITE:
+    case NoticeType.GROUP_INVITE_ME:
+    case NoticeType.GROUP_APPLY:
+      return item.senderId
+  }
+  return undefined
+}
 
 // 判断是否为当前登录用户
 const isCurrentUser = (uid: string) => {
