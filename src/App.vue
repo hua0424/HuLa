@@ -255,7 +255,7 @@ useMitt.on(
       await handleMemberAdd(param.userList, param.roomId)
     }
 
-    // #210 二期：跨窗直驱广播（pinia-shared-state 首轮往返后同步失效，见 memberChangeBroadcast.ts）
+    // #210 二期：跨窗直驱广播（#239 PR2 后与活同步按 #67 P1 互斥——防双写，见 memberChangeBroadcast.ts）
     void broadcastMemberChange(param)
 
     groupStore.addGroupDetail(param.roomId)

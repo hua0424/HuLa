@@ -17,7 +17,8 @@ export const useGlobalStore = defineStore(
     const feedStore = useFeedStore()
 
     // 未读消息标记：好友请求未读数和新消息未读数
-    const unReadMark = reactive<{
+    // #239 PR2：A 类键 reactive→ref——收包整键替换写穿 ref.value，跨窗活同步落地（#237 终裁第 1 条）
+    const unReadMark = ref<{
       newFriendUnreadCount: number
       newMsgUnreadCount: number
       newGroupUnreadCount: number
@@ -29,7 +30,7 @@ export const useGlobalStore = defineStore(
     const unreadReady = ref<boolean>(true)
 
     // 当前阅读未读列表状态
-    const currentReadUnreadList = reactive<{ show: boolean; msgId: number | null }>({
+    const currentReadUnreadList = ref<{ show: boolean; msgId: number | null }>({
       show: false,
       msgId: null
     })
@@ -106,20 +107,20 @@ export const useGlobalStore = defineStore(
     const updateGlobalUnreadCount = () => {
       if (!isWeb()) info('[global]更新全局未读消息计数')
       // 使用统一的计数管理器，避免重复逻辑（包含朋友圈未读数）
-      unreadCountManager.calculateTotal(chatStore.sessionList, unReadMark, feedStore.unreadCount)
+      unreadCountManager.calculateTotal(chatStore.sessionList, unReadMark.value, feedStore.unreadCount)
     }
 
     // 兜底同步 Dock/角标，防止未读数与徽章不同步
     watch(
       () => ({
-        msg: unReadMark.newMsgUnreadCount,
-        friend: unReadMark.newFriendUnreadCount,
-        group: unReadMark.newGroupUnreadCount,
+        msg: unReadMark.value.newMsgUnreadCount,
+        friend: unReadMark.value.newFriendUnreadCount,
+        group: unReadMark.value.newGroupUnreadCount,
         feed: feedStore.unreadCount // 添加朋友圈未读数监听
       }),
       () => {
         if (!unreadReady.value) return
-        unreadCountManager.refreshBadge(unReadMark, feedStore.unreadCount)
+        unreadCountManager.refreshBadge(unReadMark.value, feedStore.unreadCount)
       }
     )
 

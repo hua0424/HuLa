@@ -10,8 +10,7 @@ import { createApp, toRaw } from 'vue'
  *     group.userListMap / group.userListOptions / chat.sessionOptions /
  *     feed.feedOptions / feed.feedStats / feed.feedUnreadStatus /
  *     global.unReadMark / global.currentReadUnreadList / file.roomFilesMap
- *     —— PR2 将 reactive→ref（收包整键替换写穿 ref.value，活同步落地）。
- *     PR1 基线断言其当前为 reactive（!isRef）；PR2 把断言翻转为 isRef。
+ *     —— PR2 已 reactive→ref（收包整键替换写穿 ref.value，活同步落地），断言锁定 ref 形态。
  *   B 类 8 个 Map/Set 键（序列化恒 {}，永不 ref 化）：
  *     group.dissolvedRoomIds[Set] / group.friendInfoCache[Map] /
  *     chat.streamingMessages[Set] / chat.thinkingStreams[Map] /
@@ -182,16 +181,17 @@ describe('#239 键类型契约（5 脆弱 store 逐键形态，变更即红）',
     // 其形态约束由上一条 omit 断言前向锁定
   })
 
-  it('A 类 9 键形态基线（PR1：reactive；PR2 翻转为 ref 断言）', () => {
-    // PR2 改造后本组断言应翻转为 isRef(...) === true——届时同步翻转即完成契约锁定
-    expect(isRef(rawBinding(stores.group, 'userListMap'))).toBe(false)
-    expect(isRef(rawBinding(stores.group, 'userListOptions'))).toBe(false)
-    expect(isRef(rawBinding(stores.chat, 'sessionOptions'))).toBe(false)
-    expect(isRef(rawBinding(stores.feed, 'feedOptions'))).toBe(false)
-    expect(isRef(rawBinding(stores.feed, 'feedStats'))).toBe(false)
-    expect(isRef(rawBinding(stores.feed, 'feedUnreadStatus'))).toBe(false)
-    expect(isRef(rawBinding(stores.global, 'unReadMark'))).toBe(false)
-    expect(isRef(rawBinding(stores.global, 'currentReadUnreadList'))).toBe(false)
-    expect(isRef(rawBinding(stores.file, 'roomFilesMap'))).toBe(false)
+  it('A 类 9 键必须是 ref 形态（#237 终裁第 1 条：收包整键替换写穿 ref.value，活同步落地）', () => {
+    // PR2 已翻转：reactive→ref 后本组断言锁定 ref 形态，回退 reactive 即红
+    // （reactive 键收包整键替换只写 $state 孤儿副本，跨窗活同步不落地——探针 P2 固化）
+    expect(isRef(rawBinding(stores.group, 'userListMap'))).toBe(true)
+    expect(isRef(rawBinding(stores.group, 'userListOptions'))).toBe(true)
+    expect(isRef(rawBinding(stores.chat, 'sessionOptions'))).toBe(true)
+    expect(isRef(rawBinding(stores.feed, 'feedOptions'))).toBe(true)
+    expect(isRef(rawBinding(stores.feed, 'feedStats'))).toBe(true)
+    expect(isRef(rawBinding(stores.feed, 'feedUnreadStatus'))).toBe(true)
+    expect(isRef(rawBinding(stores.global, 'unReadMark'))).toBe(true)
+    expect(isRef(rawBinding(stores.global, 'currentReadUnreadList'))).toBe(true)
+    expect(isRef(rawBinding(stores.file, 'roomFilesMap'))).toBe(true)
   })
 })

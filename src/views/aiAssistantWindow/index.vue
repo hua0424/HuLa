@@ -901,9 +901,11 @@ const handleAddedToGroup = async () => {
 
 // #210：tab 打开期间成员集合变化时静默收敛，两条互补路径：
 //  - 签名 watcher（下方 watch）：web/移动端单上下文，userListMap 是活的，签名变了才收敛
-//  - Tauri 事件（MEMBER_CHANGE_EVENT）：桌面多窗——pinia-shared-state 收包 $patch 会把
-//    $state 的 reactive() 子树（userListMap 等）换成反序列化副本，首轮往返后跨窗同步失效
-//    （仅剩建窗快照），故桌面端由主窗 WS handler 经 Tauri 事件直驱，增量维护卡片。
+//  - Tauri 事件（MEMBER_CHANGE_EVENT）：桌面多窗——#230 审计实证 pinia-shared-state
+//    对 reactive() 子树（userListMap 等）的收包整键替换从未对读面可见（孤儿树），
+//    故桌面端由主窗 WS handler 经 Tauri 事件直驱，增量维护卡片。
+//    #239 PR2 后 userListMap 已 ref 化、活同步落地——事件路径按 #67 P1 互斥契约保留
+//    （防活同步与事件双写，两道闸门不变）。
 // 两道闸门：取数失败不加/不换卡（防卡片因瞬时故障消失）；与选中 aiclaw 无关的成员
 // 变化不动列表（防 AiclawGroupConfigForm 的 watch(props.config) 重置编辑中表单）。
 const groupConfigConverging = ref(false)
@@ -941,9 +943,10 @@ watch(
       : '',
   (sig, prev) => {
     // #67 P1 互斥契约：桌面端只走 MEMBER_CHANGE_EVENT 事件路径（本 watcher 短路），
-    // web/移动端只走本 watcher（broadcast 对 web no-op）。现状桌面端 watcher 恰好惰性
-    // 是依赖 pinia-shared-state 缺陷的经验行为——#230 修好后若双路径并发，watcher 的
-    // 整表替换会冲掉事件路径保护的编辑中表单。
+    // web/移动端只走本 watcher（broadcast 对 web no-op）。#239 PR2 前桌面端 watcher
+    // 恰好惰性是依赖 pinia-shared-state 缺陷的经验行为；#239 PR2 后 userListMap 已
+    // ref 化、跨窗活同步真正落地——本守卫升级为「防活同步与事件双写」：若双路径并发，
+    // watcher 的整表替换会冲掉事件路径保护的编辑中表单。代码不动，理由留档。
     if (isDesktop()) return
     // prev 为空 = tab 刚激活，激活路径已自带全量加载，不重复取数
     if (sig && prev && sig !== prev) void convergeGroupConfigs()

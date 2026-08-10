@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, reactive } from 'vue'
+import { ref } from 'vue'
 import { StoresEnum } from '@/enums'
 import { homeWindowOnlyStorage } from '@/stores/persistHomeWindowOnly'
 import {
@@ -92,14 +92,15 @@ export const useFeedStore = defineStore(
     const feedList = ref<FeedItem[]>([])
 
     // 分页选项
-    const feedOptions = reactive({
+    // #239 PR2：A 类键 reactive→ref——收包整键替换写穿 ref.value，跨窗活同步落地（#237 终裁第 1 条）
+    const feedOptions = ref({
       isLast: false,
       isLoading: false,
       cursor: ''
     })
 
     // 统计信息
-    const feedStats = reactive({
+    const feedStats = ref({
       total: 0,
       followCount: 0,
       fansCount: 0
@@ -109,7 +110,7 @@ export const useFeedStore = defineStore(
     const unreadCount = ref(0)
 
     // 朋友圈未读状态（用于全局通知处理）
-    const feedUnreadStatus = reactive({
+    const feedUnreadStatus = ref({
       hasUnread: false, // 是否有未读通知
       unreadCount: 0 // 未读通知数量
     })
@@ -121,15 +122,15 @@ export const useFeedStore = defineStore(
     const getFeedList = async (isFresh = false) => {
       // 非刷新模式下，如果已经加载完或正在加载中，则直接返回
       if (!isFresh) {
-        if (feedOptions.isLast || feedOptions.isLoading) return
+        if (feedOptions.value.isLast || feedOptions.value.isLoading) return
       }
 
-      feedOptions.isLoading = true
+      feedOptions.value.isLoading = true
 
       try {
         const response = await getFeedListApi({
           pageSize: 20,
-          cursor: isFresh ? '' : feedOptions.cursor
+          cursor: isFresh ? '' : feedOptions.value.cursor
         })
 
         if (!response) return
@@ -144,16 +145,16 @@ export const useFeedStore = defineStore(
         }
 
         // 更新分页信息
-        feedOptions.cursor = data.cursor
-        feedOptions.isLast = data.isLast
+        feedOptions.value.cursor = data.cursor
+        feedOptions.value.isLast = data.isLast
 
         // 更新统计信息
-        feedStats.total = data.total || feedList.value.length
+        feedStats.value.total = data.total || feedList.value.length
       } catch (error) {
         console.error('获取朋友圈列表失败:', error)
         throw error
       } finally {
-        feedOptions.isLoading = false
+        feedOptions.value.isLoading = false
       }
     }
 
@@ -187,7 +188,7 @@ export const useFeedStore = defineStore(
         const index = feedList.value.findIndex((item: any) => item.id === feedId)
         if (index > -1) {
           feedList.value.splice(index, 1)
-          feedStats.total = Math.max(0, feedStats.total - 1)
+          feedStats.value.total = Math.max(0, feedStats.value.total - 1)
         }
       } catch (error) {
         console.error('删除动态失败:', error)
@@ -230,16 +231,16 @@ export const useFeedStore = defineStore(
      */
     const clearFeedList = () => {
       feedList.value = []
-      feedOptions.cursor = ''
-      feedOptions.isLast = false
-      feedStats.total = 0
+      feedOptions.value.cursor = ''
+      feedOptions.value.isLast = false
+      feedStats.value.total = 0
     }
 
     /**
      * 更新统计信息
      */
-    const updateStats = (stats: Partial<typeof feedStats>) => {
-      Object.assign(feedStats, stats)
+    const updateStats = (stats: Partial<(typeof feedStats)['value']>) => {
+      Object.assign(feedStats.value, stats)
     }
 
     /**
@@ -261,8 +262,8 @@ export const useFeedStore = defineStore(
      */
     const clearUnreadCount = () => {
       unreadCount.value = 0
-      feedUnreadStatus.unreadCount = 0
-      feedUnreadStatus.hasUnread = false
+      feedUnreadStatus.value.unreadCount = 0
+      feedUnreadStatus.value.hasUnread = false
     }
 
     /**
@@ -442,21 +443,21 @@ export const useFeedStore = defineStore(
      */
     const handleFeedNotification = (_data: any) => {
       // 更新未读状态
-      feedUnreadStatus.hasUnread = true
-      feedUnreadStatus.unreadCount++
+      feedUnreadStatus.value.hasUnread = true
+      feedUnreadStatus.value.unreadCount++
 
       // 同时更新总未读数
       increaseUnreadCount(1)
 
-      console.log('朋友圈通知已处理，未读数:', feedUnreadStatus.unreadCount)
+      console.log('朋友圈通知已处理，未读数:', feedUnreadStatus.value.unreadCount)
     }
 
     /**
      * 清除朋友圈未读状态
      */
     const clearFeedUnreadStatus = () => {
-      feedUnreadStatus.hasUnread = false
-      feedUnreadStatus.unreadCount = 0
+      feedUnreadStatus.value.hasUnread = false
+      feedUnreadStatus.value.unreadCount = 0
     }
 
     return {
