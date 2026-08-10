@@ -1,6 +1,7 @@
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { info } from '@tauri-apps/plugin-log'
 import { defineStore } from 'pinia'
+import { homeWindowOnlyStorage } from '@/stores/persistHomeWindowOnly'
 import { MittEnum, RoomTypeEnum, StoresEnum } from '@/enums'
 import { isWeb } from '@/utils/PlatformConstants'
 import type { FriendItem, RequestFriendItem, SessionItem } from '@/services/types'
@@ -193,6 +194,8 @@ export const useGlobalStore = defineStore(
     share: {
       enable: true,
       initialize: true
-    }
+    },
+    // #239：只主窗持久化，辅窗 noop——防多窗 last-writer-wins 快照倒退（#237 终裁第 4 条）
+    persist: { storage: homeWindowOnlyStorage() }
   }
 )

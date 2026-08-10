@@ -10,6 +10,7 @@ import {
   suppressErrorToastsForRoom
 } from '@/utils/errorToastSuppression'
 import { useChatStore } from './chat'
+import { homeWindowOnlyStorage } from './persistHomeWindowOnly'
 
 export const useGroupStore = defineStore(
   StoresEnum.GROUP,
@@ -945,9 +946,16 @@ export const useGroupStore = defineStore(
     }
   },
   {
+    // #239：B 类 Map/Set 键 omit——序列化恒 {}（探针 P3 固化），跨窗只走既有事件路径（#237 终裁第 2 条）。
+    // 这两键当前是 setup 闭包内部状态（未 return、不在 $state，本就不参与广播）；
+    // omit 是前向防御——防未来被 return 暴露时静默开始广播 {} 损坏收方。
     share: {
       enable: true,
-      initialize: true
-    }
+      initialize: true,
+      // cast：两键非状态键、不在 keyof 州类型内——保留前向防御值（插件运行期按字符串 includes 判定）
+      omit: ['dissolvedRoomIds', 'friendInfoCache'] as never
+    },
+    // #239：只主窗持久化，辅窗 noop——防多窗 last-writer-wins 快照倒退（#237 终裁第 4 条）
+    persist: { storage: homeWindowOnlyStorage() }
   }
 )
