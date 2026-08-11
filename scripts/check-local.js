@@ -30,6 +30,17 @@ try {
   content = content
     .replace(/^(\s*base_url:\s*).+$/m, '$1http://127.0.0.1:18080/api')
     .replace(/^(\s*ws_url:\s*).+$/m, '$1ws://127.0.0.1:18080/api/ws/ws')
+
+  // fail-closed：两处替换必须都命中（模板格式漂移时宁可报错，
+  // 也绝不把生产地址静默拷进 local.yaml）
+  if (
+    !content.includes('base_url: http://127.0.0.1:18080/api') ||
+    !content.includes('ws_url: ws://127.0.0.1:18080/api/ws/ws')
+  ) {
+    console.log(chalk.red('❌ production.yaml 模板格式已漂移，backend 占位替换未命中，请检查模板后重试'))
+    process.exit(1)
+  }
+
   content =
     '# local.yaml —— 本机开发配置（gitignored，不进仓库）\n' +
     '# 本文件由 check-local.js 自动生成：backend 已占位为本机回环，\n' +

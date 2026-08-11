@@ -343,8 +343,10 @@ fn get_config_path_buf(
 mod tests {
     use super::*;
 
-    /// cargo test 恒为 debug profile（debug_assertions=true）→ 必须选 local.yaml；
+    /// cargo test 默认 debug profile（debug_assertions=true）→ 必须选 local.yaml；
     /// release 分支（production.yaml）由 release 构建的自检与安装包验证覆盖。
+    /// `cargo test --release` 下 debug_assertions=false，本断言不成立——cfg 门直接拆掉这个地雷。
+    #[cfg(debug_assertions)]
     #[test]
     fn active_config_filename_debug_selects_local() {
         assert_eq!(active_config_filename(), "local.yaml");
