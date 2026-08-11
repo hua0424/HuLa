@@ -250,7 +250,13 @@ pub fn get_configuration(app_handle: &AppHandle) -> Result<Settings, config::Con
             )
             .build()?;
 
-        settings.try_deserialize::<Settings>()
+        let settings = settings.try_deserialize::<Settings>()?;
+        // 解析结果落日志：release 验收与线上排障的第一手证据（地址非机密）
+        info!(
+            "Backend config resolved: base_url={}, ws_url={}",
+            settings.backend.base_url, settings.backend.ws_url
+        );
+        Ok(settings)
     }
 
     #[cfg(target_os = "android")]
@@ -273,7 +279,7 @@ pub fn get_configuration(app_handle: &AppHandle) -> Result<Settings, config::Con
             .map_err(|e| config::ConfigError::Message(e.to_string()))?;
 
         // 构建最终配置对象
-        config::Config::builder()
+        let merged = config::Config::builder()
             .add_source(config::File::from_str(
                 base_content,
                 config::FileFormat::Yaml,
@@ -287,8 +293,13 @@ pub fn get_configuration(app_handle: &AppHandle) -> Result<Settings, config::Con
                     .prefix_separator("_")
                     .separator("__"),
             )
-            .build()?
-            .try_deserialize::<Settings>()
+            .build()?;
+        let settings = merged.try_deserialize::<Settings>()?;
+        info!(
+            "Backend config resolved: base_url={}, ws_url={}",
+            settings.backend.base_url, settings.backend.ws_url
+        );
+        Ok(settings)
     }
 }
 
