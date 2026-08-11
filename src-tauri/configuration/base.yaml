@@ -1,6 +1,9 @@
 database:
   sqlite_file: db.sqlite
 backend:
-  base_url: http://hula.huahome.top:18080/api
-  ws_url: ws://hula.huahome.top:18080/api/ws/ws
-active_config: local
+  # 兜底块：仅当 active 文件（debug=local.yaml / release=production.yaml）缺少对应 key 时生效；
+  # 两者均已全量定义 backend，故本块实际不参与默认解析。端口必须与生产一致（19778）。
+  base_url: http://hula.huahome.top:19778/api
+  ws_url: ws://hula.huahome.top:19778/api/ws/ws
+# active_config 字段已退役（aichatoverview#249）：配置选择改由编译 profile 驱动
+# （debug → local.yaml，release → production.yaml），见 src-tauri/src/configuration.rs
