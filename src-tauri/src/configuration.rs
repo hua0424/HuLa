@@ -219,7 +219,10 @@ impl TryFrom<String> for Environment {
 }
 
 /// 获取应用程序配置
-/// 根据APP_ENVIRONMENT环境变量确定运行环境，按优先级加载配置：
+/// 配置文件选择由编译 profile 驱动（active_config 机制已退役，见 active_config_filename）：
+/// debug 构建合并 local.yaml（开发节点），release 构建合并 production.yaml（生产节点），
+/// 均叠加在 base.yaml 之上，最后可被 APP__ 前缀环境变量覆盖。
+/// 按优先级加载配置：
 /// 1. 桌面开发环境：文件系统配置文件
 /// 2. 其他环境：资源目录配置文件
 /// 3. 回退：编译时嵌入的配置文件
@@ -257,34 +260,14 @@ pub fn get_configuration(app_handle: &AppHandle) -> Result<Settings, config::Con
         let base_content = std::str::from_utf8(include_bytes!("../configuration/base.yaml"))
             .map_err(|e| config::ConfigError::Message(e.to_string()))?;
 
-        // 构建 base 配置对象
-        let base_config = config::Config::builder()
-            .add_source(config::File::from_str(
-                base_content,
-                config::FileFormat::Yaml,
-            ))
-            .build()?;
-
-        // 获取 active_config 字段
-        let active_config = base_config.get_string("active_config").map_err(|_| {
-            config::ConfigError::Message(
-                "Missing or invalid 'active_config' in base.yaml".to_string(),
-            )
-        })?;
-
-        // 校验 active_config 合法性
-        if active_config != "local" && active_config != "production" {
-            return Err(config::ConfigError::Message(
-                "Only \"local\" or \"production\" can be specified in active_config".to_string(),
-            ));
-        }
-
-        // 加载对应的配置文件内容
-        let config_file_bytes: &[u8] = match active_config.as_str() {
-            "local" => include_bytes!("../configuration/local.yaml").as_ref(),
-            "production" => include_bytes!("../configuration/production.yaml").as_ref(),
-            _ => return Err(config::ConfigError::Message("Invalid active_config".into())), // 这里可以支持更多的环境配置
-        };
+        // active_config 机制已退役（aichatoverview#249）——改由编译 profile 驱动选择内嵌配置：
+        // debug 构建内嵌 local.yaml（开发节点），release 构建内嵌 production.yaml（生产节点）。
+        // 用 #[cfg] 属性而非 if cfg!()，让 release 编译不再依赖 local.yaml 文件存在，
+        // 且 release 二进制不内嵌任何开发机地址。
+        #[cfg(debug_assertions)]
+        let config_file_bytes: &[u8] = include_bytes!("../configuration/local.yaml").as_ref();
+        #[cfg(not(debug_assertions))]
+        let config_file_bytes: &[u8] = include_bytes!("../configuration/production.yaml").as_ref();
 
         let active_content = std::str::from_utf8(config_file_bytes)
             .map_err(|e| config::ConfigError::Message(e.to_string()))?;
@@ -309,6 +292,19 @@ pub fn get_configuration(app_handle: &AppHandle) -> Result<Settings, config::Con
     }
 }
 
+/// active_config 机制已退役（aichatoverview#249）：配置文件选择改由编译 profile 驱动。
+/// debug 构建（tauri:dev / cargo test）→ local.yaml（开发节点，gitignored，各开发机自己的）；
+/// release 构建（tauri build）→ production.yaml（生产节点）。
+/// 从机制上杜绝 release 包打进开发机地址（历史事故：base.yaml 的 active_config: local
+/// 导致 release 默认连测试服）。
+fn active_config_filename() -> &'static str {
+    if cfg!(debug_assertions) {
+        "local.yaml"
+    } else {
+        "production.yaml"
+    }
+}
+
 fn get_config_path_buf(
     app_handle: &AppHandle,
     is_desktop_dev: bool,
@@ -328,24 +324,62 @@ fn get_config_path_buf(
     };
 
     let base_path = dir.join("base.yaml");
-
-    #[cfg(not(target_os = "android"))]
-    let base_config = config::Config::builder()
-        .add_source(config::File::from(base_path.clone()))
-        .build()?;
-
-    #[cfg(target_os = "android")]
-    let base_config = {
-        let content = std::str::from_utf8(include_bytes!("../configuration/base.yaml"))
-            .map_err(|e| config::ConfigError::Message(e.to_string()))?;
-
-        config::Config::builder()
-            .add_source(config::File::from_str(content, config::FileFormat::Yaml))
-            .build()?
-    };
-
-    let active_config = base_config.get_string("active_config")?;
-    println!("active_config: {:?}", active_config);
-    let active_config_path_buf = dir.clone().join(active_config);
+    let active_config_path_buf = dir.join(active_config_filename());
     Ok((base_path, active_config_path_buf))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// cargo test 恒为 debug profile（debug_assertions=true）→ 必须选 local.yaml；
+    /// release 分支（production.yaml）由 release 构建的自检与安装包验证覆盖。
+    #[test]
+    fn active_config_filename_debug_selects_local() {
+        assert_eq!(active_config_filename(), "local.yaml");
+    }
+
+    /// 锁死 aichatoverview#249 验收核心：base.yaml + production.yaml 按运行时相同的
+    /// 合并顺序叠加后，release 默认解析必须落在生产 19778，且 base.yaml 不再携带
+    /// 已退役的 active_config 字段。
+    #[test]
+    fn release_default_merges_to_production_19778() {
+        let base_content = include_str!("../configuration/base.yaml");
+        let production_content = include_str!("../configuration/production.yaml");
+
+        let base_only = config::Config::builder()
+            .add_source(config::File::from_str(
+                base_content,
+                config::FileFormat::Yaml,
+            ))
+            .build()
+            .expect("base.yaml should parse");
+        assert!(
+            base_only.get_string("active_config").is_err(),
+            "base.yaml must not carry the retired active_config field"
+        );
+
+        let settings = config::Config::builder()
+            .add_source(config::File::from_str(
+                base_content,
+                config::FileFormat::Yaml,
+            ))
+            .add_source(config::File::from_str(
+                production_content,
+                config::FileFormat::Yaml,
+            ))
+            .build()
+            .expect("base+production should merge")
+            .try_deserialize::<Settings>()
+            .expect("merged config should deserialize into Settings");
+
+        assert_eq!(
+            settings.backend.base_url,
+            "http://hula.huahome.top:19778/api"
+        );
+        assert_eq!(
+            settings.backend.ws_url,
+            "ws://hula.huahome.top:19778/api/ws/ws"
+        );
+    }
 }
