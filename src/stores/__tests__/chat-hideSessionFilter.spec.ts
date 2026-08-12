@@ -144,4 +144,29 @@ describe('useChatStore 会话列表 hide 过滤（#260）', () => {
     expect(chatStore.sessionList.map((s) => s.roomId)).toEqual(['room-new'])
     expect(chatStore.sessionMap['room-new']).toBeDefined()
   })
+
+  it('getSessionList 对 raw 带 hide=true 的已存在会话做剔除（持久化水合/详情响应滞后双场景兜底）', async () => {
+    const chatStore = useChatStore()
+
+    // 场景 A：pinia 持久化水合的旧快照里 hide 标志缺失（老版本客户端写入的缓存）
+    const hydrated = makeSession('room-hydrated', { activeTime: 9000 })
+    chatStore.sessionList = [hydrated]
+    chatStore.sessionMap = { 'room-hydrated': hydrated }
+
+    // 场景 B：某会话在内存里 hide=false（详情响应早于 setHide 到达），raw 列表已置 true
+    const stale = makeSession('room-stale', { hide: false, activeTime: 8000 })
+    chatStore.sessionList.push(stale)
+    chatStore.sessionMap['room-stale'] = stale
+
+    const rawHydrated = makeSession('room-hydrated', { hide: true, activeTime: 9000 })
+    const rawStale = makeSession('room-stale', { hide: true, activeTime: 8000 })
+    const rawVisible = makeSession('room-visible', { hide: false, activeTime: 7000 })
+    vi.mocked(invokeWithErrorHandler).mockResolvedValueOnce([rawHydrated, rawStale, rawVisible])
+
+    await chatStore.getSessionList(true)
+
+    expect(chatStore.sessionList.map((s) => s.roomId)).toEqual(['room-visible'])
+    expect(chatStore.sessionMap['room-hydrated']).toBeUndefined()
+    expect(chatStore.sessionMap['room-stale']).toBeUndefined()
+  })
 })

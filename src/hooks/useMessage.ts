@@ -317,6 +317,7 @@ export const useMessage = () => {
     {
       label: () => t('menu.remove_from_list'),
       icon: 'delete',
+      testid: 'session-delete-menu-item',
       click: async (item: SessionItem) => {
         await handleMsgDelete(item.roomId)
       }
