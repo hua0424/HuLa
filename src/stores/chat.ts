@@ -631,8 +631,9 @@ export const useChatStore = defineStore(
             return
           }
           // 将会话数据写入 sessionList 并全量重建 sessionMap（清理已消失的 roomId）
+          // #260：与 Tauri 分支同口径过滤 hide=true（已删除会话）
           const list = Array.isArray(data) ? data : data.list || []
-          sessionList.value = [...list]
+          sessionList.value = (list as SessionItem[]).filter((item) => item.hide !== true)
           rebuildSessionMap()
           sortAndUniqueSessionList()
           sessionOptions.value.isLoading = false
@@ -678,7 +679,10 @@ export const useChatStore = defineStore(
         //   }))
         // )
 
-        sessionList.value = [...data]
+        // #260：hide=true（已删除会话）在落 store 时剔除，根治"删除会话重登录复活"——
+        // 写链路（hide_contact_command → setHide）早已置位，此前读链路无人消费该标志。
+        // 口径 hide !== true：false/undefined/字段缺失的老数据一律保留。
+        sessionList.value = (data as SessionItem[]).filter((item) => item.hide !== true)
         syncPersistedUnreadCounts()
         sessionOptions.value.isLoading = false
 
@@ -774,6 +778,9 @@ export const useChatStore = defineStore(
 
     const addSession = async (roomId: string) => {
       const resp = await getSessionDetail({ id: roomId })
+      // #260：已删除（hide=true）的会话收到新消息推送时静默跳过，不复活进列表
+      // （YAGNI：不新增 un-hide 行为，与 getSessionList 过滤口径一致）
+      if (resp?.hide === true) return
       // 先插入会话到列表，确保后续的 updateSession 能找到会话
       sessionList.value.unshift(resp)
       // 同步更新 sessionMap
