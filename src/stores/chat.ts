@@ -796,6 +796,9 @@ export const useChatStore = defineStore(
     // 全程零网络——复用移除前捕获的快照对象插回原位置并重建 map 引用；
     // 不走 addSession（其首行 getSessionDetail 是网络调用，断网回滚必失败）。
     const restoreSession = (session: SessionItem, index?: number) => {
+      // #260 PR#76 P2-1：hide=true（已删除）会话的快照拒绝回插——本函数是过滤语义下
+      // 唯一能把 hide 会话写回可见列表的写点，守卫与 getSessionList/addSession 同口径
+      if (session.hide === true) return
       // 幂等：会话已被其他链路（如 WS 重拉/addSession）恢复时不重复插入
       if (sessionMap.value[session.roomId]) return
       const insertAt = index === undefined ? 0 : Math.min(Math.max(index, 0), sessionList.value.length)

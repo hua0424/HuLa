@@ -169,4 +169,22 @@ describe('useChatStore 会话列表 hide 过滤（#260）', () => {
     expect(chatStore.sessionMap['room-hydrated']).toBeUndefined()
     expect(chatStore.sessionMap['room-stale']).toBeUndefined()
   })
+
+  it('restoreSession 对 hide=true 的快照拒绝回插（乐观移除回滚不得复活已删会话，PR#76 P2-1）', () => {
+    const chatStore = useChatStore()
+
+    chatStore.restoreSession(makeSession('room-hidden', { hide: true }), 0)
+
+    expect(chatStore.sessionList.find((s) => s.roomId === 'room-hidden')).toBeUndefined()
+    expect(chatStore.sessionMap['room-hidden']).toBeUndefined()
+  })
+
+  it('restoreSession 对未隐藏快照正常回插（既有回滚行为不变）', () => {
+    const chatStore = useChatStore()
+
+    chatStore.restoreSession(makeSession('room-x', { hide: false }), 0)
+
+    expect(chatStore.sessionList.map((s) => s.roomId)).toEqual(['room-x'])
+    expect(chatStore.sessionMap['room-x']).toBeDefined()
+  })
 })
