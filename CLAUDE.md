@@ -73,6 +73,7 @@ The Windows tester drives the desktop client via playwright-cli over CDP and **l
 | `chat-header-show-thinking-switch` | 聊天头部「显示 AI 思考」开关 | `components/rightBox/chatBox/ChatHeader.vue` |
 | `inline-thinking-card` | 锚定在触发消息下方的 AI 思考卡根 | `components/rightBox/chatBox/InlineThinkingCard.vue` |
 | `session-list` / `new-chat-button` | conversation list + "+" entry | `views/homeWindow/message/index.vue` / `layout/center/index.vue` |
+| `session-delete-menu-item` | 会话右键菜单「从列表中删除」项（special menu） | `hooks/useMessage.ts`（经 `ContextMenu.vue` 透传） |
 | `aiclaw-group-settings-menu` | 群聊成员右键「群设置」菜单项 | `hooks/useChatMain.ts` |
 | `aiclaw-group-config-modal` | 群内 aiclaw 配置弹窗根 | `components/rightBox/chatBox/ChatMain.vue` |
 | `aiclaw-group-config-rate-limit` / `aiclaw-group-config-daily-limit` / `aiclaw-group-config-respond-ai` / `aiclaw-group-config-mention` / `aiclaw-group-config-save` | aiclaw 群配置表单字段与保存按钮 | `components/aiclaw/AiclawGroupConfigForm.vue` |

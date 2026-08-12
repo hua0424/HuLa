@@ -631,8 +631,9 @@ export const useChatStore = defineStore(
             return
           }
           // 将会话数据写入 sessionList 并全量重建 sessionMap（清理已消失的 roomId）
+          // #260：与 Tauri 分支同口径过滤 hide=true（已删除会话）
           const list = Array.isArray(data) ? data : data.list || []
-          sessionList.value = [...list]
+          sessionList.value = (list as SessionItem[]).filter((item) => item.hide !== true)
           rebuildSessionMap()
           sortAndUniqueSessionList()
           sessionOptions.value.isLoading = false
@@ -678,7 +679,10 @@ export const useChatStore = defineStore(
         //   }))
         // )
 
-        sessionList.value = [...data]
+        // #260：hide=true（已删除会话）在落 store 时剔除，根治"删除会话重登录复活"——
+        // 写链路（hide_contact_command → setHide）早已置位，此前读链路无人消费该标志。
+        // 口径 hide !== true：false/undefined/字段缺失的老数据一律保留。
+        sessionList.value = (data as SessionItem[]).filter((item) => item.hide !== true)
         syncPersistedUnreadCounts()
         sessionOptions.value.isLoading = false
 
@@ -774,6 +778,9 @@ export const useChatStore = defineStore(
 
     const addSession = async (roomId: string) => {
       const resp = await getSessionDetail({ id: roomId })
+      // #260：已删除（hide=true）的会话收到新消息推送时静默跳过，不复活进列表
+      // （YAGNI：不新增 un-hide 行为，与 getSessionList 过滤口径一致）
+      if (resp?.hide === true) return
       // 先插入会话到列表，确保后续的 updateSession 能找到会话
       sessionList.value.unshift(resp)
       // 同步更新 sessionMap
@@ -789,6 +796,9 @@ export const useChatStore = defineStore(
     // 全程零网络——复用移除前捕获的快照对象插回原位置并重建 map 引用；
     // 不走 addSession（其首行 getSessionDetail 是网络调用，断网回滚必失败）。
     const restoreSession = (session: SessionItem, index?: number) => {
+      // #260 PR#76 P2-1：hide=true（已删除）会话的快照拒绝回插——本函数是过滤语义下
+      // 唯一能把 hide 会话写回可见列表的写点，守卫与 getSessionList/addSession 同口径
+      if (session.hide === true) return
       // 幂等：会话已被其他链路（如 WS 重拉/addSession）恢复时不重复插入
       if (sessionMap.value[session.roomId]) return
       const insertAt = index === undefined ? 0 : Math.min(Math.max(index, 0), sessionList.value.length)
