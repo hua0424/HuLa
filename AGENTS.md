@@ -1,150 +1,21 @@
-# HuLa Project Context
+# HuLa 项目规范
 
-## Overview
-HuLa is a modern, cross-platform Instant Messaging (IM) system. It leverages **Tauri v2** for the application container, **Vite 7** for fast frontend tooling, **Vue 3** for the user interface, and **TypeScript** for type safety. The backend logic is implemented in **Rust**.
+HuLa 是 Tauri v2 / Rust + Vue 3 / TypeScript 客户端。此仓作为 AIChat 子模块时，遵守伞仓项目规范及 `../docs/agents/verification.md`；当前 checkout 分支不代表其他仓的目标版本。
 
-The project supports:
-- **Desktop:** Windows, macOS, Linux
-- **Mobile:** Android, iOS
+## 编码与安全
 
-## Tech Stack
+- 2 空格缩进、LF；Biome 检查，Vue 模板使用现有 Prettier 配置。组件用 PascalCase，composable 用 useXxx，优先 `<script setup>` 与 UnoCSS。
+- Pinia 使用 setup store；解构状态用 `storeToRefs`，业务动作放 actions，依赖 store 在 action 中实例化，持久化按需启用。
+- 主题优先使用局部 UnoCSS；跨组件复用的语义色放 `src/styles/scss/global/variable.scss`，保持 light/dark 规则。
+- 自动化使用的控件保持稳定 kebab-case `data-testid` 和 `aria-label`；更名时同步测试选择器。完整钩子参考按需读取。
+- 删除未使用变量，不以 `_` 掩盖；提交、日志、文档不加 emoji。提交遵循 Conventional Commits。
+- 凭据留在 ignored 本地配置；SQLite 当前未加密，不能按加密存储假定安全。未经用户要求不改 `.rules`，也不要求三份文档全文同步。
+- 保护已有工作树，只修改和暂存本任务路径。
 
-### Frontend
-- **Framework:** Vue 3 (Composition API)
-- **Language:** TypeScript
-- **Build Tool:** Vite 7
-- **State Management:** Pinia (with persistence plugins)
-- **Routing:** Vue Router
-- **Styling:** UnoCSS, Sass
-- **UI Libraries:** Naive UI (Desktop), Vant (Mobile)
-- **I18n:** vue-i18n
+## 验证与按需参考
 
-### Backend (Rust / Tauri)
-- **Core:** Tauri v2
-- **Database:** SQLite (managed via SeaORM; `libsqlite3-sys` bundled — not encrypted)
-- **Async Runtime:** Tokio
-- **HTTP Client:** Reqwest
-- **WebSocket:** tokio-tungstenite
-- **Audio:** Rodio
-
-## Development Workflow
-
-### Prerequisites
-- Node.js (v20+ recommended)
-- pnpm (v10+ recommended)
-- Rust (latest stable)
-- Android Studio / Xcode (for mobile development)
-
-### Key Commands
-
-| Action | Command | Description |
-| :--- | :--- | :--- |
-| **Install Dependencies** | `pnpm install` | Installs Node.js dependencies. |
-| **Start Desktop Dev** | `pnpm tauri:dev` | Starts the Tauri development server for desktop. |
-| **Build Desktop** | `pnpm tauri:build` | Builds the production application for desktop (interactive). |
-| **Commit Changes** | `pnpm commit` | Interactive git commit using Commitizen. |
-| **Lint/Format** | `pnpm check` | Checks code using Biome. |
-| **Run Tests** | `pnpm test:run` | Runs unit tests with Vitest. |
-
-### Directory Structure
-
-- **`src/`**: Frontend source code.
-    - **`views/`**: Page components.
-    - **`stores/`**: Pinia stores.
-    - **`services/`**: API and service layers (e.g., WebSocket adapter).
-    - **`components/`**: Reusable Vue components.
-    - **`layout/`**: App layout structures.
-- **`src-tauri/`**: Rust backend source code.
-    - **`src/`**: Main Rust application logic.
-    - **`entity/`**: SeaORM entity definitions.
-    - **`migration/`**: Database migrations.
-    - **`tauri.conf.json`**: Tauri configuration.
-- **`tauri-plugin-hula/`**: Custom local Tauri plugin.
-
-## Coding Style & Naming Conventions
-
-- Indent 2 spaces, LF endings, trim whitespace (see `.editorconfig`).
-- Format/lint with Biome: `pnpm check` (read-only) / `pnpm check:write` (fixes). Vue templates also use Prettier: `pnpm format:vue` or `pnpm format:all`.
-- Prefer import aliases: `@/` → `src/`, `~/` → repo root.
-- Naming: components `PascalCase.vue`, composables `useXxx.ts`, Pinia stores in `src/stores/`.
-- **Commits:** Use `pnpm commit` to enforce Conventional Commits.
-- **Styling:** Use UnoCSS utility classes where possible.
-- **State:** Use Pinia for global state; prefer Composition API `<script setup>`.
-- **Database:** Use SeaORM entities for database interactions.
-- **Test hooks:** User-facing controls the automated tester targets carry a stable kebab-case `data-testid` (+ `aria-label`); the tester locates by `data-testid`, never by text/class/DOM path. Add them when introducing such a control and keep them stable across refactors. Canonical registry + rationale: see `CLAUDE.md` → "Automated UI test hooks".
-
-## Architecture Notes
-- **Communication:** Real-time messaging uses WebSockets (`tokio-tungstenite` on Rust side).
-- **Security:** Local SQLite storage is currently unencrypted (no SQLCipher / `PRAGMA key` in the build).
-- **Plugins:** Extensive use of Tauri plugins (both official and custom) for native capabilities.
-
-## Security & Configuration
-
-- Don't add secrets to tracked files. Use `.env.local` for personal tokens/keys.
-- Package installs default to the registry in `.npmrc`; if it's unavailable, override locally: `pnpm config set registry https://registry.npmjs.org/`.
-
-## Important
-
-- Do not prefix unused variables with an underscore, delete them instead
-- Do not use emojis in commit messages, logs, or documentation
-- Never change the .rules file unless the user specifically asks for it
-
-## Pinia
-
-This project uses Pinia for state management with specific patterns:
-
-- Always create stores with the setup-style `defineStore('name', () => { ... })` for better type safety and composition.
-- Use `storeToRefs` when destructuring state so reactivity is preserved.
-- Group business logic inside the store's actions; components should only call actions/state.
-- When a store depends on another store, import and call the other store factory inside the setup to share a single instance.
-- Use `pinia-plugin-persistedstate` (already registered globally) for stores that must survive reloads—opt in per store via `persist: true`.
-
-### Store Access Patterns
-
-- Access other stores inside Pinia actions by instantiating the store at the top of the action: `const settings = useEditorSettingsStore();`
-- Prefer reading dependent store state inside actions rather than passing parameters through components.
-- Keep all imperative logic inside actions; components should remain declarative and simple.
-- Avoid exporting raw refs outside of the store unless absolutely necessary; expose derived state through getters instead.
-
-### CSS Variables & UnoCSS
-
-Theme tokens live in `src/styles/scss/global/variable.scss`, but prefer inline UnoCSS utilities for simple light/dark styling.
-
-**Defining Tokens**
-- Default to per-element classes such as `bg-[lightColor] dark:bg-[darkColor]` or `text-[lightText] dark:text-[darkText]` so colors stay close to the component.
-- Promote a color to `variable.scss` only when it is reused across multiple components or represents a semantic token (e.g. menu background).
-- Keep light values on `:root` and dark overrides under `html[data-theme="dark"]` to leverage the existing data attribute toggle.
-- When adding gradient or complex values, still store them as a variable (see `--bg-menu`) and document them inline in `variable.scss`.
-
-**Using Tokens with UnoCSS**
-- Prefer UnoCSS bracket syntax to consume tokens: `bg-[--center-bg-color]`, `text-[--text-color]`, `border-[--line-color]`.
-- For multi-property helpers, apply directives are available because `@unocss/transformer-directives` is enabled: `@apply text-[--text-color]`.
-- When a component needs conditional theming, toggle `data-theme` on `<html>` (light/dark) or add scoped data attributes (e.g. `data-theme="compact"`) and extend `variable.scss` with the selector.
-
-### language
-- The language of the reply is determined based on the language of the user's question. For example, if a user asks a question in simplified Chinese, reply in simplified Chinese.
-
-## Cursor Cloud specific instructions
-
-### Services overview
-
-This is a Tauri v2 desktop client application. The only service to run locally is the combined frontend+backend via `pnpm tauri:dev`. The app connects to a remote backend server (HuLa-Server) for IM functionality; that server is **not** part of this repo and does not need to be started locally.
-
-### Key commands
-
-See the "Key Commands" table above. Quick reference:
-
-- **Lint:** `pnpm check` (Biome, read-only) / `pnpm check:write` (auto-fix)
-- **Tests:** `pnpm test:run` (Vitest; currently no test files exist)
-- **Frontend only:** `pnpm dev` (Vite dev server on port 5210)
-- **Full desktop app:** `pnpm tauri:dev` (compiles Rust backend + launches Tauri webview)
-
-### Caveats and gotchas
-
-- The `pnpm install` preinstall hook runs `scripts/check-all.js`, which enforces Rust >= 1.88.0. If Rust is outdated, run `rustup update stable && rustup default stable` first.
-- The Cargo workspace uses `edition = "2024"` which requires Rust 1.85+.
-- On Linux, Tauri requires system libraries: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `libasound2-dev`, `libssl-dev`. These must be installed via `apt` before `cargo check` or `pnpm tauri:dev` will work.
-- The `.npmrc` defaults to the Huawei Cloud npm mirror. If it is unreachable, override with `pnpm config set registry https://registry.npmjs.org/`.
-- Opening `http://localhost:5210` in a browser shows a blank page because the Vue app depends on Tauri runtime APIs (`@tauri-apps/plugin-os`, invoke, etc.). To see the full UI, use `pnpm tauri:dev`.
-- First `pnpm tauri:dev` triggers a full Rust compilation (~2-4 minutes). Subsequent runs use incremental compilation and are much faster.
-- `pnpm install` auto-generates `src-tauri/configuration/local.yaml` from `production.yaml` if it does not exist.
+- 以当前 `package.json`、Cargo 配置和测试输出确定命令与范围；常用检查为 `pnpm check`、`pnpm test:run` 和适用平台的 Rust 编译检查。跳过、失败与未覆盖平台须单列。
+- 客户端运行结论须有对应版本的真实 Tauri 实例证据；自检与独立验证分别记录，不能互相冒充。
+- 构建/平台适配、Pinia/主题、UI testid 或 Vitest 故障：读 [技术参考](docs/agent-reference.md) 相应章节。
+- Windows 客户端自动化：读伞仓 `.codex/skills/aichat-test-skill/SKILL.md`；先核实本次实例归属与版本，同机只能一个驱动者。
+- 命令行构建或启动失败时核实当前依赖检查脚本；浏览器打开 Vite 页面不能代替 Tauri 真机验证，Linux cargo check 不覆盖 Windows 专属代码。

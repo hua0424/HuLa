@@ -1,0 +1,131 @@
+# HuLa 技术参考
+
+构建、平台接口、测试钩子或单测故障排查时按章节读取。项目规范入口为 [AGENTS.md](../AGENTS.md)，在伞仓开发时质量要求见 `../../docs/agents/verification.md`。
+
+## Overview
+
+HuLa is a modern, cross-platform Instant Messaging (IM) client. The application container is **Tauri v2** (Rust backend), the UI is **Vue 3 + TypeScript** built with **Vite 7**. It is a git submodule of the `aichatoverview` umbrella repo and talks to HuLa-Server (`/server`) over HTTP + WebSocket.
+
+Targets: **Desktop** (Windows, macOS, Linux), **Mobile** (Android, iOS), and **Web** (browser build via `TAURI_ENV_PLATFORM=web`).
+
+## Tech Stack
+
+**Frontend:** Vue 3 (Composition API, `<script setup>`), TypeScript, Vite 7, Pinia (with persistence), Vue Router, UnoCSS + Sass, Naive UI (desktop) / Vant (mobile), vue-i18n.
+
+**Backend (Rust / Tauri v2):** Tokio async runtime, Reqwest (HTTP to HuLa-Server), `tokio-tungstenite` (WebSocket), Rodio (audio), and **SeaORM over SQLite** for the local store (`tauri-plugin-sql` + `libsqlite3-sys` bundled). Note: the local SQLite DB is **not** currently encrypted — there is no SQLCipher / `PRAGMA key` in the build, despite older docs implying otherwise.
+
+## Build and test operations
+
+### Prerequisites (hard-enforced by `scripts/check-dependencies.js` on `pnpm install`)
+
+- Node.js `^20.19.0 || >=22.12.0`
+- pnpm `>=10`
+- Rust `>=1.88.0` (Cargo workspace uses `edition = "2024"`, which needs ≥1.85; the check requires ≥1.88). Update with `rustup update stable`.
+- Android Studio / Xcode for mobile builds.
+
+If the check fails the install aborts. On Linux, Tauri also needs system libs: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `libasound2-dev`, `libssl-dev`.
+
+### Key commands
+
+| Action | Command | Notes |
+|---|---|---|
+| Install deps | `pnpm install` | Runs the version check + auto-generates `src-tauri/configuration/local.yaml` from `production.yaml` |
+| Desktop dev | `pnpm tauri:dev` (`pnpm td`) | Compiles Rust + launches the Tauri webview |
+| Frontend-only dev | `pnpm dev` | Vite on port **5210** (blank in a plain browser — needs the Tauri runtime) |
+| Web target dev/build | `pnpm web:dev` / `pnpm web:build` | `TAURI_ENV_PLATFORM=web` |
+| Mobile dev | `pnpm adev` (android) / `pnpm idev` (ios) | |
+| Build desktop | `pnpm tauri:build` (`pnpm tb`) | Interactive (`scripts/interactive-build-inquirer.js`) |
+| Lint/format check | `pnpm check` | Biome, read-only |
+| Auto-fix | `pnpm check:write` / `pnpm format:all` | Biome (+ Prettier for `.vue` via `format:vue`) |
+| Tests | `pnpm test:run` (`test:ui`, `coverage`) | Vitest + happy-dom; test files and executed scope are determined from the current checkout and test output |
+| Rust check (no host toolchain) | `docker/cargo-check/run.sh` | Containerized `cargo check` for `src-tauri/` — catch Rust compile errors pre-PR. **Linux target + common code only**; does NOT build a `.exe` and does NOT compile `#[cfg(target_os="windows")]` branches — Windows-specific changes also need a Windows build. See `docker/cargo-check/README.md`. |
+| Commit | `pnpm commit` | Commitizen, enforces Conventional Commits |
+
+First `pnpm tauri:dev` does a full Rust compile (~2–4 min); later runs are incremental. `.npmrc` defaults to a Huawei Cloud mirror — if unreachable: `pnpm config set registry https://registry.npmjs.org/`.
+
+## Coding Style & Conventions
+
+- 2-space indent, LF, trim whitespace (`.editorconfig`). Format/lint with Biome; Vue templates also via Prettier.
+- Import aliases (defined in `vite.config.ts`): `@` → `src/`, `#` → `src/mobile/`, `~` → repo root.
+- Naming: components `PascalCase.vue`, composables `useXxx.ts`, Pinia stores in `src/stores/`.
+- Prefer Composition API `<script setup>` and UnoCSS utility classes.
+- **Do not** prefix unused variables with `_` — delete them. **Do not** use emojis in commits, logs, or docs.
+- Reply in the language the user asked in (e.g. Simplified Chinese question → Simplified Chinese answer).
+
+### Automated UI test hooks (`data-testid` / `aria-label`)
+
+Windows desktop automation drives the desktop client via playwright-cli over CDP and **locates elements by `data-testid`** — never by visible text, CSS class, or DOM path (those churn with the UI). When you add or refactor a user-facing control that tests target, give it a stable kebab-case `data-testid` plus an `aria-label` (the `aria-label` also serves the UIA accessibility fallback). Both are plain HTML attributes — additive, no visual/behavior impact; on Naive UI components they fall through to the root DOM node, so put them on the `<n-xxx>` tag. Keep a testid stable across refactors; if you must rename one, say so in the PR so automation consumers update their scripts. Test hook reference (verify against current components and umbrella `tests/desktop/selectors.json`; keep test selectors synchronized):
+
+| testid | control | file |
+|---|---|---|
+| `login-username` / `login-password` / `login-button` | login fields + submit | `views/loginWindow/Login.vue` |
+| `message-input` / `send-button` | composer + desktop send | `components/rightBox/MsgInput.vue` |
+| `composer-error` | empty-message inline error under composer | `components/rightBox/MsgInput.vue` |
+| `chat-history` | scrollable message container | `components/rightBox/chatBox/ChatMain.vue` |
+| `user-message` / `assistant-message` | one bubble, conditional on `isMe` | `components/rightBox/renderMessage/index.vue` |
+| `retry-button` | failed-message retry icon (resend) | `components/rightBox/renderMessage/index.vue` |
+| `message-sender-name` (+ `data-from-user-uid` / `data-user-type`) | group sender name span; data-* associate name↔uid↔userType (no visible badge) | `components/rightBox/renderMessage/index.vue` |
+| `audio-call-message` / `video-call-message` | call-message bubble root | `renderMessage/AudioCall.vue` / `VideoCall.vue` |
+| `markdown-content` / `image-content` | content inside a bubble | `renderMessage/Text.vue` / `Image.vue` |
+| `typing-status` | streaming-reply / AI 思考状态徽章 | `components/rightBox/chatBox/InlineThinkingCard.vue` |
+| `chat-header-show-thinking-switch` | 聊天头部「显示 AI 思考」开关 | `components/rightBox/chatBox/ChatHeader.vue` |
+| `inline-thinking-card` | 锚定在触发消息下方的 AI 思考卡根 | `components/rightBox/chatBox/InlineThinkingCard.vue` |
+| `session-list` / `new-chat-button` | conversation list + "+" entry | `views/homeWindow/message/index.vue` / `layout/center/index.vue` |
+| `session-delete-menu-item` | 会话右键菜单「从列表中删除」项（special menu） | `hooks/useMessage.ts`（经 `ContextMenu.vue` 透传） |
+| `aiclaw-group-settings-menu` | 群聊成员右键「群设置」菜单项 | `hooks/useChatMain.ts` |
+| `aiclaw-group-config-modal` | 群内 aiclaw 配置弹窗根 | `components/rightBox/chatBox/ChatMain.vue` |
+| `aiclaw-group-config-rate-limit` / `aiclaw-group-config-daily-limit` / `aiclaw-group-config-respond-ai` / `aiclaw-group-config-mention` / `aiclaw-group-config-save` | aiclaw 群配置表单字段与保存按钮 | `components/aiclaw/AiclawGroupConfigForm.vue` |
+| `aiclaw-silent-badge` | 未批准 aiclaw 沉默标识（常驻群成员面板 + 抽屉 + 群成员管理页） | `components/rightBox/chatBox/ChatSidebar.vue` 等（逻辑 `hooks/useSilentAiclaw.ts`） |
+| `aiclaw-add-to-group-button` / `aiclaw-add-to-group-modal` / `aiclaw-add-to-group-select` / `aiclaw-add-to-group-confirm` / `aiclaw-add-to-group-empty` | AI 助理面板「添加到群」入口与选群弹窗 | `views/aiAssistantWindow/index.vue` / `components/aiclaw/AiclawAddToGroupModal.vue` |
+| `aiclaw-adapter-badge` | AI 助理 agent 类型徽标（管理列表卡片 + 详情页头部，adapterType 原始值直显） | `views/aiAssistantWindow/index.vue` / `mobile/views/my/AiAssistant.vue` / `mobile/views/my/AiAssistantDetail.vue` |
+| `aiclaw-edit-profile-button` / `aiclaw-edit-profile-name` / `aiclaw-edit-profile-description` / `aiclaw-edit-profile-save` | AI 助理「编辑资料」入口与弹窗名称/简介/保存 | `views/aiAssistantWindow/index.vue` / `mobile/views/my/AiAssistantDetail.vue` / `components/aiclaw/AiclawEditProfileForm.vue` |
+| `chat-footer-file` / `chat-footer-image` / `chat-footer-voice` | 桌面端底部文件/图片/语音上传按钮 | `components/rightBox/chatBox/ChatFooter.vue` |
+| `mobile-voice-button` / `mobile-emoji-button` / `mobile-more-button` / `mobile-send-button` | 移动端输入栏语音/表情/更多/发送按钮 | `components/rightBox/MsgInput.vue` |
+| `mobile-more-item-file` / `mobile-more-item-image` / `mobile-more-item-video` / `mobile-more-item-history` / `mobile-more-item-videocall` | 移动端更多面板功能入口 | `mobile/components/chat-room/panel/More.vue` |
+| `file-upload-confirm` / `file-upload-cancel` | 文件上传弹窗发送/取消按钮 | `components/rightBox/FileUploadModal.vue` |
+| `video-message` | 视频消息气泡根（含缩略图与播放入口） | `components/rightBox/renderMessage/Video.vue` |
+
+### Vitest unit-test gotchas (happy-dom)
+
+Hard-won traps (REQ-017) — each failure surfaces far from its cause, so check this list before treating a spec failure as a product bug:
+
+- **Identity-mocking `storeToRefs` breaks `.value`** — `vi.mock('pinia', () => ({ storeToRefs: (s) => s }))` leaves plain mock-store properties without `.value`, so `activeItem.value` is `undefined` deep in render. Give the mock store real `ref()`s instead (precedent: `mobile/components/chat-room/panel/__tests__/More.spec.ts`).
+- **Real `storeToRefs` only picks refs/reactive props** — with real pinia + a plain mock store object, non-ref properties are silently dropped from the destructured result (e.g. `themes` becomes `undefined`). Same fix: wrap mock values in `ref()`.
+- **naive-ui `<n-input>` needs `v-model:value`** — bare `v-model` compiles but never updates the model (this was the #197 product-code root cause, not a test issue). If a spec "can't type into" an input, suspect the component's binding first; a real-component spec is the fastest proof.
+- **`<n-virtual-list>` doesn't render slots under happy-dom** — stub by its internal component name `VirtualList` (not `n-virtual-list`) with `renderStubDefaultSlot: true` and a custom `props: ['items']` template forwarding items to the scoped slot (precedent: `components/rightBox/__tests__/ApplyList.aiclawNotice.spec.ts`).
+- **Module-level side effects run even for stubbed components** — stubbing a child in `mount()` doesn't stop its real module's top-level code (e.g. `new Worker()`, store instantiation); `vi.mock` the module itself (precedent: `layout/right/__tests__/applyListKey.spec.ts`).
+
+## Architecture: platform abstraction is the central design
+
+The same Vue codebase runs in three runtimes, switched by `@/utils/PlatformConstants` (`isWeb()`, `isMobile()`, desktop). Two seams matter most:
+
+- **WebSocket** — `src/services/webSocketAdapter.ts` lazily picks the implementation: `webSocketWeb.ts` (browser-native `WebSocket`) on web, else `webSocketRust.ts` (traffic flows through the Rust backend, surfaced to Vue via Tauri events). Always import the adapter, never a concrete impl. Message/type contracts live in `wsType.ts`.
+- **Native calls** — `src/services/tauriCommand.ts` wraps `invoke()` (`@tauri-apps/api/core`) around the Rust `#[command]`s; command names are enumerated in `src/enums` (`TauriCommand`) and errors are normalized through `utils/TauriInvokeHandler`. On web, `webLoginCommand.ts` is the fallback.
+
+Adding a native capability touches **both sides**: a Rust `#[command]` under `src-tauri/src/command/`, its registration in `get_invoke_handlers()` / `generate_handler!` in `src-tauri/src/lib.rs`, and a TS wrapper in `tauriCommand.ts`.
+
+## Rust backend (`src-tauri/src/`)
+
+`lib.rs` is the Tauri entry (`run()`, registers all commands). `command/*.rs` = invokable commands, one file per feature area (chat history, contacts, messages, upload, oauth, user, settings, ai, …). `websocket/` = the native WS client (`client.rs`, `message.rs`), dispatched to the Vue side via Tauri events. `repository/` + `entity/` + `migration/` = SeaORM over SQLite. `desktops/` vs `mobiles/` = platform-specific code. `im_request_client.rs` = HTTP client to HuLa-Server.
+
+Per-platform Tauri config: `src-tauri/tauri.conf.json` is the base; `tauri.{windows,macos,linux,android,ios}.conf.json` override per target. Runtime app config (server URLs, keys) is `src-tauri/configuration/*.yaml` — `local.yaml` is git-ignored and auto-generated from `production.yaml` on install; point `backend.base_url` / `ws_url` there at your HuLa-Server.
+
+## Frontend structure (`src/`)
+
+State is a large set of Pinia **setup-stores** in `src/stores/` (`chat, `contacts`, `group`, `user`, `ws`, `userStatus`, `initialSync`, `cached`, `session*`, …). Other key dirs: `services/` (WS + Tauri bridges, i18n, fingerprint, map/translate APIs), `strategy/` (`MessageStrategy.ts` / `TriggerStrategy.ts` — message-type and @-trigger handling), `hooks/`, `views/`, `mobile/` (mobile-only views, alias `#`), `components/`, `layout/`, `workers/`.
+
+### Pinia patterns
+
+- Always `defineStore('name', () => { ... })` (setup style); use `storeToRefs` when destructuring to keep reactivity.
+- Keep imperative logic in actions; components stay declarative and call actions/state. Expose derived state via getters, not raw refs.
+- Access a dependent store by instantiating it at the top of the action (`const settings = useEditorSettingsStore()`), sharing one instance.
+- `pinia-plugin-persistedstate` is registered globally (`src/stores/index.ts`) — opt in per store via `persist: true`. `pinia-shared-state` syncs state across browser tabs.
+
+### Theming (UnoCSS + Sass)
+
+`src/styles/scss/global/variable.scss` is auto-injected into every SCSS file (`vite.config.ts` `additionalData`). Prefer inline UnoCSS for simple light/dark (`bg-[lightColor] dark:bg-[darkColor]`); promote a color to `variable.scss` only when reused or semantic. Light values on `:root`, dark overrides under `html[data-theme="dark"]`. Consume tokens via UnoCSS bracket syntax (`bg-[--center-bg-color]`) or `@apply` (`@unocss/transformer-directives` is enabled, along with `transformer-variant-group`).
+
+## Security & Configuration
+
+- Don't add secrets to tracked files; use `.env.local` for personal tokens/keys.
+- Runtime config goes in `src-tauri/configuration/local.yaml` (git-ignored).
