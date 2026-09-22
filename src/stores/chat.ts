@@ -265,19 +265,26 @@ export const useChatStore = defineStore(
         messageOptions[roomId] = newRoomProgress()
         return messageOptions[roomId]
       }
-      const merged: RoomMessageProgress = {
-        ...newRoomProgress(),
-        ...current,
-        isLast: deriveIsLast({
-          localExhausted: current.localExhausted ?? false,
-          remoteStatus: current.remoteStatus ?? 'unknown'
-        })
-      }
+      // aichatoverview#285：必须就地补齐并返回同一对象，禁止按引用替换。
+      // 首屏回填的加载 UI（historyState/currentMessageOptions）在 IPC 等待期间求值，
+      // 每次替换都会孤立在途 loadPageMsg 持有的引用：完成时把 isLoading=false、
+      // 远端游标写到孤儿对象，留下 unknown+isLoading:true 的卡死进度，后续 loadMore
+      // 被 `if (progress.isLoading) return` 静默吞掉，深历史永远无法翻页。
+      if (current.isLoading === undefined) current.isLoading = false
+      if (current.localCursor === undefined) current.localCursor = ''
+      if (current.localExhausted === undefined) current.localExhausted = false
+      if (current.remoteCursor === undefined) current.remoteCursor = ''
+      if (current.remoteStatus === undefined) current.remoteStatus = 'unknown'
+      if (current.error === undefined) current.error = ''
+      const full = current as RoomMessageProgress
       // 旧 cursor 即本地游标
-      if (!merged.localCursor && merged.cursor) merged.localCursor = merged.cursor
-      merged.cursor = merged.localCursor
-      messageOptions[roomId] = merged
-      return merged
+      if (!full.localCursor && full.cursor) full.localCursor = full.cursor
+      full.isLast = deriveIsLast({
+        localExhausted: full.localExhausted ?? false,
+        remoteStatus: full.remoteStatus ?? 'unknown'
+      })
+      full.cursor = full.localCursor ?? ''
+      return full
     }
 
     const refreshDerivedEnd = (roomId: string) => {
@@ -464,9 +471,10 @@ export const useChatStore = defineStore(
       // 1. 清空当前房间的旧消息数据
       clearRoomMessagesExceptTransient(roomId)
 
-      // 2. 切房重新加载首屏时统一初始化本次浏览进度（本地/远端双游标，远端未知）
+      // 2. 切房重新加载首屏时统一初始化本次浏览进度（本地/远端双游标，远端未知）；
+      // 就地重置保持对象身份，旧请求的浏览代次已推进，其结果会被丢弃而不污染新进度
       browseSeq[roomId] = (browseSeq[roomId] ?? 0) + 1
-      messageOptions[roomId] = newRoomProgress()
+      Object.assign(ensureProgress(roomId), newRoomProgress())
 
       // 3. 清空回复映射
       if (currentReplyMap.value) {
@@ -627,6 +635,15 @@ export const useChatStore = defineStore(
 
     // 同账号/房间/游标的请求合并互斥；预热晚返回不得覆盖前台已推进的分页状态
     const inflightPageMsg = new Map<string, Promise<PageLoadResult>>()
+    // aichatoverview#285：isLoading 只允许被在途分页请求持有。同房多流程（切房/手动刷新/
+    // 加载 UI 求值）并发时，去重共享或代次丢弃的链都可能不再拥有 loading，完成后必须
+    // 把无人持有的 loading 释放，否则 loadMore 门禁永久吞掉后续翻页。
+    const releaseRoomLoadingIfIdle = (roomId: string, excludeKey?: string) => {
+      for (const key of inflightPageMsg.keys()) {
+        if (key !== excludeKey && key.startsWith(`${roomId}|`)) return
+      }
+      ensureProgress(roomId).isLoading = false
+    }
     // aichatoverview#285 D1：本浏览代次内服务端确认过的远端游标（独立于可被重置的
     // 进度对象，仅退出/清缓存时清理），游标传递丢失时用它恢复，绝不重拉首页
     const lastGoodRemoteCursor = new Map<string, string>()
@@ -718,18 +735,22 @@ export const useChatStore = defineStore(
           )
         }
       } catch (error) {
-        // 网络/鉴权/解析失败：保留已显示消息、原游标和原终止状态，释放 loading，展示错误及重试入口
+        // 网络/鉴权/解析失败：保留已显示消息、原游标和原终止状态，展示错误及重试入口；
+        // loading 只在同代或无他人在途时释放，避免误清新代次请求的持有
         if ((browseSeq[roomId] ?? 0) === requestBrowseSeq) {
           const current = ensureProgress(roomId)
           current.isLoading = false
           current.error = error instanceof Error ? error.message : String(error)
+        } else {
+          releaseRoomLoadingIfIdle(roomId, `${roomId}|${source}|${cursor}`)
         }
         console.error(`[chat] getPageMsg(${source}) 失败:`, error)
         return { roomId, source, count: 0, ok: false, error: error instanceof Error ? error.message : String(error) }
       }
 
-      // 切房后不能把旧请求的成功写到新房间
+      // 切房后不能把旧请求的成功写到新房间；旧代次顺带释放无人持有的 loading
       if ((browseSeq[roomId] ?? 0) !== requestBrowseSeq) {
+        releaseRoomLoadingIfIdle(roomId, `${roomId}|${source}|${cursor}`)
         return { roomId, source, count: 0, ok: false, error: '房间已切换，丢弃本次结果' }
       }
 
@@ -1864,9 +1885,10 @@ export const useChatStore = defineStore(
           messageMap[requestRoomId] = {}
         }
 
-        // 2. 重置双游标浏览进度，强制cursor为空以获取最新消息
+        // 2. 重置双游标浏览进度，强制cursor为空以获取最新消息；就地重置保持对象身份，
+        // 与本房间在途请求共享同一进度对象，其完成会正常释放 isLoading 并写入游标
         browseSeq[requestRoomId] = (browseSeq[requestRoomId] ?? 0) + 1
-        messageOptions[requestRoomId] = newRoomProgress()
+        Object.assign(ensureProgress(requestRoomId), newRoomProgress())
         ensureProgress(requestRoomId).isLoading = true
 
         // 3. 清空回复映射
@@ -1881,6 +1903,10 @@ export const useChatStore = defineStore(
         thinkingByTrigger.delete(requestRoomId)
         thinkingMetadataLoaded.delete(requestRoomId)
         await ensureFirstScreen(requestRoomId)
+        // aichatoverview#285：本链去重共享到同房在途请求时可能未实际执行任何
+        // loadPageMsg（共享任务绑定对方代次被丢弃），手动置的 isLoading 必须在
+        // 无人在途时释放，否则后续 loadMore 永久被门禁吞掉
+        releaseRoomLoadingIfIdle(requestRoomId)
 
         console.log('[Network] 已重置并刷新当前聊天室的消息列表')
       } catch (error) {
