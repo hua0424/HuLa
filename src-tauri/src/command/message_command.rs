@@ -437,9 +437,11 @@ async fn page_msg_remote(
 
     info!(
         target: "tauri_db",
-        "[history-backfill] source=remote roomId={} pageSize={} returned={} inserted={} existing={} tombstone={} roomMismatch={} isLast={}",
+        "[history-backfill] source=remote roomId={} pageSize={} reqCursor={} respCursor={} returned={} inserted={} existing={} tombstone={} roomMismatch={} isLast={}",
         room_id,
         page_size,
+        request_cursor,
+        remote_cursor,
         returned,
         stats.inserted,
         stats.skipped_existing,
@@ -1316,5 +1318,37 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(dto.cursor.as_deref(), Some("9007199254740993"));
+    }
+
+    #[test]
+    fn remote_page_params_carry_cursor_for_advancing() {
+        // aichatoverview#285 D1 回归：翻页请求必须把游标发给服务端（query 参数名对齐
+        // 服务端 CursorPageBaseReq），否则服务端回首页、深历史翻不动；首页请求省略 cursor
+        let next = serde_json::to_value(RemoteMsgPageParams {
+            room_id: "143651494275072".to_string(),
+            page_size: 20,
+            cursor: Some("181387987295232".to_string()),
+            skip: false,
+        })
+        .unwrap();
+        assert_eq!(
+            next.get("cursor").and_then(|c| c.as_str()),
+            Some("181387987295232")
+        );
+        assert_eq!(
+            next.get("roomId").and_then(|c| c.as_str()),
+            Some("143651494275072")
+        );
+        let first = serde_json::to_value(RemoteMsgPageParams {
+            room_id: "143651494275072".to_string(),
+            page_size: 20,
+            cursor: None,
+            skip: false,
+        })
+        .unwrap();
+        assert!(
+            first.get("cursor").is_none(),
+            "homepage fetch must omit cursor"
+        );
     }
 }

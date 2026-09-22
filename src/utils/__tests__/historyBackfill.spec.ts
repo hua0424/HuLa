@@ -10,6 +10,7 @@ import {
   decideLoadMore,
   deriveIsLast,
   formatPreheatLog,
+  resolveRemoteCursor,
   shouldAdvanceRemote,
   splitFreshRemoteIds
 } from '@/utils/historyBackfill'
@@ -69,5 +70,18 @@ describe('history backfill strategy (#285)', () => {
     const { fresh, duplicate } = splitFreshRemoteIds(new Set(['1', '2']), ['2', '3', '3', '4'])
     expect(fresh).toEqual(['3', '4'])
     expect(duplicate).toBe(2)
+  })
+
+  it('远端请求游标：链未开始时空串合法，链已开始丢失时用确认值恢复', () => {
+    // D1 回归：more + 空请求游标不得重拉首页，必须用上次服务端确认值继续
+    expect(resolveRemoteCursor('', 'more', '181387987295232')).toBe('181387987295232')
+    // 非空请求永远优先
+    expect(resolveRemoteCursor('172662861849600', 'more', '181387987295232')).toBe('172662861849600')
+    // 首页回填（unknown）保持空串
+    expect(resolveRemoteCursor('', 'unknown', '181387987295232')).toBe('')
+    expect(resolveRemoteCursor('', 'unknown', undefined)).toBe('')
+    // 无确认值可恢复时退回空串（下轮按确认游标继续，自愈）
+    expect(resolveRemoteCursor('', 'more', undefined)).toBe('')
+    expect(resolveRemoteCursor('', 'end', '181387987295232')).toBe('')
   })
 })

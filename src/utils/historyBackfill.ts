@@ -64,6 +64,23 @@ export const formatPreheatLog = (counts: PreheatCounts): string => {
   return `本地预加载：有消息 ${counts.withMessages}，空结果 ${counts.empty}（远端未验证），失败 ${counts.failed}，总计 ${counts.total}`
 }
 
+/**
+ * 远端请求游标解析（aichatoverview#285 D1 返工）：`cursor=''` 只在远端链未开始
+ * （unknown）时合法（首页回填）；链已开始（more）却请求游标为空，说明本浏览代次
+ * 内服务端已确认的游标在传递中丢失，此时用最后一次确认值恢复继续向前翻页——
+ * 重拉首页的结果 100% 已缓存（只增请求不增消息，深历史永远翻不动）。
+ * `end` 不会走到请求（decideLoadMore 已 stop），保守回退空串。
+ */
+export const resolveRemoteCursor = (
+  requested: string,
+  remoteStatus: RemoteStatus,
+  lastGood: string | null | undefined
+): string => {
+  if (requested) return requested
+  if (remoteStatus === 'more') return lastGood ?? ''
+  return ''
+}
+
 /** 远端 ID 去重：重复拉到已缓存记录按 ID 去重，不以本地最旧 ID 跳过缺口 */
 export const splitFreshRemoteIds = (
   existingIds: Set<string>,

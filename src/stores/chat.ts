@@ -30,6 +30,7 @@ import {
   decideLoadMore,
   deriveIsLast,
   formatPreheatLog,
+  resolveRemoteCursor,
   shouldAdvanceRemote,
   type RemoteStatus
 } from '@/utils/historyBackfill'
@@ -626,6 +627,9 @@ export const useChatStore = defineStore(
 
     // 同账号/房间/游标的请求合并互斥；预热晚返回不得覆盖前台已推进的分页状态
     const inflightPageMsg = new Map<string, Promise<PageLoadResult>>()
+    // aichatoverview#285 D1：本浏览代次内服务端确认过的远端游标（独立于可被重置的
+    // 进度对象，仅退出/清缓存时清理），游标传递丢失时用它恢复，绝不重拉首页
+    const lastGoodRemoteCursor = new Map<string, string>()
 
     const getPageMsg = async (
       pageSize: number,
@@ -666,6 +670,17 @@ export const useChatStore = defineStore(
       const requestMsgSeq = roomMsgSeq[roomId] ?? 0
       const existedIds = new Set(Object.keys(messageMap[roomId] ?? {}))
 
+      // aichatoverview#285 D1：链已开始（more）却请求游标为空，说明确认游标在传递中
+      // 丢失，用本代次确认值恢复继续向前翻页；重拉首页的结果 100% 已缓存。首页回填
+      // （unknown）保持空串，约束不变
+      const effectiveRemoteCursor =
+        source === 'remote'
+          ? resolveRemoteCursor(cursor, progress.remoteStatus, lastGoodRemoteCursor.get(roomId))
+          : cursor
+      if (source === 'remote' && !cursor && effectiveRemoteCursor) {
+        console.warn('[chat] 远端游标传递丢失，已用确认值恢复继续翻页')
+      }
+
       let data: any
       try {
         if (isWeb()) {
@@ -675,7 +690,7 @@ export const useChatStore = defineStore(
           // 不再把异常转成空末页；按 msgIds 读取合并消息的 /list 使用点继续保留
           const raw: any = await imRequest({
             url: ImUrlEnum.GET_MSG_PAGE,
-            params: { roomId, pageSize, cursor: cursor || undefined, skip: false }
+            params: { roomId, pageSize, cursor: effectiveRemoteCursor || undefined, skip: false }
           })
           data = {
             list: raw?.list || raw?.records || [],
@@ -690,7 +705,7 @@ export const useChatStore = defineStore(
             {
               param: {
                 pageSize: pageSize,
-                cursor: cursor,
+                cursor: effectiveRemoteCursor,
                 roomId: roomId,
                 source,
                 async: !!async
@@ -733,6 +748,7 @@ export const useChatStore = defineStore(
       if (source === 'remote') {
         progress.remoteCursor = data.isLast ? (data.cursor ?? '') : (data.cursor as string)
         progress.remoteStatus = data.isLast ? 'end' : 'more'
+        if (progress.remoteCursor) lastGoodRemoteCursor.set(roomId, progress.remoteCursor)
       } else {
         progress.localCursor = data.cursor ?? ''
         progress.localExhausted = data.isLast === true
@@ -804,6 +820,7 @@ export const useChatStore = defineStore(
         delete roomMsgSeq[roomId]
       }
       inflightPageMsg.clear()
+      lastGoodRemoteCursor.clear()
       remoteSyncLocks.clear()
     }
     // 重连入口：保留现有近期同步，随后做本地首屏/空首屏回填，不额外全量回填
