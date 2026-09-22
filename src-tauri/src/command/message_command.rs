@@ -236,6 +236,25 @@ async fn page_msg_local(
     })
 }
 
+/// aichatoverview#285: 服务端 total 为字符串（"total":"233"），数字/缺失/空亦须兼容。
+fn de_total_str_or_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .ok_or_else(|| serde::de::Error::custom(format!("total 非法数字: {n}"))),
+        serde_json::Value::String(s) => s
+            .parse::<u64>()
+            .map_err(|_| serde::de::Error::custom(format!("total 非法字符串: {s:?}"))),
+        serde_json::Value::Null => Ok(0),
+        _ => Err(serde::de::Error::custom("total 类型非法")),
+    }
+}
+
 /// aichatoverview#285: 远端历史分页 DTO。
 ///
 /// 服务端最终空页返回 `cursor=null`，`CursorPageResp.cursor: String` 不能直接反序列化；
@@ -251,7 +270,7 @@ struct RemoteMsgPageDto {
     cursor: Option<String>,
     #[serde(default)]
     is_last: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_total_str_or_u64")]
     total: u64,
 }
 
@@ -1238,6 +1257,39 @@ mod tests {
         assert!(dto.cursor.is_none());
         assert!(dto.is_last);
         assert_eq!(dto.total, 233);
+    }
+
+    #[test]
+    fn remote_page_dto_accepts_string_total() {
+        // aichatoverview#285 回归：服务端 total 序列化为字符串（"total":"233"）
+        let dto: RemoteMsgPageDto = serde_json::from_value(json!({
+            "list": [],
+            "cursor": "192021986630144",
+            "isLast": false,
+            "total": "233"
+        }))
+        .unwrap();
+        assert_eq!(dto.total, 233);
+    }
+
+    #[test]
+    fn remote_page_dto_accepts_missing_or_null_total() {
+        // aichatoverview#285: total 缺失/空亦兼容，缺省为 0
+        let missing: RemoteMsgPageDto = serde_json::from_value(json!({
+            "list": [],
+            "cursor": "143651494275072",
+            "isLast": false
+        }))
+        .unwrap();
+        assert_eq!(missing.total, 0);
+        let null: RemoteMsgPageDto = serde_json::from_value(json!({
+            "list": [],
+            "cursor": "143651494275072",
+            "isLast": false,
+            "total": null
+        }))
+        .unwrap();
+        assert_eq!(null.total, 0);
     }
 
     #[test]
