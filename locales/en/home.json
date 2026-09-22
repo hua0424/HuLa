@@ -438,6 +438,11 @@
       "view_all": "View all"
     },
     "no_more": "No more messages",
+    "history_loading": "Loading history...",
+    "history_failed": "Failed to load history",
+    "history_empty": "No messages yet",
+    "retry": "Retry",
+    "continue_loading": "Load more",
     "new_messages": "{count} new messages",
     "confirm": "Confirm",
     "cancel": "Cancel",

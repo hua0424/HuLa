@@ -565,6 +565,147 @@ pub async fn cursor_page_messages(
     })
 }
 
+/// aichatoverview#285: 远端历史回填分页的游标归一化（纯函数，可单测）。
+///
+/// 服务端 `GET /im/chat/msg/page` 最终空页返回 `cursor=null`；`list=[] && isLast=false`
+/// 是合法的过滤空页（黑名单作者/墓碑/整页重复），必须保留继续入口。
+/// `isLast=false` 却 cursor 缺失或不前进视为协议异常，调用方停止本轮并允许重试，防止死循环。
+pub fn normalize_remote_page(
+    request_cursor: &str,
+    resp_cursor: Option<String>,
+    is_last: bool,
+) -> Result<String, String> {
+    if is_last {
+        return Ok(resp_cursor.unwrap_or_default());
+    }
+    match resp_cursor {
+        Some(c) if !c.is_empty() => {
+            if c == request_cursor {
+                return Err("protocol_error: remote cursor did not advance".to_string());
+            }
+            Ok(c)
+        }
+        _ => Err("protocol_error: missing remote cursor while isLast=false".to_string()),
+    }
+}
+
+/// aichatoverview#285: 历史回填落库统计。
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct HistorySaveStats {
+    pub inserted: usize,
+    pub skipped_existing: usize,
+    pub skipped_tombstone: usize,
+    pub skipped_room_mismatch: usize,
+}
+
+/// aichatoverview#285: 历史页只插缺失、复用墓碑。
+///
+/// 与实时保存（`save_all` 先删后插）不同：远端旧页不能覆盖 WS 已收到的新状态，
+/// 已有 `(login_uid,id)` 记录一律保留；墓碑检查与写入由调用方同事务保护；
+/// 重试同一页幂等（全部分类为 skipped_existing）。
+pub async fn save_history_page<C>(
+    db: &C,
+    messages: Vec<MessageWithThumbnail>,
+    login_uid: &str,
+    room_id: &str,
+) -> Result<HistorySaveStats, CommonError>
+where
+    C: ConnectionTrait,
+{
+    let mut stats = HistorySaveStats::default();
+    if messages.is_empty() {
+        return Ok(stats);
+    }
+
+    let mut newcomers: Vec<MessageWithThumbnail> = Vec::with_capacity(messages.len());
+    // 去重同一页内的重复 id，防止 insert_many 主键冲突
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for message in messages.into_iter() {
+        if message.message.room_id != room_id {
+            stats.skipped_room_mismatch += 1;
+            continue;
+        }
+        if !seen.insert(message.message.id.clone()) {
+            stats.skipped_existing += 1;
+            continue;
+        }
+        if should_skip_message_insert(
+            db,
+            &message.message.id,
+            &message.message.room_id,
+            login_uid,
+            message.message.send_time,
+        )
+        .await?
+        {
+            stats.skipped_tombstone += 1;
+            continue;
+        }
+        let existing =
+            im_message::Entity::find_by_id((message.message.id.clone(), login_uid.to_string()))
+                .one(db)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to query existing message: {}", e))?;
+        if existing.is_some() {
+            // 已有记录保留本地较新版本（WS 可能已更新状态），不覆盖
+            stats.skipped_existing += 1;
+            continue;
+        }
+        newcomers.push(message);
+    }
+
+    if newcomers.is_empty() {
+        return Ok(stats);
+    }
+
+    let active_models: Vec<im_message::ActiveModel> = newcomers
+        .iter()
+        .map(|message| message.message.clone().into_active_model())
+        .collect();
+    im_message::Entity::insert_many(active_models)
+        .exec(db)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to batch insert history messages: {}", e))?;
+    for message in &newcomers {
+        update_thumbnail_path(db, &message.key(), message.thumbnail_path.as_deref()).await?;
+    }
+    stats.inserted = newcomers.len();
+    Ok(stats)
+}
+
+/// aichatoverview#285: 按本批远端 ID 查询当前账号 SQLite 中的可见记录。
+///
+/// 复用消息转换、缩略图和 time_block 处理的前置查询；返回本地较新版本，
+/// 调用方不得直接返回 HTTP 旧对象，也不得用旧 localCursor 重读这一批。
+pub async fn find_visible_by_ids<C>(
+    db: &C,
+    ids: &[String],
+    room_id: &str,
+    login_uid: &str,
+) -> Result<Vec<MessageWithThumbnail>, CommonError>
+where
+    C: ConnectionTrait,
+{
+    if ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let mut condition = sea_orm::Condition::any();
+    for id in ids {
+        condition = condition.add(
+            sea_orm::Condition::all()
+                .add(im_message::Column::Id.eq(id.clone()))
+                .add(im_message::Column::LoginUid.eq(login_uid.to_string()))
+                .add(im_message::Column::RoomId.eq(room_id.to_string())),
+        );
+    }
+    let models = im_message::Entity::find()
+        .filter(condition)
+        .all(db)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to query visible history messages: {}", e))?;
+    enrich_models_with_thumbnails(db, models).await
+}
+
 /// 保存单个消息到数据库
 pub async fn save_message(
     db: &DatabaseTransaction,
@@ -1149,4 +1290,28 @@ pub async fn query_file_messages(
         .map_err(|e| anyhow::anyhow!("查询文件消息失败: {}", e))?;
 
     enrich_models_with_thumbnails(db, messages).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_remote_page;
+
+    #[test]
+    fn remote_end_with_null_cursor_is_ok() {
+        assert_eq!(
+            normalize_remote_page("", None, true).unwrap(),
+            String::new()
+        );
+    }
+
+    #[test]
+    fn remote_more_requires_advancing_cursor() {
+        assert!(normalize_remote_page("", None, false).is_err());
+        assert!(normalize_remote_page("", Some(String::new()), false).is_err());
+        assert!(normalize_remote_page("42", Some("42".to_string()), false).is_err());
+        assert_eq!(
+            normalize_remote_page("", Some("43".to_string()), false).unwrap(),
+            "43"
+        );
+    }
 }

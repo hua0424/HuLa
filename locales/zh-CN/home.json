@@ -434,6 +434,11 @@
       "view_all": "查看全部"
     },
     "no_more": "没有更多消息",
+    "history_loading": "历史消息加载中...",
+    "history_failed": "历史消息加载失败",
+    "history_empty": "暂无消息",
+    "retry": "重试",
+    "continue_loading": "继续加载",
     "new_messages": "{count} 条新消息",
     "confirm": "确定",
     "cancel": "取消",

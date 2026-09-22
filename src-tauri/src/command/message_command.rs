@@ -153,12 +153,30 @@ pub struct MessageMark {
 #[serde(rename_all = "camelCase")]
 pub struct CursorPageMessageParam {
     room_id: String,
+    /// aichatoverview#285: 'local'（缺省）只读 SQLite；'remote' 拉远端一页并回填。
+    /// 不要从既有 `async` 推导：预热与 loadMore 都传过 `async=true`，无网络语义。
+    #[serde(default)]
+    source: Option<String>,
     #[serde(flatten)]
     cursor_page_param: CursorPageParam,
 }
 
+fn is_remote_source(source: &Option<String>) -> bool {
+    matches!(source.as_deref(), Some("remote"))
+}
+
 #[tauri::command]
 pub async fn page_msg(
+    param: CursorPageMessageParam,
+    state: State<'_, AppData>,
+) -> Result<CursorPageResp<Vec<MessageResp>>, String> {
+    if is_remote_source(&param.source) {
+        return page_msg_remote(param, state).await;
+    }
+    page_msg_local(param, state).await
+}
+
+async fn page_msg_local(
     param: CursorPageMessageParam,
     state: State<'_, AppData>,
 ) -> Result<CursorPageResp<Vec<MessageResp>>, String> {
@@ -215,6 +233,207 @@ pub async fn page_msg(
         is_last: db_result.is_last,
         list: Some(message_resps),
         total: db_result.total,
+    })
+}
+
+/// aichatoverview#285: 远端历史分页 DTO。
+///
+/// 服务端最终空页返回 `cursor=null`，`CursorPageResp.cursor: String` 不能直接反序列化；
+/// `list` 为空但 `isLast=false` 是合法过滤空页（黑名单/墓碑/整页重复），不得结束。
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RemoteMsgPageDto {
+    #[serde(default)]
+    list: Option<Vec<MessageResp>>,
+    #[serde(default)]
+    records: Option<Vec<MessageResp>>,
+    #[serde(default)]
+    cursor: Option<String>,
+    #[serde(default)]
+    is_last: bool,
+    #[serde(default)]
+    total: u64,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct RemoteMsgPageParams {
+    room_id: String,
+    page_size: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cursor: Option<String>,
+    skip: bool,
+}
+
+/// aichatoverview#285: 远端历史回填一页（`source=remote`）。
+///
+/// 1. 网络等待期间不持有 SQLite 写锁；2. 提交前重核登录身份，退出/切账号使旧请求失效；
+/// 3. 同一写锁/事务内按墓碑规则只插缺失、已有保留；4. 返回本批 ID 的本地可见记录
+/// （本地较新版本），不直接返回 HTTP 旧对象；5. 事务失败不推进游标，重试幂等。
+/// ponytail: 无房间历史代次计数器， ceilings 为 uid 重核 + 同事务墓碑保护；切房竞态由 TS 浏览代次兜底。
+async fn page_msg_remote(
+    param: CursorPageMessageParam,
+    state: State<'_, AppData>,
+) -> Result<CursorPageResp<Vec<MessageResp>>, String> {
+    let room_id = param.room_id.clone();
+    let page_size = param.cursor_page_param.page_size.clamp(1, 100);
+    let request_cursor = param.cursor_page_param.cursor.clone();
+    if room_id.is_empty() {
+        return Err("roomId 不能为空".to_string());
+    }
+
+    // 网络请求前捕获登录身份
+    let login_uid = { state.user_info.lock().await.uid.clone() };
+    if login_uid.is_empty() {
+        return Err("未登录，无法回填历史消息".to_string());
+    }
+
+    let remote_params = RemoteMsgPageParams {
+        room_id: room_id.clone(),
+        page_size,
+        cursor: if request_cursor.is_empty() {
+            None
+        } else {
+            Some(request_cursor.clone())
+        },
+        skip: false,
+    };
+
+    // 不在网络等待期间持有 SQLite 写锁，复用现有认证请求及 token 更新处理
+    let old_tokens = capture_token_snapshot_arc(&state.rc).await;
+    let fetch_result: Result<Option<RemoteMsgPageDto>, anyhow::Error> = {
+        let mut client = state.rc.lock().await;
+        client
+            .im_request(
+                ImUrl::GetMsgPage,
+                None::<serde_json::Value>,
+                Some(remote_params),
+            )
+            .await
+    };
+    {
+        persist_token_if_refreshed_arc(&old_tokens, &state.rc, &state.db_conn, &login_uid).await;
+    }
+    let dto = fetch_result
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "远端历史返回空响应".to_string())?;
+
+    let mut remote_list = dto.list.or(dto.records).unwrap_or_default();
+    // ID 不转 JS Number；服务端按 id DESC、id < cursor 翻页，本地 send_time:id 不得传给远端
+    remote_list.retain(|m| m.message.room_id.as_deref() == Some(room_id.as_str()));
+    let remote_ids: Vec<String> = remote_list
+        .iter()
+        .filter_map(|m| m.message.id.clone())
+        .collect();
+    let returned = remote_ids.len();
+
+    let remote_cursor = im_message_repository::normalize_remote_page(
+        &request_cursor,
+        dto.cursor.clone(),
+        dto.is_last,
+    )
+    .map_err(|e| e.to_string())?;
+
+    // 提交前再次核对身份：退出/切账号使旧请求失效，不把旧响应写进新用户数据库
+    {
+        let current_uid = state.user_info.lock().await.uid.clone();
+        if current_uid != login_uid {
+            return Err("登录身份已变化，丢弃本次历史回填".to_string());
+        }
+    }
+
+    let write_lock = state.write_lock.clone();
+    let db_conn = state.db_conn.clone();
+    let room_for_save = room_id.clone();
+    let uid_for_save = login_uid.clone();
+    let stats = run_with_write_lock(write_lock, "save_history_page", || {
+        let db_conn = db_conn.clone();
+        let room_for_save = room_for_save.clone();
+        let uid_for_save = uid_for_save.clone();
+        let mut records: Vec<MessageWithThumbnail> = remote_list
+            .clone()
+            .into_iter()
+            .map(|msg_resp| convert_resp_to_record_for_fetch(msg_resp, uid_for_save.clone()))
+            .collect();
+        // 回填页的 time_block 按批次内顺序预填，查询时已有值则保留
+        records.sort_by(|a, b| {
+            let a_time = a.message.send_time.unwrap_or(0);
+            let b_time = b.message.send_time.unwrap_or(0);
+            a_time.cmp(&b_time)
+        });
+        async move {
+            let db = db_conn.read().await;
+            let tx = db.begin().await.map_err(CommonError::DatabaseError)?;
+            // 二次身份核对必须在事务内：防止请求返回后、提交前发生切库
+            let stats = im_message_repository::save_history_page(
+                &tx,
+                records,
+                &uid_for_save,
+                &room_for_save,
+            )
+            .await?;
+            tx.commit().await.map_err(CommonError::DatabaseError)?;
+            Ok(stats)
+        }
+    })
+    .await?;
+
+    // 查询本次远端 ID 集合的本地可见记录（本地较新版本），复用统一转换
+    let db = state.db_conn.read().await;
+    let visible =
+        im_message_repository::find_visible_by_ids(&*db, &remote_ids, &room_id, &login_uid)
+            .await
+            .map_err(|e| e.to_string())?;
+    drop(db);
+
+    let mut sorted = visible;
+    sorted.sort_by(|a, b| {
+        let a_time = a.message.send_time.unwrap_or(0);
+        let b_time = b.message.send_time.unwrap_or(0);
+        a_time
+            .cmp(&b_time)
+            .then_with(|| a.message.id.cmp(&b.message.id))
+    });
+
+    let db2 = state.db_conn.read().await;
+    let mut message_resps: Vec<MessageResp> = Vec::with_capacity(sorted.len());
+    for (index, msg) in sorted.into_iter().enumerate() {
+        let mut resp = convert_message_to_resp(msg.clone(), None);
+        if index == 0 {
+            resp.time_block = Some(1);
+        } else if let Some(send_time) = msg.message.send_time {
+            resp.time_block = im_message_repository::calculate_time_block(
+                &*db2,
+                &msg.message.room_id,
+                &msg.message.id,
+                send_time,
+                &login_uid,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+        message_resps.push(resp);
+    }
+    drop(db2);
+
+    info!(
+        target: "tauri_db",
+        "[history-backfill] source=remote roomId={} pageSize={} returned={} inserted={} existing={} tombstone={} roomMismatch={} isLast={}",
+        room_id,
+        page_size,
+        returned,
+        stats.inserted,
+        stats.skipped_existing,
+        stats.skipped_tombstone,
+        stats.skipped_room_mismatch,
+        dto.is_last,
+    );
+
+    Ok(CursorPageResp {
+        cursor: remote_cursor,
+        is_last: dto.is_last,
+        list: Some(message_resps),
+        total: dto.total,
     })
 }
 
@@ -1004,5 +1223,46 @@ mod tests {
         let msg: Message = serde_json::from_value(json).unwrap();
         assert_eq!(msg.id, Some("srv-1".to_string()));
         assert_eq!(msg.client_msg_id, Some("T123456789".to_string()));
+    }
+
+    #[test]
+    fn remote_page_dto_accepts_null_cursor_on_last_page() {
+        // aichatoverview#285: 服务端最终空页 cursor=null，必须能反序列化
+        let dto: RemoteMsgPageDto = serde_json::from_value(json!({
+            "list": [],
+            "cursor": null,
+            "isLast": true,
+            "total": 233
+        }))
+        .unwrap();
+        assert!(dto.cursor.is_none());
+        assert!(dto.is_last);
+        assert_eq!(dto.total, 233);
+    }
+
+    #[test]
+    fn remote_page_dto_accepts_empty_list_with_more() {
+        // aichatoverview#285: list=[] && isLast=false 是合法过滤空页，不得结束
+        let dto: RemoteMsgPageDto = serde_json::from_value(json!({
+            "list": [],
+            "cursor": "143651494275072",
+            "isLast": false
+        }))
+        .unwrap();
+        assert!(!dto.is_last);
+        assert_eq!(dto.cursor.as_deref(), Some("143651494275072"));
+        assert!(dto.list.unwrap().is_empty());
+    }
+
+    #[test]
+    fn remote_page_dto_keeps_cursor_as_string() {
+        // aichatoverview#285: 服务端游标是 ID 字符串，不得转 JS Number 精度丢失
+        let dto: RemoteMsgPageDto = serde_json::from_value(json!({
+            "list": [],
+            "cursor": "9007199254740993",
+            "isLast": false
+        }))
+        .unwrap();
+        assert_eq!(dto.cursor.as_deref(), Some("9007199254740993"));
     }
 }
