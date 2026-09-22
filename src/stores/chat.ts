@@ -25,6 +25,15 @@ import { normalizeAiclawGroupConfig } from '@/utils/aiclawGroupConfig'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 import { isWeb } from '@/utils/PlatformConstants'
 import { useMitt } from '@/hooks/useMitt'
+import {
+  decideFirstScreen,
+  decideLoadMore,
+  deriveIsLast,
+  formatPreheatLog,
+  resolveRemoteCursor,
+  shouldAdvanceRemote,
+  type RemoteStatus
+} from '@/utils/historyBackfill'
 
 type RecalledMessage = {
   messageId: string
@@ -221,8 +230,76 @@ export const useChatStore = defineStore(
 
     // 存储所有消息的Record
     const messageMap = reactive<Record<string, Record<string, MessageType>>>({})
+    // aichatoverview#285：每个房间明确保存两套进度。local 是本地分页状态；
+    // remote 的 cursor/isLast 原样代表服务端分页状态。UI isLast 统一派生为
+    // localExhausted && remoteStatus === 'end'。cursor 保留为本地游标镜像（兼容旧读取）。
+    // 运行时进度不作为"历史完整"的跨启动持久化事实。
+    interface RoomMessageProgress {
+      isLast: boolean
+      isLoading: boolean
+      cursor: string
+      localCursor: string
+      localExhausted: boolean
+      remoteCursor: string
+      remoteStatus: RemoteStatus
+      error: string
+    }
     // 消息加载状态
-    const messageOptions = reactive<Record<string, { isLast: boolean; isLoading: boolean; cursor: string }>>({})
+    const messageOptions = reactive<Record<string, RoomMessageProgress>>({})
+
+    const newRoomProgress = (): RoomMessageProgress => ({
+      isLast: false,
+      isLoading: false,
+      cursor: '',
+      localCursor: '',
+      localExhausted: false,
+      remoteCursor: '',
+      remoteStatus: 'unknown',
+      error: ''
+    })
+
+    // 兼容旧形状：缺失字段补缺省，不覆盖已有远端游标
+    const ensureProgress = (roomId: string): RoomMessageProgress => {
+      const current = messageOptions[roomId] as Partial<RoomMessageProgress> | undefined
+      if (!current) {
+        messageOptions[roomId] = newRoomProgress()
+        return messageOptions[roomId]
+      }
+      // aichatoverview#285：必须就地补齐并返回同一对象，禁止按引用替换。
+      // 首屏回填的加载 UI（historyState/currentMessageOptions）在 IPC 等待期间求值，
+      // 每次替换都会孤立在途 loadPageMsg 持有的引用：完成时把 isLoading=false、
+      // 远端游标写到孤儿对象，留下 unknown+isLoading:true 的卡死进度，后续 loadMore
+      // 被 `if (progress.isLoading) return` 静默吞掉，深历史永远无法翻页。
+      if (current.isLoading === undefined) current.isLoading = false
+      if (current.localCursor === undefined) current.localCursor = ''
+      if (current.localExhausted === undefined) current.localExhausted = false
+      if (current.remoteCursor === undefined) current.remoteCursor = ''
+      if (current.remoteStatus === undefined) current.remoteStatus = 'unknown'
+      if (current.error === undefined) current.error = ''
+      const full = current as RoomMessageProgress
+      // 旧 cursor 即本地游标
+      if (!full.localCursor && full.cursor) full.localCursor = full.cursor
+      full.isLast = deriveIsLast({
+        localExhausted: full.localExhausted ?? false,
+        remoteStatus: full.remoteStatus ?? 'unknown'
+      })
+      full.cursor = full.localCursor ?? ''
+      return full
+    }
+
+    const refreshDerivedEnd = (roomId: string) => {
+      const progress = ensureProgress(roomId)
+      progress.isLast = deriveIsLast(progress)
+      progress.cursor = progress.localCursor
+    }
+
+    // 切房重新加载首屏时统一初始化本次浏览进度；浏览代次防止旧请求覆盖新房间状态
+    const browseSeq = reactive<Record<string, number>>({})
+    // IPC 返回与 WS 到达之间的竞态：房间消息更新序号，回填仅覆盖本次请求期间未被 WS 更新的 ID
+    const roomMsgSeq = reactive<Record<string, number>>({})
+    const bumpRoomMsgSeq = (roomId: string) => {
+      roomMsgSeq[roomId] = (roomMsgSeq[roomId] ?? 0) + 1
+    }
 
     // 切换会话时保留本地临时消息（例如上传中的文件消息），避免 reload 消息列表时丢失
     const transientStatuses = new Set<MessageStatusEnum>([
@@ -255,15 +332,30 @@ export const useChatStore = defineStore(
     const currentMessageOptions = computed({
       get: () => {
         const roomId = globalStore.currentSessionRoomId
-        const current = messageOptions[roomId]
-        if (current === undefined) {
-          messageOptions[roomId] = { isLast: false, isLoading: false, cursor: '' }
-        }
-        return messageOptions[roomId]
+        return ensureProgress(roomId)
       },
       set: (val) => {
         const roomId = globalStore.currentSessionRoomId
-        messageOptions[roomId] = val as { isLast: boolean; isLoading: boolean; cursor: string }
+        messageOptions[roomId] = val as RoomMessageProgress
+      }
+    })
+
+    // aichatoverview#285：历史加载呈現状态（ChatMain 区分加载中/失败重试/确认空/确实结束/继续加载）
+    const historyState = computed(() => {
+      const progress = currentMessageOptions.value
+      const count = Object.keys(currentMessageMap.value ?? {}).length
+      const canContinue =
+        !progress.isLast &&
+        !progress.isLoading &&
+        !progress.error &&
+        (count === 0 || progress.localExhausted) &&
+        progress.remoteStatus !== 'end'
+      return {
+        isLoading: progress.isLoading,
+        error: progress.error,
+        canContinue,
+        isConfirmedEnd: progress.isLast && count > 0,
+        isConfirmedEmpty: progress.isLast && count === 0
       }
     })
 
@@ -379,12 +471,10 @@ export const useChatStore = defineStore(
       // 1. 清空当前房间的旧消息数据
       clearRoomMessagesExceptTransient(roomId)
 
-      // 2. 重置消息加载状态
-      currentMessageOptions.value = {
-        isLast: false,
-        isLoading: false,
-        cursor: ''
-      }
+      // 2. 切房重新加载首屏时统一初始化本次浏览进度（本地/远端双游标，远端未知）；
+      // 就地重置保持对象身份，旧请求的浏览代次已推进，其结果会被丢弃而不污染新进度
+      browseSeq[roomId] = (browseSeq[roomId] ?? 0) + 1
+      Object.assign(ensureProgress(roomId), newRoomProgress())
 
       // 3. 清空回复映射
       if (currentReplyMap.value) {
@@ -398,13 +488,13 @@ export const useChatStore = defineStore(
 
       try {
         // 从服务器加载消息
-        await getPageMsg(pageSize, roomId, '')
+        await ensureFirstScreen(roomId)
       } catch (error) {
         console.error('无法加载消息:', error)
-        currentMessageOptions.value = {
-          isLast: false,
-          isLoading: false,
-          cursor: ''
+        if (globalStore.currentSessionRoomId === roomId) {
+          const progress = ensureProgress(roomId)
+          progress.isLoading = false
+          progress.error = error instanceof Error ? error.message : String(error)
         }
       }
 
@@ -497,82 +587,195 @@ export const useChatStore = defineStore(
       // 创建并发限制器（最多同时 5 个请求）
       const limit = pLimit(5)
 
-      // 使用 p-limit 包装任务并执行
-      const tasks = sortedSessions.map((session) => limit(() => getPageMsg(size, session.roomId, '', true)))
+      // aichatoverview#285：显式 source=local，不触发历史回填；不能把本地末页当成服务端结束
+      const tasks = sortedSessions.map((session) => limit(() => getPageMsg(size, session.roomId, '', true, 'local')))
 
       // 并发执行所有任务
       const results = await Promise.allSettled(tasks)
 
-      // 统计加载结果
-      const successCount = results.filter((r) => r.status === 'fulfilled').length
-      const failCount = results.filter((r) => r.status === 'rejected').length
-
-      !isWeb() && (await info(`会话消息加载完成: 成功 ${successCount}/${sortedSessions.length}, 失败 ${failCount}`))
-
-      // 记录失败的会话（可选）
-      if (failCount > 0) {
-        results.forEach((result, index) => {
-          if (result.status === 'rejected') {
-            console.warn(`会话 ${sortedSessions[index].roomId} 消息加载失败:`, result.reason)
+      // aichatoverview#285：统计口径区分零消息与加载失败，空结果不再无条件报成功
+      let withMessages = 0
+      let emptyCount = 0
+      let failCount = 0
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          if (!result.value.ok) {
+            failCount++
+            console.warn(`会话 ${sortedSessions[index].roomId} 消息加载失败:`, result.value.error)
+          } else if (result.value.count > 0) {
+            withMessages++
+          } else {
+            emptyCount++
           }
-        })
-      }
-    }
-
-    // 获取消息列表
-    const getMsgList = async (size = pageSize, async?: boolean) => {
-      !isWeb() && (await info('获取消息列表'))
-      // 获取当前房间ID，用于后续比较
-      const requestRoomId = globalStore.currentSessionRoomId
-
-      await getPageMsg(size, requestRoomId, currentMessageOptions.value?.cursor, async)
-    }
-
-    const getPageMsg = async (pageSize: number, roomId: string, cursor: string = '', async?: boolean) => {
-      let data: any
-      if (isWeb()) {
-        const { imRequest } = await import('@/utils/ImRequestUtils')
-        const { ImUrlEnum } = await import('@/enums')
-        try {
-          const raw = await imRequest({
-            url: ImUrlEnum.GET_MSG_LIST,
-            body: { pageSize, cursor: cursor || null, roomId }
-          })
-          // 适配后端返回格式（可能是 { list, cursor, isLast } 或 { records, ... }）
-          data = {
-            list: raw?.list || raw?.records || raw || [],
-            cursor: raw?.cursor ?? '',
-            isLast: raw?.isLast ?? true
-          }
-        } catch (error) {
-          console.error('[chat] Web getPageMsg 失败:', error)
-          data = { isLast: true, cursor: '', list: [] }
+        } else {
+          failCount++
+          console.warn(`会话 ${sortedSessions[index].roomId} 消息加载失败:`, result.reason)
         }
-      } else {
-        // 查询本地存储，获取消息数据
-        data = await invokeWithErrorHandler(
-          TauriCommand.PAGE_MSG,
-          {
-            param: {
-              pageSize: pageSize,
-              cursor: cursor,
-              roomId: roomId,
-              async: !!async
-            }
-          },
-          {
-            customErrorMessage: '获取消息列表失败',
-            errorType: ErrorType.Network
-          }
-        )
+      })
+
+      !isWeb() &&
+        (await info(
+          formatPreheatLog({
+            withMessages,
+            empty: emptyCount,
+            failed: failCount,
+            total: sortedSessions.length
+          })
+        ))
+    }
+
+    interface PageLoadResult {
+      roomId: string
+      source: 'local' | 'remote'
+      /** 本次实际合入内存的消息条数 */
+      count: number
+      ok: boolean
+      error?: string
+    }
+
+    // 同账号/房间/游标的请求合并互斥；预热晚返回不得覆盖前台已推进的分页状态
+    const inflightPageMsg = new Map<string, Promise<PageLoadResult>>()
+    // aichatoverview#285：isLoading 只允许被在途分页请求持有。同房多流程（切房/手动刷新/
+    // 加载 UI 求值）并发时，去重共享或代次丢弃的链都可能不再拥有 loading，完成后必须
+    // 把无人持有的 loading 释放，否则 loadMore 门禁永久吞掉后续翻页。
+    const releaseRoomLoadingIfIdle = (roomId: string, excludeKey?: string) => {
+      for (const key of inflightPageMsg.keys()) {
+        if (key !== excludeKey && key.startsWith(`${roomId}|`)) return
+      }
+      ensureProgress(roomId).isLoading = false
+    }
+    // aichatoverview#285 D1：本浏览代次内服务端确认过的远端游标（独立于可被重置的
+    // 进度对象，仅退出/清缓存时清理），游标传递丢失时用它恢复，绝不重拉首页
+    const lastGoodRemoteCursor = new Map<string, string>()
+
+    const getPageMsg = async (
+      pageSize: number,
+      roomId: string,
+      cursor: string = '',
+      async?: boolean,
+      source: 'local' | 'remote' = 'local'
+    ): Promise<PageLoadResult> => {
+      if (!roomId) {
+        return { roomId, source, count: 0, ok: false, error: 'roomId 为空' }
+      }
+      const inflightKey = `${roomId}|${source}|${cursor}`
+      const inflight = inflightPageMsg.get(inflightKey)
+      if (inflight) return inflight
+
+      const task = loadPageMsg(pageSize, roomId, cursor, async, source)
+      inflightPageMsg.set(inflightKey, task)
+      try {
+        return await task
+      } finally {
+        if (inflightPageMsg.get(inflightKey) === task) inflightPageMsg.delete(inflightKey)
+      }
+    }
+
+    const loadPageMsg = async (
+      pageSize: number,
+      roomId: string,
+      cursor: string,
+      async: boolean | undefined,
+      source: 'local' | 'remote'
+    ): Promise<PageLoadResult> => {
+      const progress = ensureProgress(roomId)
+      progress.isLoading = true
+      progress.error = ''
+      // 结果绑定请求时 roomId 与浏览代次
+      const requestBrowseSeq = browseSeq[roomId] ?? 0
+      // IPC 返回与 WS 到达之间的竞态：请求开始时的消息更新序号与已存在 ID
+      const requestMsgSeq = roomMsgSeq[roomId] ?? 0
+      const existedIds = new Set(Object.keys(messageMap[roomId] ?? {}))
+
+      // aichatoverview#285 D1：链已开始（more）却请求游标为空，说明确认游标在传递中
+      // 丢失，用本代次确认值恢复继续向前翻页；重拉首页的结果 100% 已缓存。首页回填
+      // （unknown）保持空串，约束不变
+      const effectiveRemoteCursor =
+        source === 'remote'
+          ? resolveRemoteCursor(cursor, progress.remoteStatus, lastGoodRemoteCursor.get(roomId))
+          : cursor
+      if (source === 'remote' && !cursor && effectiveRemoteCursor) {
+        console.warn('[chat] 远端游标传递丢失，已用确认值恢复继续翻页')
       }
 
-      // 更新 messageOptions
-      messageOptions[roomId] = {
-        isLast: data.isLast,
-        isLoading: false,
-        cursor: data.cursor
+      let data: any
+      try {
+        if (isWeb()) {
+          const { imRequest } = await import('@/utils/ImRequestUtils')
+          const { ImUrlEnum } = await import('@/enums')
+          // aichatoverview#285：Web 历史入口直接使用远端分页语义，保留错误，
+          // 不再把异常转成空末页；按 msgIds 读取合并消息的 /list 使用点继续保留
+          const raw: any = await imRequest({
+            url: ImUrlEnum.GET_MSG_PAGE,
+            params: { roomId, pageSize, cursor: effectiveRemoteCursor || undefined, skip: false }
+          })
+          data = {
+            list: raw?.list || raw?.records || [],
+            cursor: raw?.cursor ?? '',
+            isLast: raw?.isLast ?? false,
+            total: raw?.total ?? 0
+          }
+        } else {
+          // 查询本地存储或远端回填（Rust PAGE_MSG，source 区分）
+          data = await invokeWithErrorHandler(
+            TauriCommand.PAGE_MSG,
+            {
+              param: {
+                pageSize: pageSize,
+                cursor: effectiveRemoteCursor,
+                roomId: roomId,
+                source,
+                async: !!async
+              }
+            },
+            {
+              customErrorMessage: '获取消息列表失败',
+              errorType: ErrorType.Network
+            }
+          )
+        }
+      } catch (error) {
+        // 网络/鉴权/解析失败：保留已显示消息、原游标和原终止状态，展示错误及重试入口；
+        // loading 只在同代或无他人在途时释放，避免误清新代次请求的持有
+        if ((browseSeq[roomId] ?? 0) === requestBrowseSeq) {
+          const current = ensureProgress(roomId)
+          current.isLoading = false
+          current.error = error instanceof Error ? error.message : String(error)
+        } else {
+          releaseRoomLoadingIfIdle(roomId, `${roomId}|${source}|${cursor}`)
+        }
+        console.error(`[chat] getPageMsg(${source}) 失败:`, error)
+        return { roomId, source, count: 0, ok: false, error: error instanceof Error ? error.message : String(error) }
       }
+
+      // 切房后不能把旧请求的成功写到新房间；旧代次顺带释放无人持有的 loading
+      if ((browseSeq[roomId] ?? 0) !== requestBrowseSeq) {
+        releaseRoomLoadingIfIdle(roomId, `${roomId}|${source}|${cursor}`)
+        return { roomId, source, count: 0, ok: false, error: '房间已切换，丢弃本次结果' }
+      }
+
+      // 远端协议校验：isLast=false 却 cursor 缺失/不前进视为协议异常，停止本轮并允许重试
+      if (source === 'remote') {
+        const nextCursor: string | undefined = data?.cursor ?? undefined
+        if (!shouldAdvanceRemote(data?.isLast === true, progress.remoteCursor, nextCursor)) {
+          progress.isLoading = false
+          progress.error = '远端分页协议异常：游标缺失或未前进'
+          console.error('[chat] 远端分页协议异常，已停止本轮，可重试')
+          return { roomId, source, count: 0, ok: false, error: progress.error }
+        }
+      }
+
+      // 更新双游标进度
+      if (source === 'remote') {
+        progress.remoteCursor = data.isLast ? (data.cursor ?? '') : (data.cursor as string)
+        progress.remoteStatus = data.isLast ? 'end' : 'more'
+        if (progress.remoteCursor) lastGoodRemoteCursor.set(roomId, progress.remoteCursor)
+      } else {
+        progress.localCursor = data.cursor ?? ''
+        progress.localExhausted = data.isLast === true
+      }
+      progress.isLoading = false
+      refreshDerivedEnd(roomId)
 
       // 确保 messageMap[roomId] 已初始化
       if (!messageMap[roomId]) {
@@ -580,26 +783,75 @@ export const useChatStore = defineStore(
       }
 
       const list = Array.isArray(data.list) ? data.list : []
+      const wsTouched = (roomMsgSeq[roomId] ?? 0) !== requestMsgSeq
+      let merged = 0
       for (const msg of list) {
         normalizeMsgSendTime(msg)
-        messageMap[roomId][msg.message.id] = msg
+        const msgId = msg.message.id
+        if (!msgId) continue
+        const existedBefore = existedIds.has(String(msgId))
+        if (existedBefore) {
+          // 已更新的保留当前对象：请求期间被 WS 更新过的 ID 不被旧页覆盖
+          if (wsTouched) continue
+          const current = messageMap[roomId][String(msgId)]
+          if (shouldKeepTransientMessage(current)) continue
+        }
+        // 消息按 ID 合并，展示按稳定的 (sendTime,id) 顺序（computed 排序），保留临时发送消息
+        messageMap[roomId][String(msgId)] = msg
+        merged++
       }
 
       // REQ-014：每加载一页消息后，按 triggerMsgId 批量反查 thinking 元数据
-      await loadThinkingByTriggerForMessages(roomId, list)
+      // 思考元数据失败独立记录，不把已落库/显示的消息误记为消息拉取失败
+      try {
+        await loadThinkingByTriggerForMessages(roomId, list)
+      } catch (error) {
+        console.error('[chat] thinking 元数据加载失败（消息已正常显示）:', error)
+      }
+
+      !isWeb() &&
+        (await info(
+          `[history-backfill] source=${source} roomId=${roomId} pageSize=${pageSize} merged=${merged} localExhausted=${progress.localExhausted} remoteStatus=${progress.remoteStatus}`
+        ))
+      return { roomId, source, count: merged, ok: true }
     }
 
+    // 首屏：本地非空立即渲染且不请求远端；本地为空且远端未知时自动回填一页
+    const ensureFirstScreen = async (roomId: string, size = pageSize): Promise<PageLoadResult> => {
+      const localResult = await getPageMsg(size, roomId, '', true, 'local')
+      if (!localResult.ok) return localResult
+      const progress = ensureProgress(roomId)
+      const localCount = Object.keys(messageMap[roomId] ?? {}).length
+      if (decideFirstScreen(localCount, progress.remoteStatus) === 'backfill-remote') {
+        return getPageMsg(size, roomId, '', true, 'remote')
+      }
+      return localResult
+    }
+
+    // aichatoverview#285：账号退出/切换清理全部进度与进行中请求，旧请求结果不再写入
     const remoteSyncLocks = new Set<string>()
+    const clearHistoryProgress = () => {
+      for (const roomId of Object.keys(messageOptions)) {
+        delete messageOptions[roomId]
+      }
+      for (const roomId of Object.keys(browseSeq)) {
+        delete browseSeq[roomId]
+      }
+      for (const roomId of Object.keys(roomMsgSeq)) {
+        delete roomMsgSeq[roomId]
+      }
+      inflightPageMsg.clear()
+      lastGoodRemoteCursor.clear()
+      remoteSyncLocks.clear()
+    }
+    // 重连入口：保留现有近期同步，随后做本地首屏/空首屏回填，不额外全量回填
     const fetchCurrentRoomRemoteOnce = async (size = pageSize) => {
       const roomId = globalStore.currentSessionRoomId
       if (!roomId) return
       if (remoteSyncLocks.has(roomId)) return
       remoteSyncLocks.add(roomId)
       try {
-        const opts = messageOptions[roomId] || { isLast: false, isLoading: false, cursor: '' }
-        opts.cursor = ''
-        messageOptions[roomId] = opts
-        await getPageMsg(size, roomId, '')
+        await ensureFirstScreen(roomId, size)
       } finally {
         remoteSyncLocks.delete(roomId)
       }
@@ -824,6 +1076,7 @@ export const useChatStore = defineStore(
     // 推送消息
     const pushMsg = async (msg: MessageType, options: { isActiveChatView?: boolean; activeRoomId?: string } = {}) => {
       normalizeMsgSendTime(msg)
+      if (msg.message.roomId) bumpRoomMsgSeq(msg.message.roomId)
       if (!msg.message.id) {
         msg.message.id = `${msg.message.roomId}_${msg.message.sendTime}_${msg.fromUser.uid}`
       }
@@ -1051,10 +1304,25 @@ export const useChatStore = defineStore(
     //   }
     // }
 
-    // 加载更多消息
+    // 加载更多消息：本地未耗尽继续本地分页；本地已耗尽或本次本地为空则走远端；
+    // 每次操作最多一页远端请求；远端 isLast=false 即使无新增也保留继续入口，不自动循环扫完
     const loadMore = async (size?: number) => {
-      if (currentMessageOptions.value?.isLast) return
-      await getMsgList(size, true)
+      const roomId = globalStore.currentSessionRoomId
+      if (!roomId) return
+      const page = size ?? pageSize
+      const progress = ensureProgress(roomId)
+      if (progress.isLoading) return
+      const decision = decideLoadMore(progress)
+      if (decision === 'stop') return
+      if (decision === 'local') {
+        // 本次拿到非空记录就先显示，短页仅标 localExhausted；本地为空则顺势走远端一页
+        const result = await getPageMsg(page, roomId, progress.localCursor, true, 'local')
+        if (result.ok && result.count === 0 && decideLoadMore(ensureProgress(roomId)) === 'remote') {
+          await getPageMsg(page, roomId, ensureProgress(roomId).remoteCursor, true, 'remote')
+        }
+        return
+      }
+      await getPageMsg(page, roomId, progress.remoteCursor, true, 'remote')
     }
 
     /** 清除新消息计数 */
@@ -1277,10 +1545,15 @@ export const useChatStore = defineStore(
         replyMapping[roomId] = {}
       }
 
-      const defaultOptions = {
+      const defaultOptions: RoomMessageProgress = {
         isLast: true,
         isLoading: false,
-        cursor: ''
+        cursor: '',
+        localCursor: '',
+        localExhausted: true,
+        remoteCursor: '',
+        remoteStatus: 'end',
+        error: ''
       }
 
       if (globalStore.currentSessionRoomId === roomId) {
@@ -1559,7 +1832,10 @@ export const useChatStore = defineStore(
 
       const keptMessages = sortedMessages.slice(0, limit)
       const keepMessageIds = new Set(keptMessages.map((msg) => msg.message.id))
-      const fallbackCursor = keptMessages[keptMessages.length - 1]?.message.id || ''
+      // aichatoverview#285：本地游标是 send_time:id 复合键（纯 id 会被当成首页），
+      // 裁剪后用内存最旧消息重建正确的本地 keyset 游标，确保继续翻页不丢页
+      const oldestKept = keptMessages[keptMessages.length - 1]
+      const fallbackCursor = oldestKept ? `${oldestKept.message.sendTime ?? 0}:${oldestKept.message.id}` : ''
 
       // 删除多余的消息
       for (const msgId in currentMessages) {
@@ -1569,16 +1845,16 @@ export const useChatStore = defineStore(
       }
 
       if (!messageOptions[roomId]) {
-        messageOptions[roomId] = { isLast: false, isLoading: false, cursor: '' }
+        messageOptions[roomId] = newRoomProgress()
       }
 
-      // 更新游标为当前内存里最旧的那条消息ID，确保后续「加载更多」能从数据库补齐更早的消息
+      // aichatoverview#285：裁剪只重建正确的本地进度，不覆盖远端游标；回归裁剪后的继续翻页
+      const progress = ensureProgress(roomId)
       if (fallbackCursor) {
-        messageOptions[roomId] = {
-          ...messageOptions[roomId],
-          cursor: fallbackCursor,
-          isLast: false
-        }
+        progress.localCursor = fallbackCursor
+        progress.cursor = fallbackCursor
+        progress.localExhausted = false
+        refreshDerivedEnd(roomId)
       }
 
       // 控制台提示裁剪信息，方便定位内存压缩触发点
@@ -1609,12 +1885,11 @@ export const useChatStore = defineStore(
           messageMap[requestRoomId] = {}
         }
 
-        // 2. 重置消息加载状态，强制cursor为空以获取最新消息
-        messageOptions[requestRoomId] = {
-          isLast: false,
-          isLoading: true,
-          cursor: ''
-        }
+        // 2. 重置双游标浏览进度，强制cursor为空以获取最新消息；就地重置保持对象身份，
+        // 与本房间在途请求共享同一进度对象，其完成会正常释放 isLoading 并写入游标
+        browseSeq[requestRoomId] = (browseSeq[requestRoomId] ?? 0) + 1
+        Object.assign(ensureProgress(requestRoomId), newRoomProgress())
+        ensureProgress(requestRoomId).isLoading = true
 
         // 3. 清空回复映射
         const currentReplyMapping = replyMapping[requestRoomId]
@@ -1624,21 +1899,23 @@ export const useChatStore = defineStore(
           }
         }
 
-        // 4. 直接调用getPageMsg获取最新消息，强制使用空cursor
+        // 4. 本地首屏，空首屏自动回填远端一页
         thinkingByTrigger.delete(requestRoomId)
         thinkingMetadataLoaded.delete(requestRoomId)
-        await getPageMsg(pageSize, requestRoomId, '')
+        await ensureFirstScreen(requestRoomId)
+        // aichatoverview#285：本链去重共享到同房在途请求时可能未实际执行任何
+        // loadPageMsg（共享任务绑定对方代次被丢弃），手动置的 isLoading 必须在
+        // 无人在途时释放，否则后续 loadMore 永久被门禁吞掉
+        releaseRoomLoadingIfIdle(requestRoomId)
 
         console.log('[Network] 已重置并刷新当前聊天室的消息列表')
       } catch (error) {
         console.error('[Network] 重置并刷新消息列表失败:', error)
-        // 如果获取失败，确保重置加载状态
+        // 如果获取失败，确保重置加载状态（结果绑定请求时 roomId，不污染新房间）
         if (globalStore.currentSessionRoomId === requestRoomId) {
-          messageOptions[requestRoomId] = {
-            isLast: false,
-            isLoading: false,
-            cursor: ''
-          }
+          const progress = ensureProgress(requestRoomId)
+          progress.isLoading = false
+          progress.error = error instanceof Error ? error.message : String(error)
         }
       }
     }
@@ -2282,6 +2559,8 @@ export const useChatStore = defineStore(
       setAllSessionMsgList,
       chatMessageListByRoomId,
       shouldShowNoMoreMessage,
+      historyState,
+      clearHistoryProgress,
       isMsgMultiChoose,
       clearMsgCheck,
       setMsgMultiChoose,

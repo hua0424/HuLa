@@ -52,11 +52,50 @@
         @mouseleave="showScrollbar = false">
         <!-- 消息列表 -->
         <div ref="messageListRef" class="message-list min-h-full flex flex-col">
-          <!-- 没有更多消息提示 -->
+          <!-- aichatoverview#285：明确区分加载中/失败重试/确认空/确实结束/继续加载 -->
+          <div
+            v-if="chatStore.historyState.isLoading"
+            data-testid="history-loading"
+            aria-label="历史消息加载中"
+            class="flex-center gap-6px h-32px flex-shrink-0 select-none">
+            <p class="text-(12px #909090)">{{ t('home.chat_main.history_loading') }}</p>
+          </div>
+          <div
+            v-else-if="chatStore.historyState.error"
+            data-testid="history-error"
+            class="flex-center gap-6px h-32px flex-shrink-0 select-none">
+            <p class="text-(12px #909090)">{{ t('home.chat_main.history_failed') }}</p>
+            <n-button
+              text
+              data-testid="history-retry"
+              :aria-label="t('home.chat_main.retry')"
+              class="text-(12px #13987f) cursor-pointer"
+              @click="handleHistoryRetry">
+              {{ t('home.chat_main.retry') }}
+            </n-button>
+          </div>
+          <!-- 没有更多消息提示（确实结束：本地耗尽且远端确认结束） -->
           <div
             v-show="chatStore.shouldShowNoMoreMessage"
             class="flex-center gap-6px h-32px flex-shrink-0 cursor-default select-none">
-            <p class="text-(12px #909090)">{{ t('home.chat_main.no_more') }}</p>
+            <p class="text-(12px #909090)">
+              {{
+                chatStore.historyState.isConfirmedEmpty
+                  ? t('home.chat_main.history_empty')
+                  : t('home.chat_main.no_more')
+              }}
+            </p>
+          </div>
+          <!-- 继续加载：未知且无新增页时提供可点击入口（无滚动条时仍可翻页，不自动循环） -->
+          <div v-if="chatStore.historyState.canContinue" class="flex-center gap-6px h-32px flex-shrink-0 select-none">
+            <n-button
+              text
+              data-testid="history-continue"
+              :aria-label="t('home.chat_main.continue_loading')"
+              class="text-(12px #13987f) cursor-pointer"
+              @click="handleHistoryRetry">
+              {{ t('home.chat_main.continue_loading') }}
+            </n-button>
           </div>
           <n-flex
             v-for="(item, index) in chatStore.chatMessageList"
@@ -861,6 +900,11 @@ const handleLoadMore = async (): Promise<void> => {
 
     scrollIntent.value = ScrollIntentEnum.NONE
   }
+}
+
+// aichatoverview#285：历史加载失败重试 / 无滚动条时继续加载（复用滚动锚点逻辑，不自动循环）
+const handleHistoryRetry = async (): Promise<void> => {
+  await handleLoadMore()
 }
 
 const handleViewAnnouncement = (): void => {

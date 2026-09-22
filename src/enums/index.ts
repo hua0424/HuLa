@@ -771,6 +771,8 @@ export enum ImUrlEnum {
   MARK_MSG = 'markMsg',
   /** 获取消息列表 */
   GET_MSG_LIST = 'getMsgList',
+  /** aichatoverview#285：按房间查历史分页（Web 历史入口用此枚举，/list 仅按 msgIds 合并消息） */
+  GET_MSG_PAGE = 'getMsgPage',
   /** 获取成员统计 */
   GET_MEMBER_STATISTIC = 'getMemberStatistic',
 

@@ -76,6 +76,8 @@ export const useLogin = () => {
     for (const key of Object.keys(chatStore.messageMap)) {
       delete chatStore.messageMap[key]
     }
+    // aichatoverview#285：账号退出/切换清理全部历史浏览进度与进行中请求
+    chatStore.clearHistoryProgress()
     // 清空群组成员数据
     for (const key of Object.keys(groupStore.userListMap)) {
       delete groupStore.userListMap[key]
@@ -137,6 +139,8 @@ export const useLogin = () => {
    */
   const logout = async () => {
     globalStore.updateCurrentSessionRoomId('')
+    // aichatoverview#285：退出即清理历史浏览进度与进行中请求，旧请求结果不再写入
+    chatStore.clearHistoryProgress()
 
     const sendLogoutEvent = async () => {
       // ws 退出连接
