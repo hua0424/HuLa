@@ -162,20 +162,58 @@ describe('useChatStore trigger-keyed thinking lifecycle (REQ-014)', () => {
     expect(bucket![0].errorMsg).toBe('Rate limited')
   })
 
-  it('同一 (room, aiclaw) 新思考覆盖旧思考，旧项以 error 留在桶中', () => {
+  it('同房间不同 ID START 须核实旧终态与新活态，不凭抵达顺序覆盖', async () => {
     const store = useChatStore()
     store.startThinking(startPayload)
+    loadThinkingDetailMock
+      .mockResolvedValueOnce({
+        thinkingId: 'tk-002',
+        roomId: ROOM_ID,
+        aiclawUid: String(AICLAW_ID),
+        triggerMsgId: MSG_ID,
+        status: 0
+      })
+      .mockResolvedValueOnce({
+        thinkingId: 'tk-001',
+        roomId: ROOM_ID,
+        aiclawUid: String(AICLAW_ID),
+        triggerMsgId: MSG_ID,
+        status: 1
+      })
     store.startThinking({ ...startPayload, thinkingId: 'tk-002' })
-
+    expect(store.thinkingStreams.get(`${ROOM_ID}:${AICLAW_ID}`)?.thinkingId).toBe('tk-001')
+    await vi.waitFor(() => expect(store.thinkingStreams.get(`${ROOM_ID}:${AICLAW_ID}`)?.thinkingId).toBe('tk-002'))
     const bucket = store.thinkingByTrigger.get(ROOM_ID)?.get(MSG_ID)
     expect(bucket).toHaveLength(2)
-    expect(bucket![0].thinkingId).toBe('tk-001')
-    expect(bucket![0].status).toBe('error')
-    expect(bucket![0].errorMsg).toBe('Superseded by new thinking')
-    expect(bucket![1].thinkingId).toBe('tk-002')
+    expect(bucket![0].status).toBe('complete')
     expect(bucket![1].status).toBe('thinking')
+  })
 
-    expect(store.thinkingStreams.get(`${ROOM_ID}:${AICLAW_ID}`)!.thinkingId).toBe('tk-002')
+  it('both server states active never attributes late conflicting START to current run', async () => {
+    const store = useChatStore()
+    store.startThinking({ ...startPayload, thinkingId: 'tk-b', clientRunId: 'run-b' })
+    loadThinkingDetailMock
+      .mockResolvedValueOnce({
+        thinkingId: 'tk-a',
+        roomId: ROOM_ID,
+        aiclawUid: String(AICLAW_ID),
+        triggerMsgId: MSG_ID,
+        clientRunId: 'run-a',
+        status: 0
+      })
+      .mockResolvedValueOnce({
+        thinkingId: 'tk-b',
+        roomId: ROOM_ID,
+        aiclawUid: String(AICLAW_ID),
+        triggerMsgId: MSG_ID,
+        clientRunId: 'run-b',
+        status: 0
+      })
+    store.startThinking({ ...startPayload, thinkingId: 'tk-a', clientRunId: 'run-a' })
+    await vi.waitFor(() => expect(loadThinkingDetailMock).toHaveBeenCalledTimes(2))
+    expect(store.thinkingStreams.get(`${ROOM_ID}:${AICLAW_ID}`)?.thinkingId).toBe('tk-b')
+    expect(store.getThinkingStatesByTriggerMsg(ROOM_ID, MSG_ID)).toHaveLength(1)
+    store.clearThinking()
   })
 
   it('getThinkingStatesByTriggerMsg 返回对应消息下的思考数组', () => {
@@ -284,6 +322,75 @@ describe('useChatStore trigger-keyed thinking lifecycle (REQ-014)', () => {
     store.clearThinking()
   })
 
+  it('unseen old START after new START cannot supersede active new run', async () => {
+    const store = useChatStore()
+    store.startThinking({ ...startPayload, thinkingId: 'tk-new', clientRunId: 'run-new' })
+    loadThinkingDetailMock.mockResolvedValueOnce({
+      thinkingId: 'tk-old',
+      roomId: ROOM_ID,
+      aiclawUid: String(AICLAW_ID),
+      triggerMsgId: 'msg-old',
+      clientRunId: 'run-old',
+      status: 1
+    })
+    store.startThinking({ ...startPayload, thinkingId: 'tk-old', triggerMsgId: 'msg-old', clientRunId: 'run-old' })
+    expect(store.thinkingStreams.get(`${ROOM_ID}:${AICLAW_ID}`)?.thinkingId).toBe('tk-new')
+    await vi.waitFor(() => expect(store.getThinkingStatesByTriggerMsg(ROOM_ID, 'msg-old')[0]?.status).toBe('complete'))
+    expect(store.thinkingStreams.get(`${ROOM_ID}:${AICLAW_ID}`)?.status).toBe('thinking')
+    store.clearThinking()
+  })
+
+  it('unverified collision remains pending; reconnect verifies dropped old END then admits new START', async () => {
+    const store = useChatStore()
+    store.startThinking({ ...startPayload, thinkingId: 'tk-old', clientRunId: 'run-old' })
+    loadThinkingDetailMock.mockResolvedValueOnce(null)
+    store.startThinking({ ...startPayload, thinkingId: 'tk-new', clientRunId: 'run-new' })
+    await vi.waitFor(() => expect(loadThinkingDetailMock).toHaveBeenCalledTimes(1))
+    expect(store.thinkingStreams.get(`${ROOM_ID}:${AICLAW_ID}`)?.thinkingId).toBe('tk-old')
+    loadThinkingDetailMock
+      .mockResolvedValueOnce({
+        thinkingId: 'tk-old',
+        roomId: ROOM_ID,
+        aiclawUid: String(AICLAW_ID),
+        triggerMsgId: MSG_ID,
+        clientRunId: 'run-old',
+        status: 1
+      })
+      .mockResolvedValueOnce({
+        thinkingId: 'tk-new',
+        roomId: ROOM_ID,
+        aiclawUid: String(AICLAW_ID),
+        triggerMsgId: MSG_ID,
+        clientRunId: 'run-new',
+        status: 0
+      })
+    await store.reconcileThinkingAfterReconnect()
+    expect(store.getThinkingStatesByTriggerMsg(ROOM_ID, MSG_ID)[0]?.status).toBe('complete')
+    expect(store.thinkingStreams.get(`${ROOM_ID}:${AICLAW_ID}`)?.thinkingId).toBe('tk-new')
+    store.clearThinking()
+  })
+
+  it('null trigger detail recovers dropped START+END only into bottom history bucket', async () => {
+    const store = useChatStore()
+    loadThinkingDetailMock.mockResolvedValueOnce({
+      thinkingId: 'tk-cli',
+      roomId: ROOM_ID,
+      aiclawUid: String(AICLAW_ID),
+      triggerMsgId: null,
+      clientRunId: 'run-cli',
+      status: 1
+    })
+    store.finalizeThinking('tk-cli', {
+      roomId: ROOM_ID,
+      fromUid: String(AICLAW_ID),
+      clientRunId: 'run-cli',
+      status: 'complete'
+    })
+    await vi.waitFor(() => expect(store.thinkingByTrigger.get(ROOM_ID)?.get('')?.[0]?.status).toBe('complete'))
+    expect(store.getBottomThinkingStates(ROOM_ID)).toHaveLength(0)
+    store.clearThinking()
+  })
+
   it('wrong-actor END cannot block later legitimate END for same ID', () => {
     const store = useChatStore()
     store.finalizeThinking('tk-001', {
@@ -387,7 +494,7 @@ describe('useChatStore trigger-keyed thinking lifecycle (REQ-014)', () => {
     store.clearThinking()
   })
 
-  it('unknown END never reconstructs from wrong actor/run, missing anchor or nonterminal detail', async () => {
+  it('unknown END never reconstructs from wrong actor/run, malformed anchor or nonterminal detail', async () => {
     const store = useChatStore()
     const detail = {
       thinkingId: 'tk-001',
@@ -400,7 +507,7 @@ describe('useChatStore trigger-keyed thinking lifecycle (REQ-014)', () => {
     for (const [thinkingId, mismatch] of [
       ['wrong-actor', { aiclawUid: '9999' }],
       ['wrong-run', { clientRunId: 'run-b' }],
-      ['no-anchor', { triggerMsgId: null }],
+      ['malformed-anchor', { triggerMsgId: Number.MAX_SAFE_INTEGER + 1 }],
       ['still-running', { status: 0 }]
     ] as const) {
       loadThinkingDetailMock.mockResolvedValueOnce({ ...detail, thinkingId, ...mismatch })

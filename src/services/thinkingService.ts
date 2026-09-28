@@ -8,10 +8,10 @@ export type ThinkingDetail = {
   thinkingId?: string | number
   roomId?: string | number
   aiclawUid?: string | number
-  triggerMsgId?: string | number
-  clientRunId?: string
+  triggerMsgId?: string | number | null
+  clientRunId?: string | null
   status: number
-  durationMs?: number
+  durationMs?: number | null
 }
 
 export const loadThinkingDetail = async (thinkingId: string): Promise<ThinkingDetail | null> => {
@@ -22,8 +22,8 @@ export const loadThinkingDetail = async (thinkingId: string): Promise<ThinkingDe
         params: { thinkingId }
       })) ?? null
     )
-  } catch (error) {
-    console.error('[thinkingService] loadThinkingDetail failed:', error)
+  } catch {
+    // Silent reconciliation: transport errors may include authenticated request metadata.
     return null
   }
 }

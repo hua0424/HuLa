@@ -20,7 +20,7 @@ import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useSessionUnreadStore } from '@/stores/sessionUnread'
 import { useAiclawStore } from '@/stores/aiclaw'
 import type { AiclawGroupConfig, ThinkingEndPayload, ThinkingStartPayload } from '@/services/wsType'
-import { loadThinkingByTrigger, loadThinkingDetail } from '@/services/thinkingService'
+import { loadThinkingByTrigger, loadThinkingDetail, type ThinkingDetail } from '@/services/thinkingService'
 import { normalizeAiclawGroupConfig } from '@/utils/aiclawGroupConfig'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 import { isWeb } from '@/utils/PlatformConstants'
@@ -2349,6 +2349,58 @@ export const useChatStore = defineStore(
       (end.fromUid == null || String(state.aiclawId) === String(end.fromUid)) &&
       (end.clientRunId == null || state.clientRunId === end.clientRunId)
 
+    const matchesDetail = (state: ThinkingState, detail: ThinkingDetail) =>
+      String(detail.thinkingId) === state.thinkingId &&
+      String(detail.roomId) === state.roomId &&
+      String(detail.aiclawUid) === String(state.aiclawId) &&
+      String(detail.triggerMsgId ?? '') === (state.triggerMsgId ?? '') &&
+      (!state.clientRunId || detail.clientRunId === state.clientRunId)
+
+    /** REST-verified terminal history never displaces an unrelated active run. */
+    const restoreTerminalThinking = (detail: ThinkingDetail) => {
+      if (
+        !validThinkingId(detail.thinkingId) ||
+        !validThinkingId(detail.roomId) ||
+        !validThinkingId(detail.aiclawUid) ||
+        (detail.triggerMsgId != null && !validThinkingId(detail.triggerMsgId))
+      )
+        return
+      const thinkingId = String(detail.thinkingId)
+      if (findThinking(thinkingId)) return
+      const aiclawId = String(detail.aiclawUid)
+      const userInfo = groupStore.getUserInfo(aiclawId)
+      const status = mapServerThinkingStatus(detail.status)
+      if (status === 'thinking') return
+      upsertThinkingToTrigger({
+        thinkingId,
+        clientRunId: detail.clientRunId || undefined,
+        aiclawId,
+        aiclawName: userInfo?.name || aiclawStore.getName(aiclawId) || 'AI',
+        aiclawAvatar: userInfo?.avatar || '',
+        roomId: String(detail.roomId),
+        triggerMsgId: detail.triggerMsgId == null ? undefined : String(detail.triggerMsgId),
+        status,
+        startTime: Date.now(),
+        endTime: Date.now(),
+        durationMs: detail.durationMs ?? undefined,
+        collapsed: true
+      })
+    }
+
+    const pendingThinkingStarts = new Map<
+      string,
+      { payload: ThinkingStartPayload; timer: ReturnType<typeof setTimeout>; retry?: ReturnType<typeof setTimeout> }
+    >()
+    const forgetPendingStart = (key: string) => {
+      const pending = pendingThinkingStarts.get(key)
+      if (pending) {
+        clearTimeout(pending.timer)
+        if (pending.retry) clearTimeout(pending.retry)
+      }
+      pendingThinkingStarts.delete(key)
+    }
+    const startKey = (payload: ThinkingStartPayload) => `${payload.roomId}:${payload.fromUid}:${payload.thinkingId}`
+
     /** 开始思考（同 ID 重放不重置时间、锚点或终态） */
     const startThinking = (payload: ThinkingStartPayload) => {
       if (!payload.thinkingId || !validThinkingId(payload.fromUid) || !validThinkingId(payload.roomId)) return
@@ -2375,16 +2427,19 @@ export const useChatStore = defineStore(
         return
       }
 
-      // 同房间同 AI 的下一次执行才覆盖旧执行，绝不覆盖同 ID 重试。
-      const existing = thinkingStreams.get(key)
-      if (existing) {
-        if (existing.status === 'thinking') {
-          existing.status = 'error'
-          existing.errorMsg = 'Superseded by new thinking'
-          existing.endTime = Date.now()
-          upsertThinkingToTrigger(existing)
+      // Different-ID START arrival alone proves no ordering. Resolve against exact persisted rows.
+      if (thinkingStreams.has(key)) {
+        const id = startKey(payload)
+        if (!pendingThinkingStarts.has(id)) {
+          if (pendingThinkingStarts.size >= PENDING_END_LIMIT)
+            forgetPendingStart(pendingThinkingStarts.keys().next().value!)
+          pendingThinkingStarts.set(id, {
+            payload,
+            timer: setTimeout(() => forgetPendingStart(id), PENDING_END_MS)
+          })
+          void resolveCollidingStart(id)
         }
-        thinkingStreams.delete(key)
+        return
       }
 
       const userInfo = groupStore.getUserInfo(String(aiclawId))
@@ -2407,6 +2462,63 @@ export const useChatStore = defineStore(
       if (end) finalizeThinking(payload.thinkingId, end)
     }
 
+    const resolveCollidingStart = async (id: string, retried = false) => {
+      const pending = pendingThinkingStarts.get(id)
+      if (!pending) return
+      const incoming = pending.payload
+      const roomId = String(incoming.roomId)
+      const actor = String(incoming.fromUid)
+      const key = `${roomId}:${actor}`
+      const incomingDetail = await loadThinkingDetail(incoming.thinkingId)
+      if (pendingThinkingStarts.get(id) !== pending) return
+      const verified =
+        incomingDetail &&
+        validThinkingId(incomingDetail.thinkingId) &&
+        validThinkingId(incomingDetail.roomId) &&
+        validThinkingId(incomingDetail.aiclawUid) &&
+        (incomingDetail.triggerMsgId == null || validThinkingId(incomingDetail.triggerMsgId)) &&
+        String(incomingDetail.thinkingId) === incoming.thinkingId &&
+        String(incomingDetail.roomId) === roomId &&
+        String(incomingDetail.aiclawUid) === actor &&
+        String(incomingDetail.triggerMsgId ?? '') === (incoming.triggerMsgId ?? '') &&
+        (!incoming.clientRunId || incomingDetail.clientRunId === incoming.clientRunId)
+      if (verified && mapServerThinkingStatus(incomingDetail.status) !== 'thinking') {
+        restoreTerminalThinking(incomingDetail)
+        forgetPendingStart(id)
+        return
+      }
+      if (verified) {
+        const current = thinkingStreams.get(key)
+        if (!current) {
+          forgetPendingStart(id)
+          startThinking(incoming)
+          return
+        }
+        const currentDetail = await loadThinkingDetail(current.thinkingId)
+        if (pendingThinkingStarts.get(id) !== pending) return
+        const currentStatus = currentDetail && mapServerThinkingStatus(currentDetail.status)
+        if (
+          thinkingStreams.get(key)?.thinkingId === current.thinkingId &&
+          currentDetail &&
+          matchesDetail(current, currentDetail) &&
+          currentStatus &&
+          currentStatus !== 'thinking'
+        ) {
+          finalizeThinking(current.thinkingId, {
+            roomId: current.roomId,
+            fromUid: current.aiclawId,
+            clientRunId: current.clientRunId,
+            status: currentStatus,
+            durationMs: currentDetail.durationMs ?? undefined
+          })
+          forgetPendingStart(id)
+          startThinking(incoming)
+          return
+        }
+      }
+      if (!retried) pending.retry = setTimeout(() => void resolveCollidingStart(id, true), 1000)
+    }
+
     const recoverMissingThinkingStart = async (end: ThinkingEndPayload, key: string, retried = false) => {
       const detail = await loadThinkingDetail(end.thinkingId)
       const pending = pendingThinkingEnds.get(key)
@@ -2420,7 +2532,7 @@ export const useChatStore = defineStore(
         !validThinkingId(detail.thinkingId) ||
         !validThinkingId(detail.roomId) ||
         !validThinkingId(detail.aiclawUid) ||
-        !validThinkingId(detail.triggerMsgId) ||
+        (detail.triggerMsgId != null && !validThinkingId(detail.triggerMsgId)) ||
         String(detail.thinkingId) !== end.thinkingId ||
         String(detail.roomId) !== String(end.roomId)
       )
@@ -2439,24 +2551,7 @@ export const useChatStore = defineStore(
       if (active && active.thinkingId !== end.thinkingId) {
         // A's delayed END must not supersede the newer active run B.
         if (findThinking(end.thinkingId)) finalizeThinking(end.thinkingId, matchingEnd)
-        else {
-          const userInfo = groupStore.getUserInfo(aiclawId)
-          upsertThinkingToTrigger({
-            thinkingId: end.thinkingId,
-            clientRunId: detail.clientRunId || undefined,
-            aiclawId,
-            aiclawName: userInfo?.name || aiclawStore.getName(aiclawId) || 'AI',
-            aiclawAvatar: userInfo?.avatar || '',
-            roomId,
-            triggerMsgId: String(detail.triggerMsgId),
-            status: matchingEnd.status,
-            startTime: Date.now(),
-            endTime: Date.now(),
-            durationMs: matchingEnd.durationMs ?? detail.durationMs,
-            errorMsg: matchingEnd.errorMsg,
-            collapsed: true
-          })
-        }
+        else restoreTerminalThinking(detail)
         forgetPendingEnd(key)
         return
       }
@@ -2464,7 +2559,7 @@ export const useChatStore = defineStore(
         thinkingId: end.thinkingId,
         roomId: detail.roomId!,
         fromUid: detail.aiclawUid!,
-        triggerMsgId: String(detail.triggerMsgId),
+        triggerMsgId: detail.triggerMsgId == null ? undefined : String(detail.triggerMsgId),
         clientRunId: detail.clientRunId || undefined
       })
     }
@@ -2542,9 +2637,10 @@ export const useChatStore = defineStore(
             fromUid: state.aiclawId,
             clientRunId: state.clientRunId,
             status,
-            durationMs: detail.durationMs
+            durationMs: detail.durationMs ?? undefined
           })
       }
+      for (const id of [...pendingThinkingStarts.keys()]) await resolveCollidingStart(id, true)
     }
 
     /** 把 ThinkingState 归位到 thinkingByTrigger 的对应 triggerMsgId 桶 */
@@ -2638,6 +2734,9 @@ export const useChatStore = defineStore(
     const clearThinking = (roomId?: string, aiclawId?: string | number) => {
       for (const [key, pending] of pendingThinkingEnds) {
         if (!roomId || String(pending.payload.roomId) === roomId) forgetPendingEnd(key)
+      }
+      for (const [key, pending] of pendingThinkingStarts) {
+        if (!roomId || String(pending.payload.roomId) === roomId) forgetPendingStart(key)
       }
       if (roomId && aiclawId) {
         const key = `${roomId}:${aiclawId}`
