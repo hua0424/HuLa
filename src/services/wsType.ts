@@ -324,15 +324,17 @@ export type ThinkingStartPayload = {
   /** 思考会话 ID（由 server 生成，im_aiclaw_thinking 自增主键序列化为 string） */
   thinkingId: string
   /** aiclaw 用户 ID */
-  fromUid: number
+  fromUid: string | number
   /** 房间 ID */
-  roomId: number
+  roomId: string | number
   /** 触发消息 ID（可选） */
   triggerMsgId?: string
   /** aiclaw 显示名（server 从 im_user 回填，可选） */
   aiclawName?: string
   /** aiclaw 头像 URL（server 从 im_user 回填，可选） */
   aiclawAvatar?: string
+  /** T08 权威执行 ID；旧协议可能缺失 */
+  clientRunId?: string
 }
 
 /**
@@ -356,7 +358,11 @@ export type ThinkingEndPayload = {
   /** 关联的思考会话 ID */
   thinkingId: string
   /** 房间 ID */
-  roomId: number
+  roomId: string | number
+  /** server 回显的执行者（旧协议可能缺失） */
+  fromUid?: string | number
+  /** T08 权威执行 ID（旧协议可能缺失） */
+  clientRunId?: string
   /** 处理耗时（毫秒） */
   durationMs?: number
   /** 结束状态 */

@@ -19,8 +19,8 @@ import { renderReplyContent } from '@/utils/RenderReplyContent.ts'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useSessionUnreadStore } from '@/stores/sessionUnread'
 import { useAiclawStore } from '@/stores/aiclaw'
-import type { AiclawGroupConfig } from '@/services/wsType'
-import { loadThinkingByTrigger } from '@/services/thinkingService'
+import type { AiclawGroupConfig, ThinkingEndPayload, ThinkingStartPayload } from '@/services/wsType'
+import { loadThinkingByTrigger, loadThinkingDetail, type ThinkingDetail } from '@/services/thinkingService'
 import { normalizeAiclawGroupConfig } from '@/utils/aiclawGroupConfig'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 import { isWeb } from '@/utils/PlatformConstants'
@@ -2310,39 +2310,143 @@ export const useChatStore = defineStore(
       return result
     }
 
-    /** 开始思考（THINKING_START 时调用） */
-    const startThinking = (payload: {
-      thinkingId: string
-      fromUid: number
-      roomId: number
-      triggerMsgId?: string
-      aiclawName?: string
-      aiclawAvatar?: string
-    }) => {
-      const roomId = String(payload.roomId)
-      const aiclawId = payload.fromUid
-      const key = `${roomId}:${aiclawId}`
-
-      // 如果该 aiclaw 在该房间已有未完成的思考，先标记为被覆盖
-      const existing = thinkingStreams.get(key)
-      if (existing) {
-        if (existing.status === 'thinking') {
-          existing.status = 'error'
-          existing.errorMsg = 'Superseded by new thinking'
-          existing.endTime = Date.now()
-          upsertThinkingToTrigger(existing)
+    // Unmatched ENDs are never displayed. A short bounded window tolerates reordered frames;
+    // an authorized detail lookup can recover a dropped START only when its anchor is verified.
+    const pendingThinkingEnds = new Map<
+      string,
+      {
+        payload: ThinkingEndPayload
+        alternate?: ThinkingEndPayload
+        timer: ReturnType<typeof setTimeout>
+        retry?: ReturnType<typeof setTimeout>
+      }
+    >()
+    const PENDING_END_LIMIT = 64
+    const PENDING_END_MS = 30_000
+    const pendingKey = (roomId: string | number, thinkingId: string) => `${String(roomId)}:${thinkingId}`
+    const validThinkingId = (id: unknown) =>
+      (typeof id === 'string' && id.length > 0) || (typeof id === 'number' && Number.isSafeInteger(id))
+    const forgetPendingEnd = (key: string) => {
+      const pending = pendingThinkingEnds.get(key)
+      if (pending) {
+        clearTimeout(pending.timer)
+        if (pending.retry) clearTimeout(pending.retry)
+      }
+      pendingThinkingEnds.delete(key)
+    }
+    const findThinking = (thinkingId: string): ThinkingState | undefined => {
+      for (const roomMap of thinkingByTrigger.values()) {
+        for (const list of roomMap.values()) {
+          const state = list.find((item) => item.thinkingId === thinkingId)
+          if (state) return state
         }
-        thinkingStreams.delete(key)
+      }
+      return [...thinkingStreams.values()].find((state) => state.thinkingId === thinkingId)
+    }
+    const matchesEnd = (state: ThinkingState, end: ThinkingEndPayload) =>
+      state.thinkingId === end.thinkingId &&
+      state.roomId === String(end.roomId) &&
+      (end.fromUid == null || String(state.aiclawId) === String(end.fromUid)) &&
+      (end.clientRunId == null || state.clientRunId === end.clientRunId)
+
+    const matchesDetail = (state: ThinkingState, detail: ThinkingDetail) =>
+      String(detail.thinkingId) === state.thinkingId &&
+      String(detail.roomId) === state.roomId &&
+      String(detail.aiclawUid) === String(state.aiclawId) &&
+      String(detail.triggerMsgId ?? '') === (state.triggerMsgId ?? '') &&
+      (!state.clientRunId || detail.clientRunId === state.clientRunId)
+
+    /** REST-verified terminal history never displaces an unrelated active run. */
+    const restoreTerminalThinking = (detail: ThinkingDetail) => {
+      if (
+        !validThinkingId(detail.thinkingId) ||
+        !validThinkingId(detail.roomId) ||
+        !validThinkingId(detail.aiclawUid) ||
+        (detail.triggerMsgId != null && !validThinkingId(detail.triggerMsgId))
+      )
+        return
+      const thinkingId = String(detail.thinkingId)
+      if (findThinking(thinkingId)) return
+      const aiclawId = String(detail.aiclawUid)
+      const userInfo = groupStore.getUserInfo(aiclawId)
+      const status = mapServerThinkingStatus(detail.status)
+      if (status === 'thinking') return
+      upsertThinkingToTrigger({
+        thinkingId,
+        clientRunId: detail.clientRunId || undefined,
+        aiclawId,
+        aiclawName: userInfo?.name || aiclawStore.getName(aiclawId) || 'AI',
+        aiclawAvatar: userInfo?.avatar || '',
+        roomId: String(detail.roomId),
+        triggerMsgId: detail.triggerMsgId == null ? undefined : String(detail.triggerMsgId),
+        status,
+        startTime: Date.now(),
+        endTime: Date.now(),
+        durationMs: detail.durationMs ?? undefined,
+        collapsed: true
+      })
+    }
+
+    const pendingThinkingStarts = new Map<
+      string,
+      { payload: ThinkingStartPayload; timer: ReturnType<typeof setTimeout>; retry?: ReturnType<typeof setTimeout> }
+    >()
+    const forgetPendingStart = (key: string) => {
+      const pending = pendingThinkingStarts.get(key)
+      if (pending) {
+        clearTimeout(pending.timer)
+        if (pending.retry) clearTimeout(pending.retry)
+      }
+      pendingThinkingStarts.delete(key)
+    }
+    const startKey = (payload: ThinkingStartPayload) => `${payload.roomId}:${payload.fromUid}:${payload.thinkingId}`
+
+    /** 开始思考（同 ID 重放不重置时间、锚点或终态） */
+    const startThinking = (payload: ThinkingStartPayload) => {
+      if (!payload.thinkingId || !validThinkingId(payload.fromUid) || !validThinkingId(payload.roomId)) return
+      const roomId = String(payload.roomId)
+      const aiclawId = String(payload.fromUid)
+      const key = `${roomId}:${aiclawId}`
+      const prior = findThinking(payload.thinkingId)
+      if (prior) {
+        // 同 ID 不得跨房间、执行者、触发消息或 run 冒充原帧。
+        if (
+          prior.roomId !== roomId ||
+          String(prior.aiclawId) !== aiclawId ||
+          prior.triggerMsgId !== payload.triggerMsgId ||
+          (prior.clientRunId && payload.clientRunId && prior.clientRunId !== payload.clientRunId)
+        )
+          return
+        if (prior.status === 'thinking' && !thinkingStreams.has(key)) {
+          prior.clientRunId ||= payload.clientRunId
+          thinkingStreams.set(key, prior)
+        }
+        const pending = pendingThinkingEnds.get(pendingKey(roomId, payload.thinkingId))
+        const end = pending && [pending.payload, pending.alternate].find((item) => item && matchesEnd(prior, item))
+        if (end && prior.status === 'thinking') finalizeThinking(payload.thinkingId, end)
+        return
       }
 
-      // 从 groupStore 获取名称和头像（降级：使用 payload 中的值或默认值）
-      const groupStore = useGroupStore()
-      const userInfo = groupStore.getUserInfo(String(aiclawId))
+      // Different-ID START arrival alone proves no ordering. Resolve against exact persisted rows.
+      if (thinkingStreams.has(key)) {
+        const id = startKey(payload)
+        if (!pendingThinkingStarts.has(id)) {
+          if (pendingThinkingStarts.size >= PENDING_END_LIMIT)
+            forgetPendingStart(pendingThinkingStarts.keys().next().value!)
+          pendingThinkingStarts.set(id, {
+            payload,
+            timer: setTimeout(() => forgetPendingStart(id), PENDING_END_MS)
+          })
+          void resolveCollidingStart(id)
+        }
+        return
+      }
 
+      const userInfo = groupStore.getUserInfo(String(aiclawId))
       const state: ThinkingState = {
         thinkingId: payload.thinkingId,
+        clientRunId: payload.clientRunId,
         aiclawId,
-        // #222：无共同群 AI 的 groupStore 查找会落空，回退管理面板（AICLAW_LIST）名字，最后才泛化 'AI'
         aiclawName: payload.aiclawName || userInfo?.name || aiclawStore.getName(aiclawId) || 'AI',
         aiclawAvatar: payload.aiclawAvatar || userInfo?.avatar || '',
         roomId,
@@ -2351,43 +2455,192 @@ export const useChatStore = defineStore(
         triggerMsgId: payload.triggerMsgId,
         collapsed: false
       }
-
       thinkingStreams.set(key, state)
       upsertThinkingToTrigger(state)
+      const pending = pendingThinkingEnds.get(pendingKey(roomId, payload.thinkingId))
+      const end = pending && [pending.payload, pending.alternate].find((item) => item && matchesEnd(state, item))
+      if (end) finalizeThinking(payload.thinkingId, end)
     }
 
-    /** 结束思考（THINKING_END 时调用） */
-    const finalizeThinking = (
-      thinkingId: string,
-      payload: { durationMs?: number; status: 'complete' | 'error'; errorMsg?: string }
-    ) => {
-      for (const [key, state] of thinkingStreams) {
-        if (state.thinkingId === thinkingId) {
-          state.status = payload.status
-          state.endTime = Date.now()
-          state.durationMs = payload.durationMs
-          state.errorMsg = payload.errorMsg
-          state.collapsed = true
-          upsertThinkingToTrigger(state)
-          thinkingStreams.delete(key)
+    const resolveCollidingStart = async (id: string, retried = false) => {
+      const pending = pendingThinkingStarts.get(id)
+      if (!pending) return
+      const incoming = pending.payload
+      const roomId = String(incoming.roomId)
+      const actor = String(incoming.fromUid)
+      const key = `${roomId}:${actor}`
+      const incomingDetail = await loadThinkingDetail(incoming.thinkingId)
+      if (pendingThinkingStarts.get(id) !== pending) return
+      const verified =
+        incomingDetail &&
+        validThinkingId(incomingDetail.thinkingId) &&
+        validThinkingId(incomingDetail.roomId) &&
+        validThinkingId(incomingDetail.aiclawUid) &&
+        (incomingDetail.triggerMsgId == null || validThinkingId(incomingDetail.triggerMsgId)) &&
+        String(incomingDetail.thinkingId) === incoming.thinkingId &&
+        String(incomingDetail.roomId) === roomId &&
+        String(incomingDetail.aiclawUid) === actor &&
+        String(incomingDetail.triggerMsgId ?? '') === (incoming.triggerMsgId ?? '') &&
+        (!incoming.clientRunId || incomingDetail.clientRunId === incoming.clientRunId)
+      if (verified && mapServerThinkingStatus(incomingDetail.status) !== 'thinking') {
+        restoreTerminalThinking(incomingDetail)
+        forgetPendingStart(id)
+        return
+      }
+      if (verified) {
+        const current = thinkingStreams.get(key)
+        if (!current) {
+          forgetPendingStart(id)
+          startThinking(incoming)
+          return
+        }
+        const currentDetail = await loadThinkingDetail(current.thinkingId)
+        if (pendingThinkingStarts.get(id) !== pending) return
+        const currentStatus = currentDetail && mapServerThinkingStatus(currentDetail.status)
+        if (
+          thinkingStreams.get(key)?.thinkingId === current.thinkingId &&
+          currentDetail &&
+          matchesDetail(current, currentDetail) &&
+          currentStatus &&
+          currentStatus !== 'thinking'
+        ) {
+          finalizeThinking(current.thinkingId, {
+            roomId: current.roomId,
+            fromUid: current.aiclawId,
+            clientRunId: current.clientRunId,
+            status: currentStatus,
+            durationMs: currentDetail.durationMs ?? undefined
+          })
+          forgetPendingStart(id)
+          startThinking(incoming)
           return
         }
       }
+      if (!retried) pending.retry = setTimeout(() => void resolveCollidingStart(id, true), 1000)
+    }
 
-      // 活跃流中未找到（例如历史元数据先加载，随后 WS END 到达），在 byTrigger 中更新
-      for (const roomMap of thinkingByTrigger.values()) {
-        for (const list of roomMap.values()) {
-          const state = list.find((s) => s.thinkingId === thinkingId)
-          if (state) {
-            state.status = payload.status
-            state.endTime = Date.now()
-            state.durationMs = payload.durationMs
-            state.errorMsg = payload.errorMsg
-            state.collapsed = true
-            return
-          }
-        }
+    const recoverMissingThinkingStart = async (end: ThinkingEndPayload, key: string, retried = false) => {
+      const detail = await loadThinkingDetail(end.thinkingId)
+      const pending = pendingThinkingEnds.get(key)
+      if (!pending || (pending.payload !== end && pending.alternate !== end)) return
+      if (!detail && !retried) {
+        pending.retry = setTimeout(() => void recoverMissingThinkingStart(end, key, true), 1000)
+        return
       }
+      if (
+        !detail ||
+        !validThinkingId(detail.thinkingId) ||
+        !validThinkingId(detail.roomId) ||
+        !validThinkingId(detail.aiclawUid) ||
+        (detail.triggerMsgId != null && !validThinkingId(detail.triggerMsgId)) ||
+        String(detail.thinkingId) !== end.thinkingId ||
+        String(detail.roomId) !== String(end.roomId)
+      )
+        return
+      const matchingEnd = [pending.payload, pending.alternate].find(
+        (candidate) =>
+          candidate &&
+          mapServerThinkingStatus(detail.status) === candidate.status &&
+          (candidate.fromUid == null || String(detail.aiclawUid) === String(candidate.fromUid)) &&
+          (candidate.clientRunId == null || detail.clientRunId === candidate.clientRunId)
+      )
+      if (!matchingEnd) return
+      const roomId = String(detail.roomId)
+      const aiclawId = String(detail.aiclawUid)
+      const active = thinkingStreams.get(`${roomId}:${aiclawId}`)
+      if (active && active.thinkingId !== end.thinkingId) {
+        // A's delayed END must not supersede the newer active run B.
+        if (findThinking(end.thinkingId)) finalizeThinking(end.thinkingId, matchingEnd)
+        else restoreTerminalThinking(detail)
+        forgetPendingEnd(key)
+        return
+      }
+      startThinking({
+        thinkingId: end.thinkingId,
+        roomId: detail.roomId!,
+        fromUid: detail.aiclawUid!,
+        triggerMsgId: detail.triggerMsgId == null ? undefined : String(detail.triggerMsgId),
+        clientRunId: detail.clientRunId || undefined
+      })
+    }
+
+    /** 只对精确 ID、房间、可用的执行者/run 关联完成；未知 END 有界等待/查询。 */
+    const finalizeThinking = (
+      thinkingId: string,
+      payload: Pick<ThinkingEndPayload, 'status' | 'durationMs' | 'errorMsg'> &
+        Partial<Pick<ThinkingEndPayload, 'roomId' | 'fromUid' | 'clientRunId'>>
+    ) => {
+      if (!thinkingId) return
+      const state = findThinking(thinkingId)
+      if (state) {
+        if (payload.roomId != null && !matchesEnd(state, { ...payload, thinkingId, roomId: payload.roomId })) return
+        if (payload.fromUid != null && String(payload.fromUid) !== String(state.aiclawId)) return
+        if (payload.clientRunId != null && payload.clientRunId !== state.clientRunId) return
+        if (state.status !== 'thinking') return
+        state.status = payload.status
+        state.endTime = Date.now()
+        state.durationMs = payload.durationMs
+        state.errorMsg = payload.errorMsg
+        state.collapsed = true
+        upsertThinkingToTrigger(state)
+        const key = `${state.roomId}:${state.aiclawId}`
+        if (thinkingStreams.get(key)?.thinkingId === thinkingId) thinkingStreams.delete(key)
+        forgetPendingEnd(pendingKey(state.roomId, thinkingId))
+        return
+      }
+      if (
+        payload.roomId == null ||
+        !validThinkingId(payload.roomId) ||
+        (payload.fromUid != null && !validThinkingId(payload.fromUid))
+      )
+        return
+      const end: ThinkingEndPayload = { ...payload, thinkingId, roomId: payload.roomId }
+      const key = pendingKey(end.roomId, thinkingId)
+      const existingPending = pendingThinkingEnds.get(key)
+      // ponytail: two variants per ID tolerate one bad/old frame; use server replay if more conflicts occur.
+      if (existingPending) {
+        if (
+          !existingPending.alternate &&
+          (existingPending.payload.fromUid !== end.fromUid ||
+            existingPending.payload.clientRunId !== end.clientRunId ||
+            existingPending.payload.status !== end.status)
+        ) {
+          existingPending.alternate = end
+          void recoverMissingThinkingStart(end, key)
+        }
+        return
+      }
+      if (pendingThinkingEnds.size >= PENDING_END_LIMIT) forgetPendingEnd(pendingThinkingEnds.keys().next().value!)
+      pendingThinkingEnds.set(key, { payload: end, timer: setTimeout(() => forgetPendingEnd(key), PENDING_END_MS) })
+      void recoverMissingThinkingStart(end, key)
+    }
+
+    /** Reconnect: repair a dropped END from authenticated exact-ID server state, never from latest room/run. */
+    const reconcileThinkingAfterReconnect = async () => {
+      // ponytail: at most 64 sequential GETs per reconnect; paginate only if >64 concurrent AI turns become real.
+      const active = [...thinkingStreams.values()].slice(0, 64)
+      for (const state of active) {
+        const detail = await loadThinkingDetail(state.thinkingId)
+        if (
+          !detail ||
+          String(detail.thinkingId) !== state.thinkingId ||
+          String(detail.roomId) !== state.roomId ||
+          String(detail.aiclawUid) !== String(state.aiclawId) ||
+          String(detail.triggerMsgId ?? '') !== (state.triggerMsgId ?? '') ||
+          (state.clientRunId && detail.clientRunId !== state.clientRunId)
+        )
+          continue
+        const status = mapServerThinkingStatus(detail.status)
+        if (status !== 'thinking')
+          finalizeThinking(state.thinkingId, {
+            roomId: state.roomId,
+            fromUid: state.aiclawId,
+            clientRunId: state.clientRunId,
+            status,
+            durationMs: detail.durationMs ?? undefined
+          })
+      }
+      for (const id of [...pendingThinkingStarts.keys()]) await resolveCollidingStart(id, true)
     }
 
     /** 把 ThinkingState 归位到 thinkingByTrigger 的对应 triggerMsgId 桶 */
@@ -2429,7 +2682,7 @@ export const useChatStore = defineStore(
       if (!msgIds.length) return
 
       const items = await loadThinkingByTrigger({
-        roomId: Number(roomId),
+        roomId,
         triggerMsgIds: msgIds
       })
 
@@ -2454,8 +2707,8 @@ export const useChatStore = defineStore(
         }
         if (exists) continue
 
-        const aiclawId = Number(item.aiclawUid)
-        const userInfo = groupStore.getUserInfo(String(aiclawId))
+        const aiclawId = String(item.aiclawUid)
+        const userInfo = groupStore.getUserInfo(aiclawId)
         const endTime = parseThinkingCreateTime(item.createTime)
         const durationMs = item.durationMs ?? 0
         const startTime = durationMs > 0 ? endTime - durationMs : endTime
@@ -2478,7 +2731,13 @@ export const useChatStore = defineStore(
     }
 
     /** 清理思考状态（切换房间或手动关闭时） */
-    const clearThinking = (roomId?: string, aiclawId?: number) => {
+    const clearThinking = (roomId?: string, aiclawId?: string | number) => {
+      for (const [key, pending] of pendingThinkingEnds) {
+        if (!roomId || String(pending.payload.roomId) === roomId) forgetPendingEnd(key)
+      }
+      for (const [key, pending] of pendingThinkingStarts) {
+        if (!roomId || String(pending.payload.roomId) === roomId) forgetPendingStart(key)
+      }
       if (roomId && aiclawId) {
         const key = `${roomId}:${aiclawId}`
         const state = thinkingStreams.get(key)
@@ -2587,6 +2846,7 @@ export const useChatStore = defineStore(
       autoReplyMessages,
       startThinking,
       finalizeThinking,
+      reconcileThinkingAfterReconnect,
       clearThinking,
       loadThinkingByTriggerForMessages,
       markMessageAsAutoReply,
