@@ -143,6 +143,7 @@ useMitt.on(WsResponseMessageType.LOGIN_SUCCESS, async (data: LoginSuccessResType
   })
   // 刚登录成功时同步当前/首个群聊的成员信息，避免消息显示“未知用户”
   await refreshActiveGroupMembers()
+  await chatStore.reconcileThinkingAfterReconnect()
 })
 
 useMitt.on(WsResponseMessageType.MSG_RECALL, (data: RevokedMsgType) => {
@@ -641,6 +642,7 @@ const handleWebsocketEvent = async (event: any) => {
   try {
     // Rust 端已通过 schedule_post_reconnect_sync 调用 sync_messages，前端无需重复调用
     await chatStore.getSessionList(true)
+    await chatStore.reconcileThinkingAfterReconnect()
 
     // 重连后同步当前/首个群聊成员信息，避免展示断网前的旧数据
     await refreshActiveGroupMembers()
