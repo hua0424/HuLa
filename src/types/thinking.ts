@@ -10,8 +10,10 @@ export type ThinkingStatus = 'thinking' | 'complete' | 'error'
 export interface ThinkingState {
   /** 思考会话 ID（server 生成） */
   thinkingId: string
+  /** T08 权威执行 ID（旧协议可缺失） */
+  clientRunId?: string
   /** aiclaw 用户 ID */
-  aiclawId: number
+  aiclawId: string | number
   /** aiclaw 显示名 */
   aiclawName: string
   /** aiclaw 头像 */
