@@ -6,7 +6,31 @@ vi.mock('@/utils/ImRequestUtils', () => ({
 }))
 
 import { ImUrlEnum } from '@/enums'
-import { loadThinkingByTrigger } from '@/services/thinkingService'
+import { loadThinkingByTrigger, loadThinkingDetail } from '@/services/thinkingService'
+
+describe('thinkingService.loadThinkingDetail', () => {
+  beforeEach(() => imRequestSilentMock.mockReset())
+
+  it('queries exact opaque ID using existing authenticated detail endpoint', async () => {
+    const detail = {
+      thinkingId: '9007199254740993',
+      roomId: '9007199254740995',
+      aiclawUid: '9007199254740997',
+      status: 1
+    }
+    imRequestSilentMock.mockResolvedValueOnce(detail)
+    expect(await loadThinkingDetail(detail.thinkingId)).toEqual(detail)
+    expect(imRequestSilentMock).toHaveBeenCalledWith({
+      url: ImUrlEnum.AICLAW_THINKING_DETAIL,
+      params: { thinkingId: detail.thinkingId }
+    })
+  })
+
+  it('fails closed on unavailable detail', async () => {
+    imRequestSilentMock.mockRejectedValueOnce(new Error('offline'))
+    expect(await loadThinkingDetail('123')).toBeNull()
+  })
+})
 
 describe('thinkingService.loadThinkingByTrigger (REQ-014)', () => {
   beforeEach(() => {
@@ -40,7 +64,7 @@ describe('thinkingService.loadThinkingByTrigger (REQ-014)', () => {
     expect(imRequestSilentMock).toHaveBeenCalledWith({
       url: ImUrlEnum.AICLAW_THINKING_BY_TRIGGER,
       body: {
-        roomId: 1001,
+        roomId: '1001',
         triggerMsgIds: ['msg-1', 'msg-2']
       }
     })

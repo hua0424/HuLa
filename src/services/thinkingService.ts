@@ -2,6 +2,32 @@ import { ImUrlEnum } from '@/enums'
 import { imRequestSilent } from '@/utils/ImRequestUtils'
 import type { ThinkingMetadataItem } from '@/types/thinking'
 
+/** GET detail is authenticated and must return ownership fields before it can recover a missed START. */
+export type ThinkingDetail = {
+  id?: string | number
+  thinkingId?: string | number
+  roomId?: string | number
+  aiclawUid?: string | number
+  triggerMsgId?: string | number | null
+  clientRunId?: string | null
+  status: number
+  durationMs?: number | null
+}
+
+export const loadThinkingDetail = async (thinkingId: string): Promise<ThinkingDetail | null> => {
+  try {
+    return (
+      (await imRequestSilent<ThinkingDetail>({
+        url: ImUrlEnum.AICLAW_THINKING_DETAIL,
+        params: { thinkingId }
+      })) ?? null
+    )
+  } catch {
+    // Silent reconciliation: transport errors may include authenticated request metadata.
+    return null
+  }
+}
+
 export type LoadThinkingByTriggerParams = {
   /** 房间 ID */
   roomId: string | number
@@ -28,7 +54,7 @@ export const loadThinkingByTrigger = async ({
     const data = await imRequestSilent<ThinkingMetadataItem[]>({
       url: ImUrlEnum.AICLAW_THINKING_BY_TRIGGER,
       body: {
-        roomId: Number(roomId),
+        roomId: String(roomId),
         triggerMsgIds
       }
     })
