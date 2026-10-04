@@ -55,6 +55,13 @@ import {
   shouldAdvanceRemote,
   type RemoteStatus
 } from '@/utils/historyBackfill'
+import {
+  buildWindowRange,
+  isWindowUnsupported,
+  mergeWindowResult,
+  type WindowCalibOutcome as WindowOutcome,
+  type WindowMergeMsg
+} from '@/utils/windowCalibrate'
 
 type RecalledMessage = {
   messageId: string
@@ -523,6 +530,9 @@ export const useChatStore = defineStore(
       browseSeq[roomId] = (browseSeq[roomId] ?? 0) + 1
       const requestBrowse = browseSeq[roomId]
       Object.assign(ensureProgress(roomId), newRoomProgress())
+      // aichatoverview#350：新浏览窗口的校准状态回到未校准（旧结果不污染新进度）
+      windowCalibOf(roomId).status = 'unknown'
+      windowCalibOf(roomId).error = ''
 
       // 3. 清空回复映射
       if (currentReplyMap.value) {
@@ -888,9 +898,190 @@ export const useChatStore = defineStore(
       const progress = ensureProgress(roomId)
       const localCount = Object.keys(messageMap[roomId] ?? {}).length
       if (decideFirstScreen(localCount, progress.remoteStatus) === 'backfill-remote') {
-        return getPageMsg(size, roomId, '', true, 'remote')
+        const remoteResult = await getPageMsg(size, roomId, '', true, 'remote')
+        if (remoteResult.ok) void calibrateWindow(roomId)
+        return remoteResult
       }
+      // 首屏不等待校准：后台核对当前页差异，失败保留可读内容
+      void calibrateWindow(roomId)
       return localResult
+    }
+
+    // aichatoverview#350：当前阅读窗口校准状态（unknown 未校准 / calibrating 校准中 /
+    // ok 已校准 / partial 部分确认可读 / unsupported 旧服务端 / error 失败可重试）。
+    // 冲突项重查完成前不报 ok；任何失败都不清空已有可读内容。
+    interface WindowCalibState {
+      status: WindowOutcome['status']
+      error: string
+      updatedAt: number
+    }
+    const windowCalib = reactive<Record<string, WindowCalibState>>({})
+    const windowCalibOf = (roomId: string): WindowCalibState =>
+      (windowCalib[roomId] ??= { status: 'unknown', error: '', updatedAt: 0 })
+    // 同房间校准单飞；预热/切房晚返回不得覆盖前台已推进的状态（浏览代次丢弃）
+    const inflightCalib = new Map<string, Promise<WindowOutcome>>()
+
+    const calibrateWindow = async (
+      roomId: string = globalStore.currentSessionRoomId,
+      opts?: { force?: boolean; requestId?: string }
+    ): Promise<WindowOutcome> => {
+      if (!roomId) return { roomId: '', ok: false, status: 'unknown', error: 'roomId 为空' }
+      if (!opts?.force && windowCalibOf(roomId).status === 'unsupported') {
+        return { roomId, ok: false, status: 'unsupported', error: windowCalibOf(roomId).error }
+      }
+      const inflight = inflightCalib.get(roomId)
+      if (inflight) return inflight
+      const task = runWindowCalibration(roomId, opts?.requestId ?? `wcal-${Date.now().toString(36)}-${roomId}`)
+      inflightCalib.set(roomId, task)
+      try {
+        return await task
+      } finally {
+        if (inflightCalib.get(roomId) === task) inflightCalib.delete(roomId)
+      }
+    }
+
+    // 旧失败可重试入口（重进房间/手动刷新自动触发；历史重试按钮顺带触发）
+    const retryWindowCalibration = async (roomId: string = globalStore.currentSessionRoomId) =>
+      calibrateWindow(roomId, { force: true })
+
+    const runWindowCalibration = async (roomId: string, reqId: string): Promise<WindowOutcome> => {
+      const state = windowCalibOf(roomId)
+      state.status = 'calibrating'
+      state.error = ''
+      const finish = (outcome: WindowOutcome): WindowOutcome => {
+        state.status = outcome.status
+        state.error = outcome.error ?? ''
+        state.updatedAt = Date.now()
+        return outcome
+      }
+      let binding: SessionIdentity | null = null
+      const epoch = accountEpoch
+      try {
+        binding = await captureAccount()
+      } catch (error) {
+        return finish({
+          roomId,
+          ok: false,
+          status: 'error',
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+      // 结果绑定请求时浏览代次与消息更新序号
+      const requestBrowseSeq = browseSeq[roomId] ?? 0
+      const requestMsgSeq = roomMsgSeq[roomId] ?? 0
+      const existedIds = new Set(Object.keys(messageMap[roomId] ?? {}))
+      const visible = chatMessageListByRoomId
+        .value(roomId)
+        .map((m) => ({ id: String(m.message.id), sendTime: m.message.sendTime ?? 0 }))
+      const anchorId = visible.length ? visible[0].id : ''
+      const range = buildWindowRange(visible, pageSize, reqId)
+
+      let data: {
+        items?: unknown[]
+        unavailableIds?: Array<string | number>
+        complete?: boolean
+        knownReceipts?: Array<{ id?: string; available?: boolean }>
+        knownComplete?: boolean
+        schemaVersion?: string
+      }
+      try {
+        if (isWeb()) {
+          // Web 直调服务端 envelope：同口径严格校验，不推测旧服务端能力
+          const { imRequest } = await import('@/utils/ImRequestUtils')
+          const { ImUrlEnum } = await import('@/enums')
+          const envelope = (await imRequest({
+            url: ImUrlEnum.GET_MSG_WINDOW,
+            body: { roomId, ...range }
+          })) as {
+            schemaVersion?: string
+            capabilities?: string[]
+            items?: unknown[]
+            complete?: boolean
+            knownReceipts?: Array<{ id?: string; available?: boolean }>
+            knownComplete?: boolean
+          }
+          if (
+            !envelope ||
+            envelope.schemaVersion !== 'msg-window-v1' ||
+            !envelope.capabilities?.includes('messages') ||
+            !envelope.capabilities?.includes('known-receipts') ||
+            !Array.isArray(envelope.items) ||
+            typeof envelope.complete !== 'boolean' ||
+            !Array.isArray(envelope.knownReceipts) ||
+            typeof envelope.knownComplete !== 'boolean'
+          ) {
+            return finish({
+              roomId,
+              ok: false,
+              status: 'unsupported',
+              error: 'window_unsupported: envelope 缺字段或版本未知'
+            })
+          }
+          data = {
+            items: envelope.items,
+            unavailableIds: envelope.knownReceipts.filter((r) => !r.available).map((r) => String(r.id)),
+            complete: envelope.complete && envelope.knownComplete
+          }
+        } else {
+          data = (await invokeWithErrorHandler(
+            TauriCommand.CALIBRATE_WINDOW,
+            { binding, param: { roomId, ...range } },
+            {
+              customErrorMessage: '校准当前窗口失败',
+              errorType: ErrorType.Network
+            }
+          )) as { items?: unknown[]; unavailableIds?: Array<string | number>; complete?: boolean }
+          if (!data || !Array.isArray(data.items) || !Array.isArray(data.unavailableIds)) {
+            return finish({ roomId, ok: false, status: 'unsupported', error: 'window_unsupported: 校准响应缺字段' })
+          }
+        }
+      } catch (error) {
+        // 切房/退出：丢弃本次结果，不污染新房间状态
+        if (!accountCurrent(binding, epoch) || (browseSeq[roomId] ?? 0) !== requestBrowseSeq) {
+          return { roomId, ok: false, status: state.status, error: '窗口代次已失效' }
+        }
+        const message = error instanceof Error ? error.message : String(error)
+        // 鉴权失败原文透出（转登录，不重试）；旧服务端/404 判 unsupported 保持可读
+        if (/请重新登录|token过期|Token expired/i.test(message)) {
+          return finish({ roomId, ok: false, status: 'error', error: message })
+        }
+        if (isWindowUnsupported(message)) {
+          return finish({ roomId, ok: false, status: 'unsupported', error: message })
+        }
+        console.error(`[chat] calibrateWindow 失败:`, error)
+        return finish({ roomId, ok: false, status: 'error', error: message })
+      }
+
+      if (!accountCurrent(binding, epoch) || (browseSeq[roomId] ?? 0) !== requestBrowseSeq) {
+        return { roomId, ok: false, status: state.status, error: '窗口代次已失效' }
+      }
+      if (!messageMap[roomId]) messageMap[roomId] = {}
+      const wsTouched = (roomMsgSeq[roomId] ?? 0) !== requestMsgSeq
+      for (const msg of (data.items ?? []) as MessageType[]) {
+        if (binding) Object.assign(msg, { _sessionBinding: binding })
+        normalizeMsgSendTime(msg)
+      }
+      // 原地合并：请求期间被 WS 更新过的 ID 不被旧快照覆盖，发送中占位永不覆盖
+      const merged = mergeWindowResult(
+        messageMap[roomId],
+        { items: (data.items ?? []) as WindowMergeMsg[], unavailableIds: data.unavailableIds ?? [] },
+        { existedIds, wsTouched, isTransient: (m) => shouldKeepTransientMessage(m as MessageType) },
+        anchorId
+      )
+      // 在途触及导致部分跳过时不假称已校准
+      const status = data.complete && !wsTouched ? 'ok' : 'partial'
+      !isWeb() &&
+        (await info(
+          `[window-calibrate] roomId=${roomId} merged=${merged.merged} deleted=${merged.deleted} anchorKept=${merged.anchorKept} status=${status}`
+        ))
+      return finish({
+        roomId,
+        ok: true,
+        status,
+        merged: merged.merged,
+        deleted: merged.deleted,
+        anchorKept: merged.anchorKept
+      })
     }
 
     // aichatoverview#285：账号退出/切换清理全部进度与进行中请求，旧请求结果不再写入
@@ -905,6 +1096,10 @@ export const useChatStore = defineStore(
       for (const roomId of Object.keys(roomMsgSeq)) {
         delete roomMsgSeq[roomId]
       }
+      for (const roomId of Object.keys(windowCalib)) {
+        delete windowCalib[roomId]
+      }
+      inflightCalib.clear()
       inflightPageMsg.clear()
       lastGoodRemoteCursor.clear()
       remoteSyncLocks.clear()
@@ -3097,6 +3292,9 @@ export const useChatStore = defineStore(
       currentReplyMap,
       currentNewMsgCount,
       loadMore,
+      calibrateWindow,
+      retryWindowCalibration,
+      windowCalib,
       currentMsgReply,
       sessionList,
       sessionMap,

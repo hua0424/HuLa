@@ -17,6 +17,7 @@ use sea_orm::TransactionTrait;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 use tauri::{State, ipc::Channel};
@@ -446,6 +447,585 @@ async fn page_msg_remote(
         is_last: dto.is_last,
         list: Some(message_resps),
         total: dto.total,
+    })
+}
+
+/// aichatoverview#350：当前阅读窗口校准参数（TS 侧组装可见窗口 + 已知 ID）。
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CalibrateWindowParam {
+    room_id: String,
+    #[serde(default)]
+    request_id: Option<String>,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    from_time_ms: Option<i64>,
+    #[serde(default)]
+    from_id: Option<String>,
+    #[serde(default)]
+    to_time_ms: Option<i64>,
+    #[serde(default)]
+    to_id: Option<String>,
+    #[serde(default)]
+    known_msg_ids: Vec<String>,
+    #[serde(default)]
+    page_size: Option<u32>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct WindowRequestBody {
+    room_id: String,
+    request_id: String,
+    mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from_time_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    to_time_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    to_id: Option<String>,
+    known_msg_ids: Vec<String>,
+    page_size: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowBoundDto {
+    #[serde(default)]
+    time_ms: Option<i64>,
+    #[serde(default)]
+    id: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct KnownReceiptDto {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    available: Option<bool>,
+    #[serde(default)]
+    message: Option<MessageResp>,
+}
+
+/// aichatoverview#350：窗口 envelope 全部字段 Option——缺字段必须能解析出来再判
+/// unsupported，绝不能反序列化失败就当成功空或失权。
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct WindowCalibrateDto {
+    #[serde(default)]
+    schema_version: Option<String>,
+    #[serde(default)]
+    capabilities: Option<Vec<String>>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    request_id: Option<String>,
+    #[serde(default)]
+    items: Option<Vec<MessageResp>>,
+    #[serde(default)]
+    covered_lower: Option<WindowBoundDto>,
+    #[serde(default)]
+    covered_upper: Option<WindowBoundDto>,
+    #[serde(default)]
+    complete: Option<bool>,
+    #[serde(default)]
+    known_receipts: Option<Vec<KnownReceiptDto>>,
+    #[serde(default)]
+    known_complete: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CalibrateWindowResult {
+    pub room_id: String,
+    pub request_id: String,
+    pub complete: bool,
+    pub known_complete: bool,
+    pub inserted: usize,
+    pub recalled: usize,
+    pub hidden: usize,
+    pub unhidden: usize,
+    pub unconfirmed: usize,
+    pub items: Vec<MessageResp>,
+    pub unavailable_ids: Vec<String>,
+    pub covered_lower: Option<WindowBoundDto>,
+    pub covered_upper: Option<WindowBoundDto>,
+}
+
+#[derive(Debug)]
+struct ValidatedWindow {
+    items: Vec<MessageResp>,
+    receipts: Vec<(String, bool, Option<MessageResp>)>,
+    complete: bool,
+    known_complete: bool,
+    covered_lower: Option<WindowBoundDto>,
+    covered_upper: Option<WindowBoundDto>,
+}
+
+/// aichatoverview#350：envelope 严格校验（纯函数，可单测）。
+///
+/// schema_version/能力/字段缺失一律判 unsupported（保持缓存、未校准、可重试），
+/// 不当成功空，不当失权；回执必须与请求 ID 一一对应且顺序一致。
+fn validate_window_dto(
+    dto: WindowCalibrateDto,
+    requested_known: &[String],
+) -> Result<ValidatedWindow, String> {
+    let unsupported = |why: String| format!("window_unsupported: {}", why);
+    match dto.schema_version.as_deref() {
+        Some("msg-window-v1") => {}
+        other => {
+            return Err(unsupported(format!(
+                "schema_version 不是 msg-window-v1: {:?}",
+                other
+            )));
+        }
+    }
+    let caps = dto.capabilities.unwrap_or_default();
+    for need in ["messages", "known-receipts"] {
+        if !caps.iter().any(|c| c == need) {
+            return Err(unsupported(format!("缺能力 {}", need)));
+        }
+    }
+    let items = dto
+        .items
+        .ok_or_else(|| unsupported("缺 items".to_string()))?;
+    let complete = dto
+        .complete
+        .ok_or_else(|| unsupported("缺 complete".to_string()))?;
+    let receipts_raw = dto
+        .known_receipts
+        .ok_or_else(|| unsupported("缺 knownReceipts".to_string()))?;
+    let known_complete = dto
+        .known_complete
+        .ok_or_else(|| unsupported("缺 knownComplete".to_string()))?;
+    if receipts_raw.len() != requested_known.len() {
+        return Err(unsupported(format!(
+            "knownReceipts 数量 {} 与请求 {} 不一致",
+            receipts_raw.len(),
+            requested_known.len()
+        )));
+    }
+    let mut receipts = Vec::with_capacity(receipts_raw.len());
+    for (i, r) in receipts_raw.into_iter().enumerate() {
+        let id = r.id.ok_or_else(|| unsupported("回执缺 id".to_string()))?;
+        if id != requested_known[i] {
+            return Err(unsupported("回执顺序与请求不一致".to_string()));
+        }
+        let available = r
+            .available
+            .ok_or_else(|| unsupported("回执缺 available".to_string()))?;
+        if available && r.message.is_none() {
+            return Err(unsupported("available 回执缺 message".to_string()));
+        }
+        if !available && r.message.is_some() {
+            return Err(unsupported("unavailable 回执不应带 message".to_string()));
+        }
+        receipts.push((id, available, r.message));
+    }
+    Ok(ValidatedWindow {
+        items,
+        receipts,
+        complete,
+        known_complete,
+        covered_lower: dto.covered_lower,
+        covered_upper: dto.covered_upper,
+    })
+}
+
+/// aichatoverview#350：传输层错误分级（纯函数，可单测）。
+///
+/// 404 类文本（旧服务端无此路由）判 unsupported；鉴权失败原文透出（调用方转登录，
+/// 不重试）；其余判 window_error（可重试）；任何失败都不当成功空、不当失权。
+fn map_window_request_error(err: String) -> String {
+    if err.contains("请重新登录") || err.contains("token过期") || err.contains("Token expired")
+    {
+        return err;
+    }
+    let lower = err.to_lowercase();
+    // ponytail：文本启发而非状态码——request() 只透业务 code，HTTP 404 落在 anyhow 文本里；
+    // 若服务端补窗口能力探针，用探针替换此处。
+    if lower.contains("404")
+        || lower.contains("not found")
+        || lower.contains("no handler")
+        || lower.contains("no static resource")
+        || lower.contains("no such route")
+        || lower.contains("unknown path")
+    {
+        return format!(
+            "window_unsupported: 服务端无窗口校准接口（疑似旧版本）: {}",
+            err
+        );
+    }
+    format!("window_error: {}", err)
+}
+
+fn is_decimal_id(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// 服务端撤回类型（与服务端 MessageTypeEnum.RECALL=2、前端 MsgEnum.RECALL=2 同值）。
+const RECALL_MESSAGE_TYPE: u8 = 2;
+
+/// aichatoverview#350：当前阅读窗口校准。
+///
+/// 1. 网络等待不持写锁；2. 提交前重核账号代次与房间归属，迟到结果不串房不写新库；
+/// 3. 同一写事务内按指纹门禁合并：缺失插入（墓碑/清空边界/已存在优先复用
+/// save_history_page），已有行变更必须指纹未变，否则保留本地并计未确认；
+/// 4. 撤回只做 NORMAL→RECALL 单向，终态不倒退；乐观 temp 行（T 前缀）与非 success
+/// 行永不覆盖；5. 冲突未重查完不报 complete。
+#[tauri::command]
+pub async fn calibrate_window(
+    param: CalibrateWindowParam,
+    state: State<'_, AppData>,
+    binding: SessionIdentity,
+) -> Result<CalibrateWindowResult, String> {
+    let binding = state.session.capture_identity(&binding)?;
+    let room_id = param.room_id.trim().to_string();
+    if room_id.is_empty() {
+        return Err("roomId 不能为空".to_string());
+    }
+    let login_uid = binding.identity.uid.clone();
+    if login_uid.is_empty() {
+        return Err("未登录，无法校准窗口".to_string());
+    }
+    let page_size = param.page_size.unwrap_or(20).clamp(1, 100);
+    // 服务端只收十进制 id：乐观 temp 行（T 前缀）不进 known/边界，避免整包 400。
+    let known_msg_ids: Vec<String> = param
+        .known_msg_ids
+        .into_iter()
+        .filter(|id| is_decimal_id(id))
+        .take(100)
+        .collect();
+    let mode = match param.mode.as_deref().map(str::trim) {
+        None | Some("") | Some("tail") => "tail".to_string(),
+        Some("range") => "range".to_string(),
+        Some(other) => return Err(format!("未知窗口模式: {}", other)),
+    };
+    let clean_id = |v: Option<String>| v.filter(|s| is_decimal_id(s));
+    let request_id = param
+        .request_id
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("wcal-{}-{}", chrono::Utc::now().timestamp_millis(), room_id));
+
+    // 快照请求发起前的本地指纹：逐记录 touch 保护的比对基线（不持写锁）。
+    let snapshot_gate = state.session.commit(&binding).await?;
+    let snapshot =
+        im_message_repository::find_fingerprints(&binding.db, &known_msg_ids, &room_id, &login_uid)
+            .await
+            .map_err(|e| e.to_string())?;
+    drop(snapshot_gate);
+
+    let body = WindowRequestBody {
+        room_id: room_id.clone(),
+        request_id: request_id.clone(),
+        mode,
+        from_time_ms: param.from_time_ms,
+        from_id: clean_id(param.from_id),
+        to_time_ms: param.to_time_ms,
+        to_id: clean_id(param.to_id),
+        known_msg_ids: known_msg_ids.clone(),
+        page_size,
+    };
+    let dto_result: Result<Option<WindowCalibrateDto>, String> = request_bound(
+        &state.rc,
+        &state.session,
+        &binding,
+        ImUrl::GetMsgWindow,
+        Some(body),
+        None::<serde_json::Value>,
+    )
+    .await
+    .map_err(|e| map_window_request_error(e.to_string()));
+    let dto = match dto_result {
+        Err(e) => {
+            // 失败保持可读缓存：只记 outcome，不清空、不谎报已校准。
+            warn!(
+                target: "tauri_db",
+                "[window-calibrate] roomId={} requestId={} outcome=request-failed detail={}",
+                room_id,
+                request_id,
+                e
+            );
+            return Err(e);
+        }
+        Ok(None) => {
+            warn!(
+                target: "tauri_db",
+                "[window-calibrate] roomId={} requestId={} outcome=request-failed detail=window_error: 空响应",
+                room_id, request_id
+            );
+            return Err("window_error: 窗口校准返回空响应".to_string());
+        }
+        Ok(Some(dto)) => dto,
+    };
+    let window = match validate_window_dto(dto, &known_msg_ids) {
+        Err(e) => {
+            warn!(
+                target: "tauri_db",
+                "[window-calibrate] roomId={} requestId={} outcome=validate-failed detail={}",
+                room_id,
+                request_id,
+                e
+            );
+            return Err(e);
+        }
+        Ok(w) => w,
+    };
+
+    // 权威集合 = 范围 items ∪ 可用回执内容（去重）；串房行丢弃。
+    let mut authoritative: Vec<MessageResp> = window.items;
+    {
+        let mut seen: HashSet<String> = authoritative
+            .iter()
+            .filter_map(|m| m.message.id.clone())
+            .collect();
+        for (_, available, content) in &window.receipts {
+            if *available {
+                if let Some(msg) = content {
+                    if let Some(id) = msg.message.id.clone() {
+                        if seen.insert(id) {
+                            authoritative.push(msg.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    authoritative.retain(|m| m.message.room_id.as_deref() == Some(room_id.as_str()));
+
+    let room_for_save = room_id.clone();
+    let uid_for_save = login_uid.clone();
+    let snapshot_for_save = snapshot.clone();
+    let stats = run_with_write_lock(
+        state.session.clone(),
+        binding.clone(),
+        "calibrate_window",
+        || {
+            let db_conn = binding.db.clone();
+            let room_for_save = room_for_save.clone();
+            let uid_for_save = uid_for_save.clone();
+            let snapshot_for_save = snapshot_for_save.clone();
+            let authoritative = authoritative.clone();
+            let receipts: Vec<(String, bool)> = window
+                .receipts
+                .iter()
+                .map(|(id, available, _)| (id.clone(), *available))
+                .collect();
+            async move {
+                let tx = db_conn.begin().await.map_err(CommonError::DatabaseError)?;
+                // 提交时重读：快照有记录且不一致 = 在途被 WS/本地触及，保留本地。
+                let mut watch: Vec<String> = authoritative
+                    .iter()
+                    .filter_map(|m| m.message.id.clone())
+                    .collect();
+                watch.extend(receipts.iter().map(|(id, _)| id.clone()));
+                watch.sort();
+                watch.dedup();
+                let current = im_message_repository::find_fingerprints(
+                    &tx,
+                    &watch,
+                    &room_for_save,
+                    &uid_for_save,
+                )
+                .await?;
+                let touched = |id: &str| {
+                    snapshot_for_save
+                        .get(id)
+                        .is_some_and(|fp| current.get(id) != Some(fp))
+                };
+
+                // 缺失插入：墓碑/清空边界/已存在/串房由 save_history_page 统一守护。
+                let records: Vec<MessageWithThumbnail> = authoritative
+                    .iter()
+                    .cloned()
+                    .map(|msg_resp| {
+                        convert_resp_to_record_for_fetch(msg_resp, uid_for_save.clone())
+                    })
+                    .collect();
+                let save_stats = im_message_repository::save_history_page(
+                    &tx,
+                    records,
+                    &uid_for_save,
+                    &room_for_save,
+                )
+                .await?;
+
+                let mut recalled = 0usize;
+                let mut unconfirmed = 0usize;
+                // 已有行的权威变更：指纹门禁 + 撤回单向 + 乐观保护。
+                for msg_resp in &authoritative {
+                    let Some(id) = msg_resp.message.id.clone() else {
+                        continue;
+                    };
+                    if id.starts_with('T') {
+                        continue;
+                    }
+                    if current.get(&id).is_none() {
+                        continue; // 刚插入或仍缺失，无需变更
+                    }
+                    if touched(&id) {
+                        // 在途被触及的行若权威仍有意见则记未确认（插入已由上一步完成）。
+                        unconfirmed += 1;
+                        continue;
+                    }
+                    let (_, _, send_status) = &current[&id];
+                    if send_status != "success" {
+                        continue;
+                    }
+                    let (local_type, _, _) = &current[&id];
+                    if msg_resp.message.message_type == Some(RECALL_MESSAGE_TYPE)
+                        && *local_type != Some(RECALL_MESSAGE_TYPE)
+                    {
+                        let body_str = msg_resp
+                            .message
+                            .body
+                            .as_ref()
+                            .map(|b| serde_json::to_string(b).unwrap_or_default())
+                            .unwrap_or_default();
+                        im_message_repository::update_message_recall_status(
+                            &tx,
+                            &id,
+                            RECALL_MESSAGE_TYPE,
+                            &body_str,
+                            &uid_for_save,
+                        )
+                        .await?;
+                        recalled += 1;
+                    }
+                }
+
+                // 权威不可用：本地存在、未被触及、已发送成功才标隐藏；缺失即确认。
+                let mut hidden = 0usize;
+                let mut unavailable_effective: Vec<String> = Vec::new();
+                for (id, available) in &receipts {
+                    if *available || id.starts_with('T') {
+                        continue;
+                    }
+                    if current.get(id).is_none() {
+                        continue;
+                    }
+                    if touched(id) {
+                        unconfirmed += 1;
+                        continue;
+                    }
+                    let (_, _, send_status) = &current[id];
+                    if send_status != "success" {
+                        continue;
+                    }
+                    im_message_repository::mark_remote_hidden(
+                        &tx,
+                        id,
+                        &room_for_save,
+                        &uid_for_save,
+                    )
+                    .await?;
+                    hidden += 1;
+                    unavailable_effective.push(id.clone());
+                }
+
+                // 权威可用：清除历史隐藏标记（重新确认可见），计实际复活数。
+                let available_ids: Vec<String> = authoritative
+                    .iter()
+                    .filter_map(|m| m.message.id.clone())
+                    .collect();
+                let was_hidden =
+                    im_message_repository::remote_hidden_ids(&tx, &available_ids, &uid_for_save)
+                        .await?;
+                im_message_repository::clear_remote_hidden(&tx, &available_ids, &uid_for_save)
+                    .await?;
+                let unhidden = available_ids
+                    .iter()
+                    .filter(|id| was_hidden.contains(*id))
+                    .count();
+
+                tx.commit().await.map_err(CommonError::DatabaseError)?;
+                Ok((
+                    save_stats,
+                    recalled,
+                    hidden,
+                    unhidden,
+                    unconfirmed,
+                    unavailable_effective,
+                ))
+            }
+        },
+    )
+    .await?;
+    let (save_stats, recalled, hidden, unhidden, unconfirmed, unavailable_effective) = stats;
+
+    // 回读本地较新版本返回（不直接返 HTTP 旧对象），顺带重算 time_block。
+    let response_gate = state.session.commit(&binding).await?;
+    let db = &binding.db;
+    let auth_ids: Vec<String> = authoritative
+        .iter()
+        .filter_map(|m| m.message.id.clone())
+        .collect();
+    let mut sorted =
+        im_message_repository::find_visible_by_ids(&*db, &auth_ids, &room_id, &login_uid)
+            .await
+            .map_err(|e| e.to_string())?;
+    sorted.sort_by(|a, b| {
+        let a_time = a.message.send_time.unwrap_or(0);
+        let b_time = b.message.send_time.unwrap_or(0);
+        a_time
+            .cmp(&b_time)
+            .then_with(|| a.message.id.cmp(&b.message.id))
+    });
+
+    let db2 = &binding.db;
+    let mut message_resps: Vec<MessageResp> = Vec::with_capacity(sorted.len());
+    for (index, msg) in sorted.into_iter().enumerate() {
+        let mut resp = convert_message_to_resp(msg.clone(), None);
+        if index == 0 {
+            resp.time_block = Some(1);
+        } else if let Some(send_time) = msg.message.send_time {
+            resp.time_block = im_message_repository::calculate_time_block(
+                &*db2,
+                &msg.message.room_id,
+                &msg.message.id,
+                send_time,
+                &login_uid,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+        message_resps.push(resp);
+    }
+    drop(response_gate);
+
+    info!(
+        target: "tauri_db",
+        "[window-calibrate] roomId={} requestId={} complete={} knownComplete={} inserted={} existing={} tombstone={} recalled={} hidden={} unhidden={} unconfirmed={}",
+        room_id,
+        request_id,
+        window.complete,
+        window.known_complete,
+        save_stats.inserted,
+        save_stats.skipped_existing,
+        save_stats.skipped_tombstone,
+        recalled,
+        hidden,
+        unhidden,
+        unconfirmed,
+    );
+
+    Ok(CalibrateWindowResult {
+        room_id,
+        request_id,
+        complete: window.complete && window.known_complete && unconfirmed == 0,
+        known_complete: window.known_complete,
+        inserted: save_stats.inserted,
+        recalled,
+        hidden,
+        unhidden,
+        unconfirmed,
+        items: message_resps,
+        unavailable_ids: unavailable_effective,
+        covered_lower: window.covered_lower,
+        covered_upper: window.covered_upper,
     })
 }
 
@@ -1443,5 +2023,100 @@ mod tests {
             first.get("cursor").is_none(),
             "homepage fetch must omit cursor"
         );
+    }
+
+    fn window_dto_fixture() -> serde_json::Value {
+        serde_json::json!({
+            "schemaVersion": "msg-window-v1",
+            "capabilities": ["messages", "known-receipts"],
+            "requestId": "wcal-1",
+            "items": [],
+            "coveredLower": null,
+            "coveredUpper": null,
+            "complete": true,
+            "knownReceipts": [
+                {"id": "100", "available": true, "message": {
+                    "createId": "100",
+                    "fromUser": {"uid": "4", "nickname": null, "userType": 3},
+                    "message": {"id": "100", "clientMsgId": null, "roomId": "10",
+                        "type": 1, "body": {"content": "hi"}, "messageMarks": null,
+                        "sendTime": 1000, "status": "success"},
+                    "oldMsgId": null, "timeBlock": null
+                }},
+                {"id": "999", "available": false, "message": null}
+            ],
+            "knownComplete": true
+        })
+    }
+
+    #[test]
+    fn window_dto_validates_ok_and_receipts_align() {
+        let dto: WindowCalibrateDto =
+            serde_json::from_value(window_dto_fixture()).expect("fixture parses");
+        let known = vec!["100".to_string(), "999".to_string()];
+        let validated = validate_window_dto(dto, &known).expect("valid envelope");
+        assert!(validated.complete && validated.known_complete);
+        assert_eq!(validated.receipts.len(), 2);
+        assert!(validated.receipts[0].1);
+        assert!(!validated.receipts[1].1);
+    }
+
+    #[test]
+    fn window_dto_missing_fields_is_unsupported_not_empty() {
+        // 缺字段/旧版本形状：必须判 unsupported（保持缓存、可重试），不当成功空。
+        for patch in [
+            serde_json::json!({"schemaVersion": null}),
+            serde_json::json!({"schemaVersion": "msg-window-v0"}),
+            serde_json::json!({"capabilities": ["messages"]}),
+            serde_json::json!({"complete": null}),
+            serde_json::json!({"knownReceipts": null}),
+            serde_json::json!({"knownComplete": null}),
+        ] {
+            let mut v = window_dto_fixture();
+            for (k, val) in patch.as_object().unwrap() {
+                v[k] = val.clone();
+            }
+            let dto: WindowCalibrateDto =
+                serde_json::from_value(v).expect("tolerant parse keeps missing fields");
+            let err = validate_window_dto(dto, &["100".to_string(), "999".to_string()])
+                .expect_err("must be unsupported");
+            assert!(err.starts_with("window_unsupported:"), "got: {}", err);
+        }
+    }
+
+    #[test]
+    fn window_dto_receipt_mismatch_is_unsupported() {
+        let dto: WindowCalibrateDto =
+            serde_json::from_value(window_dto_fixture()).expect("fixture parses");
+        // 回执缺一条
+        let err = validate_window_dto(dto.clone(), &["100".to_string()]).expect_err("count");
+        assert!(err.starts_with("window_unsupported:"), "got: {}", err);
+        // available 带 message 缺失
+        let mut v = window_dto_fixture();
+        v["knownReceipts"][0]["message"] = serde_json::Value::Null;
+        let dto2: WindowCalibrateDto = serde_json::from_value(v).unwrap();
+        let err2 = validate_window_dto(dto2, &["100".to_string(), "999".to_string()])
+            .expect_err("content");
+        assert!(err2.starts_with("window_unsupported:"), "got: {}", err2);
+    }
+
+    #[test]
+    fn window_error_mapping_grades_404_auth_and_retryable() {
+        assert!(
+            map_window_request_error("请求失败，状态码: 404".to_string())
+                .starts_with("window_unsupported:")
+        );
+        assert!(
+            map_window_request_error("Request error: 404 Not Found".to_string())
+                .starts_with("window_unsupported:")
+        );
+        // 鉴权失败原文透出，不吞成可重试
+        assert_eq!(
+            map_window_request_error("请重新登录".to_string()),
+            "请重新登录"
+        );
+        // 泛化失败可重试，但不是成功空也不是失权
+        let other = map_window_request_error("network_error: timeout".to_string());
+        assert!(other.starts_with("window_error:"), "got: {}", other);
     }
 }

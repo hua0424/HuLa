@@ -94,6 +94,7 @@ export const assertSessionCurrent = async (binding: SessionIdentity) => {
 
 const scopedCommands = new Set([
   'page_msg',
+  'calibrate_window',
   'send_msg',
   'save_msg',
   'sync_messages',

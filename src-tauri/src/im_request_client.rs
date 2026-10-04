@@ -492,6 +492,7 @@ pub enum ImUrl {
     GetUserInfoDetail,
     GetMsgList,
     GetMsgPage,
+    GetMsgWindow,
     GetAllUserBaseInfo,
     GetBadgesBatch,
     GetMemberStatistic,
@@ -786,6 +787,7 @@ impl ImUrl {
             ImUrl::MarkMsg => (http::Method::PUT, "im/chat/msg/mark"),
             ImUrl::GetMsgPage => (http::Method::GET, "im/chat/msg/page"),
             ImUrl::GetMsgList => (http::Method::POST, "im/chat/msg/list"),
+            ImUrl::GetMsgWindow => (http::Method::POST, "im/chat/msg/window"),
             ImUrl::GetMemberStatistic => (http::Method::GET, "im/chat/member/statistic"),
 
             // 朋友圈相关
@@ -1114,6 +1116,7 @@ impl ImUrl {
             "markMsg" => Ok(ImUrl::MarkMsg),
             "getMsgList" => Ok(ImUrl::GetMsgList),
             "getMsgPage" => Ok(ImUrl::GetMsgPage),
+            "getMsgWindow" => Ok(ImUrl::GetMsgWindow),
             "getMemberStatistic" => Ok(ImUrl::GetMemberStatistic),
 
             // 朋友圈相关
