@@ -96,6 +96,8 @@ class ListenerController {
 
 class RustWebSocketClient {
   private listenerController: ListenerController = new ListenerController()
+  // aichatoverview#349：业务监听幂等——重复 mount/MSG_INIT/重连不再重复注册 Tauri 监听。
+  private businessListenersReady = false
 
   constructor() {
     info('[RustWS] Rust WebSocket 客户端初始化')
@@ -246,6 +248,7 @@ class RustWebSocketClient {
    * 监听 Rust 端发送的具体业务消息事件
    */
   public async setupBusinessMessageListeners(): Promise<void> {
+    if (this.businessListenersReady) return
     const contactStore = useContactStore()
     this.listenerController.add(
       await listen('ws-login-success', (event: any) => {
@@ -550,6 +553,7 @@ class RustWebSocketClient {
         useMitt.emit(MittEnum.CONTACTS_SYNCED, event.payload)
       })
     )
+    this.businessListenersReady = true
   }
 }
 const isInTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window

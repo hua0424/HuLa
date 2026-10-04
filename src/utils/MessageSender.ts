@@ -78,6 +78,18 @@ const sendMessageViaTauri = async ({ data, binding: captured, onSuccess, onError
   }
 }
 
+export type SendBlockReason = 'no-session' | 'no-identity'
+
+/**
+ * aichatoverview#349：发送仅要求身份/目标有效即可提交 pending，不要求
+ * WS-connected 或思考/群资料完成。返回 null 即允许提交。
+ */
+export const getSendBlockReason = (targetRoomId: string, currentUid?: string): SendBlockReason | null => {
+  if (!targetRoomId) return 'no-session'
+  if (!currentUid) return 'no-identity'
+  return null
+}
+
 export const sendMessageWithChannel = async (options: SendMessageOptions) => {
   if (isWeb()) await sendMessageViaHttp(options)
   else await sendMessageViaTauri(options)
