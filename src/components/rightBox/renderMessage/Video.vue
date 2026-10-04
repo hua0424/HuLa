@@ -147,7 +147,8 @@ import { useVideoViewer as useVideoViewerStore } from '@/stores/videoViewer'
 import { useThumbnailCacheStore } from '@/stores/thumbnailCache'
 import { useChatStore } from '@/stores/chat'
 import { formatBytes } from '@/utils/Formatting.ts'
-import { isMobile } from '@/utils/PlatformConstants'
+import { isMobile, isWeb } from '@/utils/PlatformConstants'
+import { sessionBinding, eventSession, isSessionCurrent, sameSession } from '@/services/sessionBinding'
 import { invokeSilently } from '@/utils/TauriInvokeHandler'
 import { useI18n } from 'vue-i18n'
 import { resolveSignedFileUrl } from '@/utils/fileSign'
@@ -201,17 +202,19 @@ const { observe: observeVideoVisibility, disconnect: disconnectVideoVisibility }
 const showVideoPreviewRef = ref(false)
 const mobileVideoUrl = ref('')
 
+const originBinding = sessionBinding.value
 const persistVideoLocalPath = async (absolutePath: string) => {
+  if (!isWeb() && (!originBinding || !isSessionCurrent(originBinding))) return
   if (!props.message?.id || !absolutePath) return
   const target = chatStore.getMessage(props.message.id)
-  if (!target) return
+  if (!target || (!isWeb() && !sameSession(eventSession(target) ?? null, originBinding))) return
 
   const nextBody = { ...(target.message.body || {}), localPath: absolutePath }
   if (target.message.body?.localPath === absolutePath) return
 
   chatStore.updateMsg({ msgId: target.message.id, status: target.message.status, body: nextBody })
   const updated = { ...target, message: { ...target.message, body: nextBody } }
-  await invokeSilently(TauriCommand.SAVE_MSG, { data: updated as any })
+  await invokeSilently(TauriCommand.SAVE_MSG, { binding: originBinding, data: updated })
 }
 const localVideoThumbSrc = ref<string | null>(null)
 
@@ -221,7 +224,13 @@ const resolveVideoUrl = async () => {
     return
   }
   if (props.body?.objectKey && props.message?.id) {
-    resolvedVideoUrl.value = await resolveSignedFileUrl('', props.message.id, props.body.objectKey, 'file')
+    resolvedVideoUrl.value = await resolveSignedFileUrl(
+      '',
+      props.message.id,
+      props.body.objectKey,
+      'file',
+      originBinding ?? undefined
+    )
   } else {
     resolvedVideoUrl.value = ''
   }

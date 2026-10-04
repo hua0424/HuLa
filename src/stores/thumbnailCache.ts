@@ -5,7 +5,17 @@ import { StoresEnum } from '@/enums'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
 import { detectRemoteFileType } from '@/utils/PathUtil'
-import { isMobile } from '@/utils/PlatformConstants'
+import { isMobile, isWeb } from '@/utils/PlatformConstants'
+import {
+  eventSession,
+  captureSessionBinding,
+  isSessionCurrent,
+  sameSession,
+  sessionBinding,
+  SessionExpiredError,
+  type SessionIdentity
+} from '@/services/sessionBinding'
+import { watch } from 'vue'
 import { invokeSilently } from '@/utils/TauriInvokeHandler'
 import { TauriCommand } from '@/enums'
 import { md5FromString } from '@/utils/Md5Util'
@@ -14,6 +24,8 @@ import { resolveSignedFileUrl, type SignDownloadTarget } from '@/utils/fileSign'
 type TaskKind = 'image' | 'video' | 'emoji'
 
 type Task = {
+  binding: SessionIdentity | null
+  directory: string
   url: string
   objectKey?: string
   msgId: string
@@ -39,9 +51,9 @@ export const useThumbnailCacheStore = defineStore(
     const worker = new Worker(new URL('../workers/imageDownloader.ts', import.meta.url))
     const waiterMap = new Map<string, Array<(path: string | null) => void>>()
 
-    const getTaskKey = (task: Task) => {
-      return task.url || task.objectKey || (task.msgId ? `msgId:${task.msgId}` : '')
-    }
+    const scopedKey = (url?: string, objectKey?: string, msgId?: string, binding = sessionBinding.value) =>
+      JSON.stringify([binding, url || objectKey || (msgId ? `msgId:${msgId}` : '')])
+    const getTaskKey = (task: Task) => scopedKey(task.url, task.objectKey, task.msgId, task.binding)
 
     const notifyWaiters = (task: Task, path: string | null) => {
       const key = getTaskKey(task)
@@ -60,18 +72,18 @@ export const useThumbnailCacheStore = defineStore(
     }
 
     const persistMessage = async (task: Task, abs: string) => {
-      const msg = chatStore.getMessage(task.msgId)
-      if (!msg) return
+      if (task.binding && !isSessionCurrent(task.binding)) return
+      const msg = chatStore.messageMap[task.roomId]?.[task.msgId]
+      if (!msg || (task.binding && !sameSession(eventSession(msg) ?? null, task.binding))) return
       const nextBody = buildUpdatedBody(task, msg.message.body || {}, abs)
       chatStore.updateMsg({ msgId: task.msgId, status: msg.message.status, body: nextBody })
       const updated = { ...msg, message: { ...msg.message, body: nextBody } }
-      await invokeSilently(TauriCommand.SAVE_MSG, { data: updated as any })
+      await invokeSilently(TauriCommand.SAVE_MSG, { binding: task.binding, data: updated })
     }
 
-    const ensureCacheDir = async (kind: TaskKind) => {
-      const dir = await userStore.getUserRoomDir()
-      const folder = kind === 'emoji' ? 'emojis' : 'thumbnails'
-      const target = await join(dir, folder)
+    const ensureCacheDir = async (task: Task) => {
+      const folder = task.kind === 'emoji' ? 'emojis' : 'thumbnails'
+      const target = await join(task.directory, folder)
       const baseDir = isMobile() ? BaseDirectory.AppData : BaseDirectory.Resource
       const ok = await exists(target, { baseDir })
       if (!ok) {
@@ -106,17 +118,23 @@ export const useThumbnailCacheStore = defineStore(
 
     const processTask = async (task: Task) => {
       const taskKey = getTaskKey(task)
+      const assertCurrent = () => {
+        if (task.binding && !isSessionCurrent(task.binding)) throw new SessionExpiredError()
+      }
       try {
+        assertCurrent()
         task.status = 'downloading'
         statusMap.value[taskKey] = task
-        const { relativeDir, baseDir } = await ensureCacheDir(task.kind)
-        const hash = await md5FromString(taskKey)
+        const { relativeDir, baseDir } = await ensureCacheDir(task)
+        assertCurrent()
+        const hash = await md5FromString(JSON.stringify([task.binding?.backendKey, task.binding?.uid, taskKey]))
         const ext = await decideExt(task.url || task.objectKey || '', task.msgId)
         const fileName = `${hash}.${ext}`
         const relPath = await join(relativeDir, fileName)
         const existsFlag = await exists(relPath, { baseDir })
         if (existsFlag) {
           const abs = await getAbsolute(relPath)
+          assertCurrent()
           task.status = 'completed'
           task.path = abs
           statusMap.value[taskKey] = task
@@ -125,7 +143,15 @@ export const useThumbnailCacheStore = defineStore(
           return
         }
 
-        const fetchUrl = await resolveSignedFileUrl(task.url, task.msgId, task.objectKey, task.target ?? 'file')
+        assertCurrent()
+        const fetchUrl = await resolveSignedFileUrl(
+          task.url,
+          task.msgId,
+          task.objectKey,
+          task.target ?? 'file',
+          task.binding ?? undefined
+        )
+        assertCurrent()
 
         const buffer: ArrayBuffer = await new Promise((resolve, reject) => {
           const handler = (e: MessageEvent<any>) => {
@@ -139,15 +165,21 @@ export const useThumbnailCacheStore = defineStore(
           worker.postMessage({ url: fetchUrl, originalUrl: taskKey })
         })
 
+        assertCurrent()
         const bytes = new Uint8Array(buffer)
         await writeFile(relPath, bytes, { baseDir })
         const abs = await getAbsolute(relPath)
+        assertCurrent()
         task.status = 'completed'
         task.path = abs
         statusMap.value[taskKey] = task
         notifyWaiters(task, abs)
         await persistMessage(task, abs)
       } catch (err: any) {
+        if (err instanceof SessionExpiredError) {
+          notifyWaiters(task, null)
+          return
+        }
         task.retries += 1
         task.error = String(err?.message || err)
         statusMap.value[taskKey] = task
@@ -169,7 +201,12 @@ export const useThumbnailCacheStore = defineStore(
       kind: TaskKind
       target?: SignDownloadTarget
     }) => {
-      const t: Task = { ...options, status: 'pending', retries: 0 }
+      const binding = isWeb()
+        ? null
+        : (eventSession(chatStore.messageMap[options.roomId]?.[options.msgId]) ?? (await captureSessionBinding()))
+      const directory = await userStore.getUserRoomDir()
+      if (binding && !isSessionCurrent(binding)) return null
+      const t: Task = { ...options, binding, directory, status: 'pending', retries: 0 }
       const taskKey = getTaskKey(t)
       const existsTask = statusMap.value[taskKey]
       if (existsTask?.status === 'completed') {
@@ -196,7 +233,7 @@ export const useThumbnailCacheStore = defineStore(
 
     const invalidate = (url?: string, objectKey?: string, msgId?: string) => {
       if (!url && !objectKey && !msgId) return
-      const key = url || objectKey || (msgId ? `msgId:${msgId}` : '')
+      const key = scopedKey(url, objectKey, msgId)
       if (statusMap.value[key]) {
         delete statusMap.value[key]
       }
@@ -204,9 +241,20 @@ export const useThumbnailCacheStore = defineStore(
     }
 
     const getStatus = (url?: string, objectKey?: string, msgId?: string) => {
-      const key = url || objectKey || (msgId ? `msgId:${msgId}` : '')
+      const key = scopedKey(url, objectKey, msgId)
       return statusMap.value[key]
     }
+
+    watch(
+      sessionBinding,
+      () => {
+        queue.length = 0
+        statusMap.value = {}
+        for (const waiters of waiterMap.values()) for (const resolve of waiters) resolve(null)
+        waiterMap.clear()
+      },
+      { flush: 'sync' }
+    )
 
     return {
       enqueueThumbnail,

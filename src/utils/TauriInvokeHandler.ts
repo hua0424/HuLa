@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeScoped as invoke, prepareScopedArgs, SessionExpiredError } from '@/services/sessionBinding'
 import { AppException, ErrorType } from '@/common/exception'
 import { isErrorToastSuppressed } from '@/utils/errorToastSuppression'
 
@@ -31,6 +31,7 @@ export async function invokeWithErrorHandler<T = any>(
     const result = await invoke<T>(command, args)
     return result
   } catch (error) {
+    if (error instanceof SessionExpiredError) throw error
     console.error(`[Tauri Invoke Error] 命令: ${command}`, error)
 
     // 构造错误消息
@@ -96,17 +97,19 @@ export async function invokeWithRetry<T = any>(
 ): Promise<T> {
   const { maxRetries = 3, retryDelay = 1000, showError = true, customErrorMessage } = options || {}
 
+  const boundArgs = (await prepareScopedArgs(command, args)) as Record<string, any> | undefined
   let lastError: any
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await invokeWithErrorHandler<T>(command, args, {
+      return await invokeWithErrorHandler<T>(command, boundArgs, {
         showError: attempt === maxRetries ? showError : false,
         customErrorMessage: attempt === maxRetries ? customErrorMessage : undefined,
         isRetryError: attempt < maxRetries,
         errorType: ErrorType.Network
       })
     } catch (error) {
+      if (error instanceof SessionExpiredError) throw error
       lastError = error
 
       if (attempt < maxRetries) {

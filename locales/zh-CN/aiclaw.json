@@ -107,6 +107,7 @@
     "yesterday": "昨天"
   },
   "thinking": {
+    "pending_confirmation": "状态待确认",
     "status": {
       "thinking": "正在思考...",
       "complete": "思考完成 ({duration})",

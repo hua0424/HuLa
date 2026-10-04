@@ -243,6 +243,7 @@
       "group_name_empty": "Group name cannot be empty",
       "group_name_too_long": "Group name cannot exceed 32 characters",
       "delete_history_success": "Chat history deleted",
+      "local_cache_failed": "Could not save the local message. Retry loading history.",
       "delete_history_failed": "Failed to delete chat history",
       "delete_friend_success": "Friend removed",
       "dissolve_not_allowed": "Cannot disband channel",

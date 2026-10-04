@@ -1,6 +1,7 @@
 import { ImUrlEnum } from '@/enums'
 import type { SignDownloadUrlResp } from '@/services/types'
 import { imRequest } from '@/utils/ImRequestUtils'
+import { SessionExpiredError, type SessionIdentity } from '@/services/sessionBinding'
 
 export type SignDownloadTarget = 'file' | 'thumb'
 
@@ -11,14 +12,20 @@ export type SignDownloadTarget = 'file' | 'thumb'
  * @param target 下载目标：'file'（默认）主文件 / 'thumb' 缩略图（#158 视频缩略图）
  * @returns 签名后的临时 URL，失败时返回 null
  */
-export async function signFileDownloadUrl(msgId: string, target: SignDownloadTarget = 'file'): Promise<string | null> {
+export async function signFileDownloadUrl(
+  msgId: string,
+  target: SignDownloadTarget = 'file',
+  binding?: SessionIdentity
+): Promise<string | null> {
   try {
     const resp = await imRequest<SignDownloadUrlResp>({
       url: ImUrlEnum.FILE_SIGN_DOWNLOAD,
+      binding,
       body: target === 'file' ? { msgId } : { msgId, target }
     })
     return resp?.url || null
   } catch (error) {
+    if (error instanceof SessionExpiredError) throw error
     console.warn('[signFileDownloadUrl] 换取签名 URL 失败:', error)
     return null
   }
@@ -36,12 +43,13 @@ export async function resolveSignedFileUrl(
   url: string,
   msgId?: string,
   objectKey?: string,
-  target: SignDownloadTarget = 'file'
+  target: SignDownloadTarget = 'file',
+  binding?: SessionIdentity
 ): Promise<string> {
   if (!msgId) return url
   if (!url && !objectKey) return url
   if (url && !(url.startsWith('http://') || url.startsWith('https://')) && !objectKey) return url
 
-  const signedUrl = await signFileDownloadUrl(msgId, target)
+  const signedUrl = await signFileDownloadUrl(msgId, target, binding)
   return signedUrl || url
 }

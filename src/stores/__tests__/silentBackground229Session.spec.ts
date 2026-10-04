@@ -60,10 +60,15 @@ vi.mock('@/utils/UnreadCountManager', () => ({
 }))
 vi.mock('@/utils/PlatformConstants', () => ({ isWeb: () => false, isDesktop: () => true, isMobile: () => false }))
 
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: async () => ({ sessionEpoch: 1, binding: { backendKey: 'http://fixture/api', uid: '229', sessionEpoch: 1 } })
+}))
+import { initializeSessionBinding } from '@/services/sessionBinding'
 import { useChatStore } from '@/stores/chat'
 
 describe('#229 getSessionList 断网静默（ISS-009 边界内：只收 toast）', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await initializeSessionBinding()
     setActivePinia(createPinia())
     invokeWithErrorHandlerMock.mockReset().mockResolvedValue([])
   })
@@ -73,7 +78,7 @@ describe('#229 getSessionList 断网静默（ISS-009 边界内：只收 toast）
 
     expect(invokeWithErrorHandlerMock).toHaveBeenCalledWith(
       'list_contacts_command',
-      undefined,
+      { binding: { backendKey: 'http://fixture/api', uid: '229', sessionEpoch: 1 } },
       expect.objectContaining({ showError: false })
     )
   })

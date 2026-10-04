@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { homeWindowOnlyStorage } from '@/stores/persistHomeWindowOnly'
+import { scopedChatStorage } from '@/stores/persistHomeWindowOnly'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { appDataDir, join, resourceDir } from '@tauri-apps/api/path'
 import { readDir } from '@tauri-apps/plugin-fs'
@@ -225,6 +225,6 @@ export const useFileStore = defineStore(
       initialize: true
     },
     // #239：只主窗持久化，辅窗 noop——防多窗 last-writer-wins 快照倒退（#237 终裁第 4 条）
-    persist: { storage: homeWindowOnlyStorage() }
+    persist: { storage: scopedChatStorage() }
   }
 )

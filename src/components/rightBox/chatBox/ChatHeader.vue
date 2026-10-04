@@ -677,7 +677,8 @@ import { useSilentAiclaw } from '@/hooks/useSilentAiclaw'
 import { notification, setSessionTop, shield, updateRoomInfo } from '@/utils/ImRequestUtils'
 import { canvasToImageBytes } from '@/utils/Canvas2Dom'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
-import { isMac, isWindows } from '@/utils/PlatformConstants'
+import { isMac, isWindows, isWeb } from '@/utils/PlatformConstants'
+import { sessionBinding, isSessionCurrent, type SessionIdentity } from '@/services/sessionBinding'
 
 // 转发群二维码尺寸
 const QR_IMAGE_SIZE = 200
@@ -1522,17 +1523,22 @@ const handleGroupInfoChange = () => {
   }
 }
 
-const deleteRoomMessages = async (roomId: string) => {
+let pendingHistoryClear: { roomId: string; binding: SessionIdentity | null } | undefined
+const deleteRoomMessages = async () => {
+  const target = pendingHistoryClear
+  if (!target || (!isWeb() && (!target.binding || !isSessionCurrent(target.binding)))) return
+  const { roomId, binding } = target
   if (!roomId) return
   try {
     await invokeWithErrorHandler(
       TauriCommand.DELETE_ROOM_MESSAGES,
-      { roomId },
+      { roomId, binding },
       {
         customErrorMessage: t('home.chat_header.toast.delete_history_failed'),
         errorType: ErrorType.Client
       }
     )
+    if (binding && !isSessionCurrent(binding)) return
     chatStore.clearRoomMessages(roomId)
     useMitt.emit(MittEnum.UPDATE_SESSION_LAST_MSG, { roomId })
     window.$message?.success(t('home.chat_header.toast.delete_history_success'))
@@ -1562,6 +1568,7 @@ const handleDelete = (label: RoomActEnum) => {
   } else {
     tips.value = t('home.chat_header.modal.tips.delete_history')
     optionsType.value = RoomActEnum.DELETE_RECORD
+    pendingHistoryClear = { roomId: currentSessionRoomId.value, binding: sessionBinding.value }
   }
 }
 
@@ -1570,7 +1577,8 @@ const dissolving = ref(false)
 
 const handleConfirm = async () => {
   const currentOption = optionsType.value
-  const targetRoomId = currentSessionRoomId.value
+  const targetRoomId =
+    currentOption === RoomActEnum.DELETE_RECORD ? pendingHistoryClear?.roomId : currentSessionRoomId.value
   const targetDetailId = activeItem.value?.detailId
 
   if (currentOption === undefined || currentOption === null || !targetRoomId) return
@@ -1627,7 +1635,7 @@ const handleConfirm = async () => {
       window.$message.error(t('home.chat_header.toast.exit_failed'))
     }
   } else if (currentOption === RoomActEnum.DELETE_RECORD) {
-    await deleteRoomMessages(targetRoomId)
+    await deleteRoomMessages()
   } else if (currentOption === RoomActEnum.UPDATE_GROUP_NAME) {
     // 确认修改群名称
     await saveGroupName()

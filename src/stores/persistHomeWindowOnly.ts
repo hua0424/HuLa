@@ -1,6 +1,7 @@
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { StorageLike } from 'pinia-plugin-persistedstate'
 import { isWeb } from '@/utils/PlatformConstants'
+import { canWriteScopedSnapshot, ensureSessionListener, readBootBinding } from '@/services/sessionBinding'
 
 /**
  * aichatoverview#239（REQ-019）主窗持久化——#230 审计 §1 伴生隐患的收口：
@@ -22,6 +23,36 @@ import { isWeb } from '@/utils/PlatformConstants'
 const readOnlyStorage: StorageLike = {
   getItem: (key: string) => window.localStorage.getItem(key),
   setItem: () => {}
+}
+
+export const isChatHomeWindow = () => {
+  if (isWeb()) return true
+  try {
+    return getCurrentWindow().label === 'home'
+  } catch {
+    return true
+  }
+}
+
+/** Tier3 still has one writer; only snapshots with a native-established backend+UID are consumed. */
+export const scopedChatStorage = (): StorageLike => {
+  const storage = homeWindowOnlyStorage()
+  void ensureSessionListener()?.catch(() => console.warn('[session] identity listener unavailable'))
+  const keyFor = (key: string) => {
+    if (isWeb()) return key
+    const binding = readBootBinding()
+    return binding ? `${key}:${JSON.stringify([binding.backendKey, binding.uid])}` : null
+  }
+  return {
+    getItem: (key) => {
+      const scoped = keyFor(key)
+      return scoped ? storage.getItem(scoped) : null
+    },
+    setItem: (key, value) => {
+      const scoped = keyFor(key)
+      if (scoped && canWriteScopedSnapshot()) storage.setItem(scoped, value)
+    }
+  }
 }
 
 export const homeWindowOnlyStorage = (): StorageLike => {

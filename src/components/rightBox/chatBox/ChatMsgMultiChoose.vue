@@ -154,7 +154,14 @@ import { useGroupStore } from '@/stores/group'
 import { AvatarUtils } from '@/utils/AvatarUtils'
 import { mergeMsg } from '@/utils/ImRequestUtils'
 import { isMessageMultiSelectEnabled } from '@/utils/MessageSelect'
-import { isMac, isWindows } from '@/utils/PlatformConstants'
+import { isMac, isWindows, isWeb } from '@/utils/PlatformConstants'
+import {
+  eventSession,
+  sessionBinding,
+  isSessionCurrent,
+  SessionExpiredError,
+  type SessionIdentity
+} from '@/services/sessionBinding'
 import { sendMessageWithChannel } from '@/utils/MessageSender'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useI18n } from 'vue-i18n'
@@ -217,17 +224,25 @@ const deleteConfirmText = computed(() => {
   return t('message.multi_choose.delete_confirm', { count })
 })
 
+let deleteTarget: { roomId: string; binding: SessionIdentity | null; ids: string[] } | undefined
 const handleDeleteClick = () => {
   if (selectedMsgs.value.length === 0) {
     window.$message?.warning(t('message.multi_choose.select_delete_prompt'))
     return
   }
+  deleteTarget = {
+    roomId: globalStore.currentSessionRoomId,
+    binding: eventSession(selectedMsgs.value[0]) ?? sessionBinding.value,
+    ids: selectedMsgs.value.map((msg) => msg.message.id)
+  }
   showDeleteConfirm.value = true
 }
 
 const handleBatchDelete = async () => {
-  if (isDeleting.value || selectedMsgs.value.length === 0) return
-  const roomId = globalStore.currentSessionRoomId
+  const target = deleteTarget
+  if (isDeleting.value || !target?.ids.length) return
+  const { roomId, binding, ids } = target
+  if (!isWeb() && (!binding || !isSessionCurrent(binding))) return
   if (!roomId) {
     window.$message?.error(t('message.multi_choose.room_missing'))
     showDeleteConfirm.value = false
@@ -235,32 +250,27 @@ const handleBatchDelete = async () => {
   }
 
   isDeleting.value = true
-  const ids = selectedMsgs.value.map((msg) => msg.message.id)
 
   try {
-    await Promise.all(
-      ids.map((messageId) =>
-        invokeWithErrorHandler(
-          TauriCommand.DELETE_MESSAGE,
-          {
-            messageId,
-            roomId
-          },
-          {
-            customErrorMessage: t('message.multi_choose.delete_failed_short'),
-            errorType: ErrorType.Client
-          }
-        )
+    for (const messageId of ids) {
+      await invokeWithErrorHandler(
+        TauriCommand.DELETE_MESSAGE,
+        { binding, messageId, roomId },
+        { customErrorMessage: t('message.multi_choose.delete_failed_short'), errorType: ErrorType.Client }
       )
-    )
-    ids.forEach((id) => chatStore.deleteMsg(id))
+      if (binding && !isSessionCurrent(binding)) return
+      chatStore.deleteMsg(messageId, roomId)
+    }
     window.$message?.success(t('message.multi_choose.delete_success'))
-    chatStore.clearMsgCheck()
-    chatStore.resetSessionSelection()
-    chatStore.setMsgMultiChoose(false)
+    if (globalStore.currentSessionRoomId === roomId) {
+      chatStore.clearMsgCheck()
+      chatStore.resetSessionSelection()
+      chatStore.setMsgMultiChoose(false)
+    }
     useMitt.emit(MittEnum.UPDATE_SESSION_LAST_MSG, { roomId })
     showDeleteConfirm.value = false
   } catch (error) {
+    if (error instanceof SessionExpiredError) return
     console.error('批量删除消息失败:', error)
     window.$message?.error(t('message.multi_choose.delete_failed_retry'))
   } finally {
@@ -353,14 +363,16 @@ const handlePreviewCustomImage = () => {
   openImageViewer(task.previewUrl, [MsgEnum.IMAGE], [task.previewUrl])
 }
 
-const sendCustomForwardTask = async (roomIds: string[]) => {
+const sendCustomForwardTask = async (roomIds: string[], binding: SessionIdentity | null) => {
   const task = chatStore.customForwardTask
   if (!task) return
   const messageBody = await buildCustomTaskImageBody()
 
   for (const roomId of roomIds) {
+    if (binding && !isSessionCurrent(binding)) throw new SessionExpiredError()
     const tempMsgId = `CF_${roomId}_${Date.now()}`
     await sendMessageWithChannel({
+      binding: binding ?? undefined,
       data: {
         id: tempMsgId,
         roomId,
@@ -372,6 +384,7 @@ const sendCustomForwardTask = async (roomIds: string[]) => {
         }
       }
     })
+    if (binding && !isSessionCurrent(binding)) return
     chatStore.updateSessionLastActiveTime(roomId)
   }
 }
@@ -385,27 +398,34 @@ const sendMsg = async () => {
   }
 
   const hasCustomTask = Boolean(chatStore.customForwardTask)
+  const binding = sessionBinding.value
+  if (!isWeb() && !binding) return
 
   try {
     isForwarding.value = true
     if (hasCustomTask) {
-      await sendCustomForwardTask(selectedRoomIds)
+      await sendCustomForwardTask(selectedRoomIds, binding)
     } else {
       const selectedMsgIds = selectedMsgs.value.map((item) => item.message.id)
-      await mergeMsg({
-        roomIds: selectedRoomIds,
-        type: mergeMessageType,
-        messageIds: selectedMsgIds,
-        fromRoomId: globalStore.currentSessionRoomId
-      })
+      await mergeMsg(
+        {
+          roomIds: selectedRoomIds,
+          type: mergeMessageType,
+          messageIds: selectedMsgIds,
+          fromRoomId: globalStore.currentSessionRoomId
+        },
+        binding ?? undefined
+      )
     }
+    if (binding && !isSessionCurrent(binding)) return
     window.$message.success(t('message.multi_choose.forward_success'))
   } catch (error) {
+    if (error instanceof SessionExpiredError) return
     console.error('消息转发失败', error)
     window.$message.error(t('message.multi_choose.forward_failed'))
   } finally {
     isForwarding.value = false
-    cleanupSelectionState()
+    if (!binding || isSessionCurrent(binding)) cleanupSelectionState()
   }
 }
 

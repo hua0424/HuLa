@@ -39,7 +39,8 @@ import { extractFileName, removeTag } from '@/utils/Formatting'
 import { detectImageFormat, imageUrlToUint8Array, isImageUrl } from '@/utils/ImageUtils'
 import { recallMsg, removeGroupMember, updateMyRoomInfo } from '@/utils/ImRequestUtils'
 import { detectRemoteFileType, getFilesMeta } from '@/utils/PathUtil'
-import { isMac, isMobile } from '@/utils/PlatformConstants'
+import { isMac, isMobile, isWeb } from '@/utils/PlatformConstants'
+import { eventSession, isSessionCurrent, sessionBinding, type SessionIdentity } from '@/services/sessionBinding'
 import { resolveSignedFileUrl } from '@/utils/fileSign'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useWindow } from './useWindow'
@@ -86,6 +87,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
   /** 需要删除信息的下标 */
   const delIndex = ref('')
   const delRoomId = ref('')
+  let deleteBinding: SessionIdentity | null = null
   /** 选中的气泡消息 */
   const activeBubble = ref('')
   /** 记录历史消息下标 */
@@ -579,6 +581,7 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
               modalShow.value = true
               delIndex.value = item.message.id
               delRoomId.value = item.message.roomId
+              deleteBinding = eventSession(item) ?? sessionBinding.value
             }
           }
         ]
@@ -1345,7 +1348,10 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
   /** 删除信息事件 */
   const handleConfirm = async () => {
     if (!delIndex.value) return
-    const targetRoomId = delRoomId.value || globalStore.currentSessionRoomId
+    const targetRoomId = delRoomId.value
+    const messageId = delIndex.value
+    const binding = deleteBinding
+    if (!isWeb() && (!binding || !isSessionCurrent(binding))) return
     if (!targetRoomId) {
       window.$message?.error('无法确定消息所属的会话')
       return
@@ -1354,7 +1360,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
       await invokeWithErrorHandler(
         TauriCommand.DELETE_MESSAGE,
         {
-          messageId: delIndex.value,
+          binding,
+          messageId,
           roomId: targetRoomId
         },
         {
@@ -1362,7 +1369,8 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
           errorType: ErrorType.Client
         }
       )
-      chatStore.deleteMsg(delIndex.value)
+      if (binding && !isSessionCurrent(binding)) return
+      chatStore.deleteMsg(messageId, targetRoomId)
       useMitt.emit(MittEnum.UPDATE_SESSION_LAST_MSG, { roomId: targetRoomId })
       delIndex.value = ''
       delRoomId.value = ''

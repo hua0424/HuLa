@@ -1,5 +1,4 @@
 import { TauriCommand } from '@/enums'
-import { getUserDetail } from '@/utils/ImRequestUtils'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 
 /**
@@ -15,15 +14,8 @@ export class TokenManager {
    */
   static async updateToken(token: string, refreshToken: string, uid?: string): Promise<void> {
     try {
-      let targetUid = uid || ''
-      if (!targetUid) {
-        try {
-          const user = await getUserDetail()
-          targetUid = user?.uid || user?.id || ''
-        } catch (_) {
-          // ignore detail fetch error here
-        }
-      }
+      // Rust resolves this token's authenticated UID; never borrow the previous account's detail.
+      const targetUid = uid || ''
       await invokeWithErrorHandler(
         TauriCommand.UPDATE_TOKEN,
         {

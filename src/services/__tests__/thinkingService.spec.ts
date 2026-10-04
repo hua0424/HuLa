@@ -69,10 +69,10 @@ describe('thinkingService.loadThinkingByTrigger (REQ-014)', () => {
       }
     })
     expect(result).toHaveLength(1)
-    expect(result[0].id).toBe(1)
+    expect(result?.[0].id).toBe(1)
   })
 
-  it('请求失败时静默返回空数组', async () => {
+  it('请求失败返回null，不冒充成功空元数据', async () => {
     imRequestSilentMock.mockRejectedValueOnce(new Error('network'))
 
     const result = await loadThinkingByTrigger({
@@ -80,10 +80,10 @@ describe('thinkingService.loadThinkingByTrigger (REQ-014)', () => {
       triggerMsgIds: ['msg-1']
     })
 
-    expect(result).toEqual([])
+    expect(result).toBeNull()
   })
 
-  it('服务端返回 null 时返回空数组', async () => {
+  it('服务端空响应不是成功空集合', async () => {
     imRequestSilentMock.mockResolvedValueOnce(null)
 
     const result = await loadThinkingByTrigger({
@@ -91,6 +91,6 @@ describe('thinkingService.loadThinkingByTrigger (REQ-014)', () => {
       triggerMsgIds: ['msg-1']
     })
 
-    expect(result).toEqual([])
+    expect(result).toBeNull()
   })
 })

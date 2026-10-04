@@ -107,6 +107,7 @@
     "yesterday": "Yesterday"
   },
   "thinking": {
+    "pending_confirmation": "Awaiting confirmation",
     "status": {
       "thinking": "Thinking...",
       "complete": "Thought for {duration}",

@@ -50,6 +50,7 @@ import { useFeedNotificationStore } from '@/stores/feedNotification'
 import type { MarkItemType, RevokedMsgType, UserItem } from '@/services/types.ts'
 import * as ImRequestUtils from '@/utils/ImRequestUtils'
 import { listen } from '@tauri-apps/api/event'
+import { listenBound } from '@/services/sessionBinding'
 import { useTauriListener } from '@/hooks/useTauriListener'
 import { updateSettings } from '@/services/tauriCommand.ts'
 import { useI18n } from 'vue-i18n'
@@ -706,7 +707,7 @@ onMounted(() => {
   window.addEventListener('dragstart', preventDrag)
 
   if (!isWeb()) {
-    addListener(listen('websocket-event', handleWebsocketEvent), 'websocket-event')
+    addListener(listenBound('websocket-event', handleWebsocketEvent), 'websocket-event')
   }
 
   // 只在桌面端的主窗口中初始化全局快捷键

@@ -2,7 +2,6 @@ use crate::error::CommonError;
 use crate::pojo::common::{CursorPageParam, CursorPageResp};
 use chrono::Utc;
 use entity::im_message;
-use lazy_static::lazy_static;
 use migration::ExprTrait; // #36: SeaORM 1.1.x 把 SimpleExpr 的 .lt()/.eq() 等比较方法放在 ExprTrait（keyset 过滤的 if_null(0).lt()/.eq()、cast_as().lt() 都需要它在 scope）
 use sea_orm::prelude::Expr;
 use sea_orm::sea_query::{Alias, Value};
@@ -12,21 +11,8 @@ use sea_orm::{
     TransactionTrait, TryIntoModel,
 };
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use tracing::{debug, error, info};
-
-lazy_static! {
-    static ref DELETED_TABLE_INITIALIZED: AtomicBool = AtomicBool::new(false);
-    static ref ROOM_CLEAR_TABLE_INITIALIZED: AtomicBool = AtomicBool::new(false);
-}
-
-/// 重置表初始化标志，在切换数据库时调用
-pub fn reset_table_initialization_flags() {
-    DELETED_TABLE_INITIALIZED.store(false, Ordering::SeqCst);
-    ROOM_CLEAR_TABLE_INITIALIZED.store(false, Ordering::SeqCst);
-    info!("Table initialization flags have been reset");
-}
 
 #[derive(Clone)]
 pub struct MessageWithThumbnail {
@@ -61,10 +47,6 @@ fn parse_message_id(id: &str) -> Option<i64> {
 }
 
 async fn ensure_deleted_message_table<C: ConnectionTrait>(conn: &C) -> Result<(), CommonError> {
-    if DELETED_TABLE_INITIALIZED.load(Ordering::SeqCst) {
-        return Ok(());
-    }
-
     let backend = conn.get_database_backend();
     let stmt = Statement::from_string(
         backend,
@@ -80,15 +62,10 @@ async fn ensure_deleted_message_table<C: ConnectionTrait>(conn: &C) -> Result<()
     conn.execute(stmt)
         .await
         .map_err(CommonError::DatabaseError)?;
-    DELETED_TABLE_INITIALIZED.store(true, Ordering::SeqCst);
     Ok(())
 }
 
 async fn ensure_room_clear_table<C: ConnectionTrait>(conn: &C) -> Result<(), CommonError> {
-    if ROOM_CLEAR_TABLE_INITIALIZED.load(Ordering::SeqCst) {
-        return Ok(());
-    }
-
     let backend = conn.get_database_backend();
     let stmt = Statement::from_string(
         backend,
@@ -104,11 +81,10 @@ async fn ensure_room_clear_table<C: ConnectionTrait>(conn: &C) -> Result<(), Com
     conn.execute(stmt)
         .await
         .map_err(CommonError::DatabaseError)?;
-    ROOM_CLEAR_TABLE_INITIALIZED.store(true, Ordering::SeqCst);
     Ok(())
 }
 
-async fn should_skip_message_insert<C: ConnectionTrait>(
+pub(crate) async fn should_skip_message_insert<C: ConnectionTrait>(
     conn: &C,
     message_id: &str,
     room_id: &str,
@@ -703,7 +679,15 @@ where
         .all(db)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to query visible history messages: {}", e))?;
-    enrich_models_with_thumbnails(db, models).await
+    let mut visible = Vec::with_capacity(models.len());
+    for model in models {
+        if !should_skip_message_insert(db, &model.id, &model.room_id, login_uid, model.send_time)
+            .await?
+        {
+            visible.push(model);
+        }
+    }
+    enrich_models_with_thumbnails(db, visible).await
 }
 
 /// 保存单个消息到数据库
@@ -769,8 +753,8 @@ pub async fn save_message(
     Ok(record)
 }
 
-pub async fn delete_message_by_id(
-    db: &DatabaseConnection,
+pub async fn delete_message_by_id<C: ConnectionTrait>(
+    db: &C,
     message_id: &str,
     login_uid: &str,
 ) -> Result<u64, CommonError> {
@@ -783,8 +767,8 @@ pub async fn delete_message_by_id(
     Ok(result.rows_affected)
 }
 
-pub async fn delete_messages_by_room(
-    db: &DatabaseConnection,
+pub async fn delete_messages_by_room<C: ConnectionTrait>(
+    db: &C,
     room_id: &str,
     login_uid: &str,
 ) -> Result<u64, CommonError> {
@@ -830,8 +814,8 @@ where
     Ok(result.rows_affected())
 }
 
-pub async fn get_room_max_message_id(
-    db: &DatabaseConnection,
+pub async fn get_room_max_message_id<C: ConnectionTrait>(
+    db: &C,
     room_id: &str,
     login_uid: &str,
 ) -> Result<Option<String>, CommonError> {
@@ -853,8 +837,8 @@ pub async fn get_room_max_message_id(
     }
 }
 
-pub async fn get_room_id_by_message_id(
-    db: &DatabaseConnection,
+pub async fn get_room_id_by_message_id<C: ConnectionTrait>(
+    db: &C,
     message_id: &str,
     login_uid: &str,
 ) -> Result<Option<String>, CommonError> {
@@ -865,8 +849,8 @@ pub async fn get_room_id_by_message_id(
     Ok(message.map(|model| model.room_id))
 }
 
-pub async fn record_deleted_message(
-    db: &DatabaseConnection,
+pub async fn record_deleted_message<C: ConnectionTrait>(
+    db: &C,
     message_id: &str,
     room_id: &str,
     login_uid: &str,
@@ -889,8 +873,8 @@ pub async fn record_deleted_message(
     Ok(())
 }
 
-pub async fn record_room_clear(
-    db: &DatabaseConnection,
+pub async fn record_room_clear<C: ConnectionTrait>(
+    db: &C,
     room_id: &str,
     login_uid: &str,
     last_cleared_msg_id: Option<String>,
@@ -995,6 +979,28 @@ pub async fn update_message_status(
         // 三步包进单事务：避免「删后插前崩溃→本地行临时消失」这一自引入的非原子缺口
         // （原 update_many 是单语句隐式原子；拆成三步后必须显式事务复原原子性）。
         let txn = db.begin().await.map_err(CommonError::DatabaseError)?;
+        // A user deletion/room clear wins over both HTTP acknowledgement and WS reconciliation.
+        // Reconciliation itself deletes the temp row without creating a user tombstone.
+        for candidate in [&original_id, &message_id] {
+            if should_skip_message_insert(
+                &txn,
+                candidate,
+                &record.message.room_id,
+                &login_uid,
+                record.message.send_time,
+            )
+            .await?
+            {
+                // Transfer a user's temp-ID deletion to its newly learned official ID.
+                record_deleted_message(&txn, &message_id, &record.message.room_id, &login_uid)
+                    .await?;
+                delete_message_by_id(&txn, &message_id, &login_uid).await?;
+                txn.commit().await.map_err(CommonError::DatabaseError)?;
+                return Err(CommonError::RequestError(
+                    "Message was deleted locally".to_string(),
+                ));
+            }
+        }
         im_message::Entity::delete_by_id((original_id.clone(), login_uid.clone()))
             .exec(&txn)
             .await
