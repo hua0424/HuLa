@@ -1,5 +1,7 @@
 use crate::AppData;
 use crate::command::message_command::{SyncMessagesParam, sync_messages};
+use crate::command::token_helper::{capture_token_snapshot_direct, persist_captured_tokens};
+use crate::session::SessionBinding;
 use crate::websocket::commands::get_websocket_client_container;
 
 use super::types::*;
@@ -79,6 +81,7 @@ pub struct WebSocketClient {
     config: Arc<RwLock<WebSocketConfig>>,
     state: Arc<RwLock<ConnectionState>>,
     app_handle: AppHandle,
+    pub binding: SessionBinding,
 
     // 心跳相关
     last_pong_time: Arc<AtomicU64>,
@@ -118,12 +121,52 @@ pub struct WebSocketClient {
     close_sender: Arc<RwLock<Option<mpsc::UnboundedSender<()>>>>,
 }
 
+/// Every queued frontend event retains its connection's immutable origin.
+struct BoundEmitter<'a> {
+    handle: &'a AppHandle,
+    binding: &'a SessionBinding,
+}
+impl BoundEmitter<'_> {
+    fn payload<T: Serialize>(&self, payload: T) -> Result<serde_json::Value> {
+        let state: State<'_, AppData> = self.handle.state();
+        if !state.session.is_current(self.binding) {
+            return Err(anyhow::anyhow!("WS账号代次已失效"));
+        }
+        Ok(serde_json::json!({ "binding": self.binding.identity, "payload": payload }))
+    }
+    fn emit<T: Serialize>(&self, event: &str, payload: T) -> Result<()> {
+        self.handle
+            .emit(event, self.payload(payload)?)
+            .map_err(Into::into)
+    }
+    fn emit_to<T: Serialize>(&self, target: &str, event: &str, payload: T) -> Result<()> {
+        self.handle
+            .emit_to(target, event, self.payload(payload)?)
+            .map_err(Into::into)
+    }
+}
+
 impl WebSocketClient {
-    pub fn new(app_handle: AppHandle) -> Self {
+    fn events(&self) -> BoundEmitter<'_> {
+        BoundEmitter {
+            handle: &self.app_handle,
+            binding: &self.binding,
+        }
+    }
+    fn ensure_session(&self) -> Result<()> {
+        let state: State<'_, AppData> = self.app_handle.state();
+        if !state.session.is_current(&self.binding) {
+            return Err(anyhow::anyhow!("WS账号代次已失效"));
+        }
+        Ok(())
+    }
+
+    pub fn new(app_handle: AppHandle, binding: SessionBinding) -> Self {
         Self {
             config: Arc::new(RwLock::new(WebSocketConfig::default())),
             state: Arc::new(RwLock::new(ConnectionState::Disconnected)),
             app_handle,
+            binding,
             last_pong_time: Arc::new(AtomicU64::new(0)),
             consecutive_failures: Arc::new(AtomicU32::new(0)),
             heartbeat_active: Arc::new(AtomicBool::new(false)),
@@ -161,6 +204,7 @@ impl WebSocketClient {
             return Ok(());
         }
 
+        self.ensure_session()?;
         // 更新配置
         *self.config.write().await = config;
         self.should_stop.store(false, Ordering::SeqCst);
@@ -208,6 +252,7 @@ impl WebSocketClient {
 
         // 清理消息发送器
         *self.message_sender.write().await = None;
+        self.pending_messages.write().await.clear();
 
         // 更新状态
         self.update_state(ConnectionState::Disconnected, false)
@@ -226,6 +271,7 @@ impl WebSocketClient {
 
     /// 发送消息
     pub async fn send_message(&self, data: serde_json::Value) -> Result<()> {
+        self.ensure_session()?;
         // 首先检查连接状态
         let current_state = self.get_state().await;
 
@@ -312,6 +358,7 @@ impl WebSocketClient {
 
     /// 强制重连
     pub async fn force_reconnect(&self) -> Result<()> {
+        self.ensure_session()?;
         info!("Force reconnecting");
 
         // 获取连接锁
@@ -339,6 +386,7 @@ impl WebSocketClient {
     /// 主连接循环
     async fn connection_loop(&self) -> Result<()> {
         loop {
+            self.ensure_session()?;
             // 检查是否应该停止
             if self.should_stop.load(Ordering::SeqCst) {
                 info!("Received stop signal, exiting connection loop");
@@ -436,6 +484,7 @@ impl WebSocketClient {
     /// REQ-017 #198：WS 鉴权失败（4001 关闭码 / 握手 401·403）后的 refresh-token 自愈。
     /// Ok = 刷新成功，可用新 token 继续重连；Err = 自愈失败/超次数上限，已通知前端跳登录重鉴。
     async fn handle_auth_failure(&self) -> Result<()> {
+        self.ensure_session()?;
         let attempts = self.auth_refresh_attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if attempts > MAX_AUTH_REFRESH_ATTEMPTS {
             let reason = "auth refresh attempts exhausted".to_string();
@@ -450,11 +499,18 @@ impl WebSocketClient {
 
         let state: State<'_, AppData> = self.app_handle.state();
         let mut rc = state.rc.lock().await;
+        self.ensure_session()?;
+        let old_tokens = capture_token_snapshot_direct(&rc);
         match rc.start_refresh_token().await {
             Ok(()) => {
                 // 刷新成功：把新 token 写回 WS 配置并复位标记，下一轮循环用新 token 重连
                 let new_token = rc.token.clone();
+                let new_tokens = capture_token_snapshot_direct(&rc);
                 drop(rc);
+                persist_captured_tokens(&old_tokens, &new_tokens, &self.binding, &state.session)
+                    .await
+                    .map_err(anyhow::Error::msg)?;
+                self.ensure_session()?;
                 if let Some(token) = new_token {
                     self.config.write().await.token = Some(token);
                 }
@@ -481,7 +537,7 @@ impl WebSocketClient {
         self.should_stop.store(true, Ordering::SeqCst);
         self.is_ws_connected.store(false, Ordering::SeqCst);
         self.update_state(ConnectionState::Error, false).await;
-        if let Err(e) = self.app_handle.emit(
+        if let Err(e) = self.events().emit(
             "ws-auth-failed",
             serde_json::json!({
                 "reason": reason,
@@ -511,6 +567,7 @@ impl WebSocketClient {
 
     /// 尝试建立连接
     async fn try_connect(&self) -> Result<()> {
+        self.ensure_session()?;
         let mut config = self.config.read().await.clone();
 
         // REQ-017 #198：连接前从共享 HTTP 客户端同步最新 token。
@@ -519,6 +576,7 @@ impl WebSocketClient {
         {
             let state: State<'_, AppData> = self.app_handle.state();
             let rc = state.rc.lock().await;
+            self.ensure_session()?;
             if let Some(fresh) = rc.token.clone() {
                 if config.token.as_deref() != Some(fresh.as_str()) {
                     info!("WS config token synced from shared HTTP client");
@@ -540,7 +598,7 @@ impl WebSocketClient {
         }
 
         let url_str = url.as_str();
-        info!("Connecting to WebSocket: {}", url_str);
+        info!("Connecting to WebSocket: {}", config.server_url);
         self.update_state(ConnectionState::Connecting, false).await;
 
         // 建立连接
@@ -554,6 +612,7 @@ impl WebSocketClient {
             anyhow::anyhow!("Failed to connect to WebSocket '{}': {}", url_str, e)
         })?;
 
+        self.ensure_session()?;
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
 
         // 创建消息通道
@@ -586,10 +645,14 @@ impl WebSocketClient {
         let message_sender_task = {
             let should_stop = self.should_stop.clone();
             let is_ws_connected = self.is_ws_connected.clone();
+            let app_handle = self.app_handle.clone();
+            let binding = self.binding.clone();
             tokio::spawn(async move {
                 while !should_stop.load(Ordering::SeqCst) {
                     tokio::select! {
                         Some(message) = msg_receiver.recv() => {
+                            let state: State<'_, AppData> = app_handle.state();
+                            if !state.session.is_current(&binding) { break; }
                             if let Err(e) = ws_sender.send(message).await {
                                 error!(" Failed to send message: {}", e);
                                 is_ws_connected.store(false, Ordering::SeqCst);
@@ -619,9 +682,14 @@ impl WebSocketClient {
             let is_ws_connected = self.is_ws_connected.clone();
             let auth_failed = self.auth_failed.clone();
             let auth_refresh_attempts = self.auth_refresh_attempts.clone();
+            let binding = self.binding.clone();
 
             tokio::spawn(async move {
                 while let Some(msg) = ws_receiver.next().await {
+                    let state: State<'_, AppData> = app_handle.state();
+                    if !state.session.is_current(&binding) {
+                        break;
+                    }
                     match msg {
                         Ok(Message::Text(text)) => {
                             // REQ-017 #198：收到服务端有效帧 = 当前 token 真实可用，
@@ -632,6 +700,7 @@ impl WebSocketClient {
                                 &app_handle,
                                 &last_pong_time,
                                 &consecutive_failures,
+                                &binding,
                             )
                             .await;
                         }
@@ -643,6 +712,7 @@ impl WebSocketClient {
                                     &app_handle,
                                     &last_pong_time,
                                     &consecutive_failures,
+                                    &binding,
                                 )
                                 .await;
                             }
@@ -714,8 +784,12 @@ impl WebSocketClient {
         app_handle: &AppHandle,
         last_pong_time: &Arc<AtomicU64>,
         consecutive_failures: &Arc<AtomicU32>,
+        binding: &SessionBinding,
     ) {
-        info!("Received message: {}", text);
+        let events = BoundEmitter {
+            handle: app_handle,
+            binding,
+        };
 
         // 尝试解析心跳响应
         if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
@@ -734,7 +808,7 @@ impl WebSocketClient {
                         round_trip_time: None,
                     };
 
-                    let _ = app_handle.emit(
+                    let _ = events.emit(
                         "websocket-event",
                         &WebSocketEvent::HeartbeatStatusChanged { health },
                     );
@@ -747,10 +821,10 @@ impl WebSocketClient {
         // 处理业务消息
         if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&text) {
             // 处理具体的业务消息类型
-            Self::process_business_message(&json_value, app_handle).await;
+            Self::process_business_message(&json_value, app_handle, binding).await;
 
             // 同时发送原始消息事件（保持兼容性）
-            let _ = app_handle.emit(
+            let _ = events.emit(
                 "websocket-event",
                 &WebSocketEvent::MessageReceived {
                     message: json_value,
@@ -758,7 +832,7 @@ impl WebSocketClient {
             );
         } else {
             // 非JSON消息，直接转发
-            let _ = app_handle.emit(
+            let _ = events.emit(
                 "websocket-event",
                 &WebSocketEvent::MessageReceived {
                     message: serde_json::Value::String(text),
@@ -815,7 +889,15 @@ impl WebSocketClient {
     }
 
     /// 处理业务消息类型
-    async fn process_business_message(message: &serde_json::Value, app_handle: &AppHandle) {
+    async fn process_business_message(
+        message: &serde_json::Value,
+        app_handle: &AppHandle,
+        binding: &SessionBinding,
+    ) {
+        let events = BoundEmitter {
+            handle: app_handle,
+            binding,
+        };
         // 提取消息类型
         let message_type = message.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
@@ -829,15 +911,15 @@ impl WebSocketClient {
             // 登录相关
             "loginQrCode" => {
                 info!("Getting login QR code");
-                let _ = app_handle.emit("ws-login-qr-code", data);
+                let _ = events.emit("ws-login-qr-code", data);
             }
             "waitingAuthorize" => {
                 info!("Waiting for authorization");
-                let _ = app_handle.emit("ws-waiting-authorize", data);
+                let _ = events.emit("ws-waiting-authorize", data);
             }
             "loginSuccess" => {
                 info!("Login successful");
-                let _ = app_handle.emit_to("home", "ws-login-success", data);
+                let _ = events.emit_to("home", "ws-login-success", data);
             }
 
             // 消息相关 TODO 暂时只实现聊天消息的ack
@@ -855,7 +937,10 @@ impl WebSocketClient {
                     {
                         info!("回执 ACK: {}", message_id);
 
-                        if let Some(client) = client_guard.as_ref() {
+                        if let Some(client) = client_guard
+                            .as_ref()
+                            .filter(|client| client.binding.identity == binding.identity)
+                        {
                             match client.send_ack(message_id).await {
                                 Ok(_) => {
                                     info!("ACK sent successfully for message {}", message_id);
@@ -870,187 +955,219 @@ impl WebSocketClient {
                     }
                 }
 
-                let _ = app_handle.emit_to("home", "ws-receive-message", data);
+                let _ = events.emit_to("home", "ws-receive-message", data);
             }
             "msgRecall" => {
                 info!("Message recalled");
-                let _ = app_handle.emit_to("home", "ws-msg-recall", data);
+                let _ = events.emit_to("home", "ws-msg-recall", data);
             }
             "msgMarkItem" => {
                 info!("Message liked/disliked");
-                let _ = app_handle.emit_to("home", "ws-msg-mark-item", data);
+                let _ = events.emit_to("home", "ws-msg-mark-item", data);
             }
 
             // 用户状态相关
             "online" => {
                 info!("User online");
-                let _ = app_handle.emit_to("home", "ws-online", data);
+                let _ = events.emit_to("home", "ws-online", data);
             }
             "offline" => {
                 info!("User offline");
-                let _ = app_handle.emit_to("home", "ws-offline", data);
+                let _ = events.emit_to("home", "ws-offline", data);
             }
             "userStateChange" => {
                 info!("User state changed");
-                let _ = app_handle.emit_to("home", "ws-user-state-change", data);
+                let _ = events.emit_to("home", "ws-user-state-change", data);
             }
             // 通知总线
             "notifyEvent" => {
                 info!("新的notifyEvent");
-                let _ = app_handle.emit_to("home", "ws-request-notify-event", data);
+                let _ = events.emit_to("home", "ws-request-notify-event", data);
             }
             "groupSetAdmin" => {
-                let _ = app_handle.emit_to("home", "ws-group-set-admin-success", data);
+                let _ = events.emit_to("home", "ws-group-set-admin-success", data);
             }
             // 好友相关
             "newApply" => {
                 info!("New apply request");
-                let _ = app_handle.emit_to("home", "ws-request-new-apply", data);
+                let _ = events.emit_to("home", "ws-request-new-apply", data);
             }
             "requestApprovalFriend" => {
                 info!("Friend request approved");
-                let _ = app_handle.emit_to("home", "ws-request-approval-friend", data);
+                let _ = events.emit_to("home", "ws-request-approval-friend", data);
             }
             "memberChange" => {
                 info!("Member change");
-                let _ = app_handle.emit_to("home", "ws-member-change", data);
+                let _ = events.emit_to("home", "ws-member-change", data);
             }
 
             // 房间/群聊相关
             "roomInfoChange" => {
                 info!("Room info changed");
-                let _ = app_handle.emit_to("home", "ws-room-info-change", data);
+                let _ = events.emit_to("home", "ws-room-info-change", data);
             }
             "myRoomInfoChange" => {
                 info!("My room info changed");
-                let _ = app_handle.emit_to("home", "ws-my-room-info-change", data);
+                let _ = events.emit_to("home", "ws-my-room-info-change", data);
             }
             // REQ-016 #194: 资料变更（改名/简介/头像 profile；好友备注 remark）
             "userInfoChange" => {
                 info!("User info changed");
-                let _ = app_handle.emit_to("home", "ws-user-info-change", data);
+                let _ = events.emit_to("home", "ws-user-info-change", data);
             }
             "roomGroupNoticeMsg" => {
                 info!("Group notice published");
-                let _ = app_handle.emit_to("home", "ws-room-group-notice-msg", data);
+                let _ = events.emit_to("home", "ws-room-group-notice-msg", data);
             }
             "roomEditGroupNoticeMsg" => {
                 info!("✏️ Group notice edited");
-                let _ = app_handle.emit_to("home", "ws-room-edit-group-notice-msg", data);
+                let _ = events.emit_to("home", "ws-room-edit-group-notice-msg", data);
             }
             "roomDissolution" => {
                 info!("Room dissolved");
-                let _ = app_handle.emit_to("home", "ws-room-dissolution", data);
+                let _ = events.emit_to("home", "ws-room-dissolution", data);
             }
 
             // 视频通话相关
             "VideoCallRequest" => {
                 info!("Received call request");
-                let _ = app_handle.emit("ws-video-call-request", data);
+                let _ = events.emit("ws-video-call-request", data);
             }
             "CallAccepted" => {
                 info!("Call accepted");
-                let _ = app_handle.emit("ws-call-accepted", data);
+                let _ = events.emit("ws-call-accepted", data);
             }
             "CallRejected" => {
                 info!(" Call rejected");
-                let _ = app_handle.emit("ws-call-rejected", data);
+                let _ = events.emit("ws-call-rejected", data);
             }
             "RoomClosed" => {
                 info!("Room closed");
-                let _ = app_handle.emit("ws-room-closed", data);
+                let _ = events.emit("ws-room-closed", data);
             }
             "WEBRTC_SIGNAL" => {
                 info!("Signaling message");
-                let _ = app_handle.emit("ws-webrtc-signal", data);
+                let _ = events.emit("ws-webrtc-signal", data);
             }
             "JoinVideo" => {
                 info!("User joined video");
-                let _ = app_handle.emit("ws-join-video", data);
+                let _ = events.emit("ws-join-video", data);
             }
             "LeaveVideo" => {
                 info!("User left video");
-                let _ = app_handle.emit("ws-leave-video", data);
+                let _ = events.emit("ws-leave-video", data);
             }
             "DROPPED" => {
                 info!("Call dropped");
-                let _ = app_handle.emit("ws-dropped", data);
+                let _ = events.emit("ws-dropped", data);
             }
 
             "CANCEL" => {
                 info!("Call cancelled");
-                let _ = app_handle.emit("ws-cancel", data);
+                let _ = events.emit("ws-cancel", data);
             }
 
             "TIMEOUT" => {
                 info!("Call timeout");
-                let _ = app_handle.emit("ws-timeout", data);
+                let _ = events.emit("ws-timeout", data);
             }
 
             // 系统相关
             "tokenExpired" => {
                 warn!("Token expired");
-                let _ = app_handle.emit("ws-token-expired", data);
+                let _ = events.emit("ws-token-expired", data);
             }
             "invalidUser" => {
                 warn!("Invalid user");
-                let _ = app_handle.emit("ws-invalid-user", data);
+                let _ = events.emit("ws-invalid-user", data);
             }
 
             "deleteFriend" => {
                 warn!("Delete Friend");
-                let _ = app_handle.emit("ws-delete-friend", data);
+                let _ = events.emit("ws-delete-friend", data);
             }
 
             // 朋友圈相关
             "feedSendMsg" => {
                 info!("Feed message received");
-                let _ = app_handle.emit_to("home", "ws-feed-send-msg", data);
+                let _ = events.emit_to("home", "ws-feed-send-msg", data);
             }
             "feedNotify" => {
                 info!("Feed notification received (like/comment)");
-                let _ = app_handle.emit_to("home", "ws-feed-notify", data);
+                let _ = events.emit_to("home", "ws-feed-notify", data);
             }
 
             // AIclaw 流式消息
             "streamStart" => {
                 info!("Stream start");
-                let _ = app_handle.emit_to("home", "ws-stream-start", data);
+                let _ = events.emit_to("home", "ws-stream-start", data);
             }
             "streamDelta" => {
-                let _ = app_handle.emit_to("home", "ws-stream-delta", data);
+                let _ = events.emit_to("home", "ws-stream-delta", data);
             }
             "streamEnd" => {
                 info!("Stream end");
-                let _ = app_handle.emit_to("home", "ws-stream-end", data);
+                let _ = events.emit_to("home", "ws-stream-end", data);
             }
             "aiclawAuthRequest" => {
                 info!("AIclaw auth request");
-                let _ = app_handle.emit_to("home", "ws-aiclaw-auth-request", data);
+                let _ = events.emit_to("home", "ws-aiclaw-auth-request", data);
             }
 
             // REQ-004: AIclaw 思考流式消息
             "thinkingStart" => {
+                // Replayed START must honor persisted deletion/clear boundaries after restart too.
+                if let Some(payload) = data {
+                    let id = |key: &str| {
+                        payload.get(key).and_then(|value| {
+                            value
+                                .as_str()
+                                .map(str::to_owned)
+                                .or_else(|| value.as_u64().map(|id| id.to_string()))
+                        })
+                    };
+                    if let Some(trigger) = id("triggerMsgId") {
+                        let Some(room) = id("roomId") else {
+                            return;
+                        };
+                        let state = app_handle.state::<AppData>();
+                        let Ok(_gate) = state.session.commit(binding).await else {
+                            return;
+                        };
+                        match crate::repository::im_message_repository::should_skip_message_insert(
+                            &binding.db,
+                            &trigger,
+                            &room,
+                            &binding.identity.uid,
+                            None,
+                        )
+                        .await
+                        {
+                            Ok(false) => {}
+                            _ => return,
+                        }
+                    }
+                }
                 info!("AIclaw thinking start");
-                let _ = app_handle.emit_to("home", "ws-thinking-start", data);
+                let _ = events.emit_to("home", "ws-thinking-start", data);
             }
             // S4 起服务端不再下发 thinkingDelta，客户端也不再转发（思考全文改为按需 REST 拉取）
             "thinkingEnd" => {
                 info!("AIclaw thinking end");
-                let _ = app_handle.emit_to("home", "ws-thinking-end", data);
+                let _ = events.emit_to("home", "ws-thinking-end", data);
             }
 
             // REQ-004: 群配置变更广播
             "groupConfigChange" => {
                 info!("AIclaw group config change broadcast");
-                let _ = app_handle.emit_to("home", "ws-group-config-change", data);
+                let _ = events.emit_to("home", "ws-group-config-change", data);
             }
 
             // 未知消息类型
             _ => {
                 warn!("Received unhandled message type: {}", message_type);
                 // 发送通用的未知消息事件
-                let _ = app_handle.emit("ws-unknown-message", message);
+                let _ = events.emit("ws-unknown-message", message);
             }
         }
     }
@@ -1220,7 +1337,7 @@ impl WebSocketClient {
 
     /// 发送事件到前端
     async fn emit_event(&self, event: WebSocketEvent) {
-        if let Err(e) = self.app_handle.emit("websocket-event", &event) {
+        if let Err(e) = self.events().emit("websocket-event", &event) {
             error!(" Failed to emit WebSocket event: {}", e);
         }
     }
@@ -1292,7 +1409,7 @@ impl WebSocketClient {
                     if let Err(e) = self.force_reconnect().await {
                         warn!("Auto-reconnection failed: {}", e);
                         // 通知前端需要重连
-                        if let Err(emit_err) = self.app_handle.emit(
+                        if let Err(emit_err) = self.events().emit(
                             "ws-connection-lost",
                             serde_json::json!({
                                 "reason": "auto_reconnect_failed",
@@ -1313,7 +1430,7 @@ impl WebSocketClient {
                 if let Err(e) = self.force_reconnect().await {
                     warn!("Auto-reconnection failed: {}", e);
                     // 通知前端需要重连
-                    if let Err(emit_err) = self.app_handle.emit(
+                    if let Err(emit_err) = self.events().emit(
                         "ws-connection-lost",
                         serde_json::json!({
                             "reason": "auto_reconnect_failed",
@@ -1345,7 +1462,7 @@ impl WebSocketClient {
                 Err(e) => {
                     warn!("Test heartbeat failed: {}", e);
                     // 通过事件通知前端需要重连
-                    if let Err(emit_err) = self.app_handle.emit(
+                    if let Err(emit_err) = self.events().emit(
                         "ws-connection-lost",
                         serde_json::json!({
                             "reason": "test_heartbeat_failed",
@@ -1372,8 +1489,9 @@ impl WebSocketClient {
 
     fn schedule_post_reconnect_sync(&self) {
         let app_handle = self.app_handle.clone();
+        let binding = self.binding.clone();
         tokio::spawn(async move {
-            if let Err(err) = Self::run_sync_messages(&app_handle).await {
+            if let Err(err) = Self::run_sync_messages(&app_handle, &binding).await {
                 warn!("Post-reconnect message sync failed: {}", err);
             } else {
                 info!("Post-reconnect message sync completed");
@@ -1381,7 +1499,10 @@ impl WebSocketClient {
         });
     }
 
-    async fn run_sync_messages(app_handle: &AppHandle) -> Result<(), String> {
+    async fn run_sync_messages(
+        app_handle: &AppHandle,
+        binding: &SessionBinding,
+    ) -> Result<(), String> {
         let state: State<'_, AppData> = app_handle.state();
 
         let params = Some(SyncMessagesParam {
@@ -1390,7 +1511,7 @@ impl WebSocketClient {
             uid: None,
         });
 
-        sync_messages(params, state).await
+        sync_messages(params, state, binding.identity.clone()).await
     }
 }
 

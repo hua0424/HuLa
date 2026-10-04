@@ -1,4 +1,5 @@
 use crate::AppData;
+use crate::session::SessionIdentity;
 
 use super::{client::WebSocketClient, types::*};
 use serde::{Deserialize, Serialize};
@@ -63,7 +64,9 @@ pub async fn ws_init_connection(
     app_handle: AppHandle,
     params: InitWsParams,
     state: State<'_, AppData>,
+    binding: SessionIdentity,
 ) -> Result<SuccessResponse, String> {
+    let binding = state.session.capture_identity(&binding)?;
     info!("Received WebSocket initialization request");
 
     let client_container = get_websocket_client_container();
@@ -75,28 +78,31 @@ pub async fn ws_init_connection(
         token: rc.token.clone(),
         ..Default::default()
     };
+    drop(rc);
+    if !state.session.is_current(&binding) {
+        return Err("WS初始化代次失效".into());
+    }
 
     // 获取或创建客户端实例
     let client = {
         let mut client_guard = client_container.write().await;
 
-        // 检查是否已有客户端实例
-        if let Some(existing_client) = client_guard.as_ref() {
-            // 如果已有客户端且已连接，直接返回成功
-            if existing_client.is_connected() {
-                info!("WebSocket already connected, skipping duplicate connection");
-                return Ok(SuccessResponse::new());
+        if let Some(existing) = client_guard.as_ref() {
+            if existing.binding.identity == binding.identity {
+                if existing.is_connected() {
+                    return Ok(SuccessResponse::new());
+                }
+            } else {
+                existing.internal_disconnect().await;
+                *client_guard = None;
             }
-
-            // 如果已有客户端但未连接，使用现有客户端
-            info!("Reconnecting using existing WebSocket client instance");
-            existing_client.clone()
+        }
+        if let Some(existing) = client_guard.as_ref() {
+            existing.clone()
         } else {
-            // 如果没有客户端，创建新实例
-            info!("Creating new WebSocket client instance");
-            let new_client = WebSocketClient::new(app_handle);
-            *client_guard = Some(new_client.clone());
-            new_client
+            let client = WebSocketClient::new(app_handle, binding);
+            *client_guard = Some(client.clone());
+            client
         }
     };
 
@@ -116,12 +122,21 @@ pub async fn ws_init_connection(
 
 /// 断开 WebSocket 连接
 #[tauri::command]
-pub async fn ws_disconnect(_app_handle: AppHandle) -> Result<SuccessResponse, String> {
+pub async fn ws_disconnect(
+    _app_handle: AppHandle,
+    binding: SessionIdentity,
+) -> Result<SuccessResponse, String> {
     info!("Received WebSocket disconnect request");
 
     let client_container = get_websocket_client_container();
     let mut client_guard = client_container.write().await;
 
+    if client_guard
+        .as_ref()
+        .is_some_and(|client| client.binding.identity != binding)
+    {
+        return Err("拒绝旧账号任务断开新连接".into());
+    }
     if let Some(client) = client_guard.take() {
         client.internal_disconnect().await;
     }
@@ -135,11 +150,15 @@ pub async fn ws_disconnect(_app_handle: AppHandle) -> Result<SuccessResponse, St
 pub async fn ws_send_message(
     _app_handle: AppHandle,
     params: SendMessageParams,
+    binding: SessionIdentity,
 ) -> Result<SuccessResponse, String> {
     let client_container = get_websocket_client_container();
     let client_guard = client_container.read().await;
 
     if let Some(client) = client_guard.as_ref() {
+        if client.binding.identity != binding {
+            return Err("WS发送账号代次失效".into());
+        }
         match client.send_message(params.data).await {
             Ok(_) => Ok(SuccessResponse::new()),
             Err(e) => {
@@ -181,13 +200,19 @@ pub async fn ws_get_health(_app_handle: AppHandle) -> Result<ConnectionHealth, S
 
 /// 强制重连
 #[tauri::command]
-pub async fn ws_force_reconnect(_app_handle: AppHandle) -> Result<SuccessResponse, String> {
+pub async fn ws_force_reconnect(
+    _app_handle: AppHandle,
+    binding: SessionIdentity,
+) -> Result<SuccessResponse, String> {
     info!("Received force reconnect request");
 
     let client_container = get_websocket_client_container();
     let client_guard = client_container.read().await;
 
     if let Some(client) = client_guard.as_ref() {
+        if client.binding.identity != binding {
+            return Err("WS重连账号代次失效".into());
+        }
         match client.force_reconnect().await {
             Ok(_) => {
                 info!("WebSocket reconnected successfully");

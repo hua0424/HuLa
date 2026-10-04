@@ -10,7 +10,8 @@ import {
   suppressErrorToastsForRoom
 } from '@/utils/errorToastSuppression'
 import { useChatStore } from './chat'
-import { homeWindowOnlyStorage } from './persistHomeWindowOnly'
+import { scopedChatStorage } from './persistHomeWindowOnly'
+import { sessionBinding } from '@/services/sessionBinding'
 
 export const useGroupStore = defineStore(
   StoresEnum.GROUP,
@@ -888,6 +889,18 @@ export const useGroupStore = defineStore(
       return roomIds
     }
 
+    watch(
+      sessionBinding,
+      () => {
+        groupDetailsCache.value = {}
+        loadingGroups.value.clear()
+        dissolvedRoomIds.clear()
+        friendInfoCache.clear()
+        for (const key of Object.keys(memberOrderCounters)) delete memberOrderCounters[key]
+      },
+      { flush: 'sync' }
+    )
+
     return {
       userList,
       userListMap,
@@ -957,6 +970,6 @@ export const useGroupStore = defineStore(
       omit: ['dissolvedRoomIds', 'friendInfoCache'] as never
     },
     // #239：只主窗持久化，辅窗 noop——防多窗 last-writer-wins 快照倒退（#237 终裁第 4 条）
-    persist: { storage: homeWindowOnlyStorage() }
+    persist: { storage: scopedChatStorage() }
   }
 )

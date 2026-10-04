@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { StoresEnum } from '@/enums'
-import { homeWindowOnlyStorage } from '@/stores/persistHomeWindowOnly'
+import { scopedChatStorage } from '@/stores/persistHomeWindowOnly'
 import {
   feedList as getFeedListApi,
   feedDetail as getFeedDetailApi,
@@ -502,6 +502,6 @@ export const useFeedStore = defineStore(
       initialize: true
     },
     // #239：只主窗持久化，辅窗 noop——防多窗 last-writer-wins 快照倒退（#237 终裁第 4 条）
-    persist: { storage: homeWindowOnlyStorage() }
+    persist: { storage: scopedChatStorage() }
   }
 )

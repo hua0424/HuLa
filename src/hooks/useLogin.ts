@@ -21,7 +21,7 @@ import { getAllUserState, getUserDetail } from '../utils/ImRequestUtils'
 import { useNetwork } from '@vueuse/core'
 import { UserInfoType } from '../services/types'
 import { getEnhancedFingerprint } from '../services/fingerprint'
-import { invoke } from '@tauri-apps/api/core'
+import { captureSessionBinding, invokeScoped as invoke } from '@/services/sessionBinding'
 import { useMitt } from './useMitt'
 // 安全日志：Tauri 环境用 plugin-log，浏览器 Web 环境降级到 console.log
 const logInfo = (msg: string): void => {
@@ -60,7 +60,7 @@ export const useLogin = () => {
    * 防止 Pinia 在页面刷新时自动恢复旧账号数据
    */
   const clearUserLocalStorage = () => {
-    const userScopedStoreKeys = ['chat', 'group', 'contacts', 'feed', 'cached', 'sessionUnread']
+    const userScopedStoreKeys = ['group', 'contacts', 'feed', 'cached']
     userScopedStoreKeys.forEach((key) => {
       localStorage.removeItem(key)
     })
@@ -143,10 +143,10 @@ export const useLogin = () => {
     chatStore.clearHistoryProgress()
 
     const sendLogoutEvent = async () => {
-      // ws 退出连接
-      await invokeSilently('ws_disconnect')
-      await invokeSilently(TauriCommand.REMOVE_TOKENS)
-      await invokeSilently(TauriCommand.UPDATE_USER_LAST_OPT_TIME)
+      const binding = isWeb() ? null : await captureSessionBinding()
+      await invokeSilently(TauriCommand.UPDATE_USER_LAST_OPT_TIME, { binding })
+      await invokeSilently('ws_disconnect', { binding })
+      await invokeWithErrorHandler(TauriCommand.REMOVE_TOKENS, { binding }, { showError: false })
     }
 
     if (isDesktop()) {

@@ -2,6 +2,8 @@ import { MessageStatusEnum, MittEnum } from '@/enums'
 import { sendMessageWithChannel, type SendMessagePayload } from '@/utils/MessageSender'
 import { useChatStore } from '@/stores/chat'
 import { useMitt } from '@/hooks/useMitt'
+import { eventSession, isSessionCurrent, SessionExpiredError } from '@/services/sessionBinding'
+import { isWeb } from '@/utils/PlatformConstants'
 
 export type SendWithTrackingOptions = {
   tempMsgId: string
@@ -20,7 +22,10 @@ export const useMessageSender = () => {
   const sendWithTracking = async (options: SendWithTrackingOptions) => {
     const { tempMsgId, payload, updateSessionActive = true, scrollOnUpdate = true, onSuccess, onError } = options
 
+    const binding = isWeb() ? undefined : eventSession(chatStore.messageMap[payload.roomId]?.[tempMsgId])
+    if (!isWeb() && !binding) throw new SessionExpiredError()
     await sendMessageWithChannel({
+      binding,
       data: payload,
       onSuccess: (response) => {
         chatStore.updateMsg({
@@ -49,6 +54,7 @@ export const useMessageSender = () => {
       }
     })
 
+    if (binding && !isSessionCurrent(binding)) return
     if (updateSessionActive) {
       chatStore.updateSessionLastActiveTime(payload.roomId)
     }

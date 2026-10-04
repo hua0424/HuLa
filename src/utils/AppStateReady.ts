@@ -13,24 +13,34 @@ let pendingPromise: Promise<void> | null = null
  * 等待一次后端广播的 ready 事件。事件触发后即解除监听，并允许后续调用直接读取缓存结果。
  */
 const waitForReadyEvent = () =>
-  new Promise<void>((resolve) => {
-    let cleanup: (() => void) | null = null
-    listen('app-state-ready', () => {
+  new Promise<void>((resolve, reject) => {
+    let cleanup: (() => void) | undefined
+    const ready = () => {
       isReady = true
+      const unlisten = cleanup
+      cleanup = undefined
+      unlisten?.()
       resolve()
-      if (cleanup) {
-        cleanup()
-        cleanup = null
-      }
-      pendingPromise = null
-    })
-      .then((unlisten) => {
+    }
+    listen('app-state-ready', ready)
+      .then(async (unlisten) => {
         cleanup = unlisten
+        // Native is authoritative. A startup edge may be missed before a WebView is ready.
+        // ponytail: one bounded poll per window (30s); replace with a native wait command if startup grows.
+        const deadline = Date.now() + 30_000
+        while (!isReady) {
+          if (await invoke<boolean>('is_app_state_ready')) {
+            ready()
+            return
+          }
+          if (Date.now() >= deadline) throw new Error('应用状态未在30秒内就绪')
+          await new Promise((done) => setTimeout(done, 100))
+        }
+        ready()
       })
       .catch((error) => {
-        console.warn('[appStateReady] Failed to register listener:', error)
-        pendingPromise = null
-        resolve()
+        cleanup?.()
+        reject(error)
       })
   })
 
@@ -57,7 +67,9 @@ export const ensureAppStateReady = async () => {
   }
 
   if (!pendingPromise) {
-    pendingPromise = waitForReadyEvent()
+    pendingPromise = waitForReadyEvent().finally(() => {
+      pendingPromise = null
+    })
   }
 
   await pendingPromise

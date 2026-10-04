@@ -1,27 +1,25 @@
 use crate::AppData;
 use crate::command::token_helper::{
-    capture_token_snapshot_arc, capture_token_snapshot_direct, persist_token_if_refreshed_arc,
-    persist_token_if_refreshed_direct,
+    capture_token_snapshot_direct, persist_captured_tokens, request_bound,
 };
 use crate::error::CommonError;
 use crate::im_request_client::{ImRequestClient, ImUrl};
 use crate::pojo::common::{CursorPageParam, CursorPageResp};
 use crate::repository::im_message_repository::MessageWithThumbnail;
 use crate::repository::{im_message_repository, im_user_repository};
+use crate::session::{SessionBinding, SessionIdentity, SessionStore};
 use crate::vo::vo::ChatMessageReq;
 
 use entity::im_user::Entity as ImUserEntity;
 use entity::{im_message, im_user};
 use once_cell::sync::Lazy;
+use sea_orm::TransactionTrait;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
-use sea_orm::{DatabaseConnection, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
 use tauri::{State, ipc::Channel};
-use tokio::sync::Mutex;
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info, warn};
 
@@ -29,9 +27,10 @@ const WRITE_RETRY_LIMIT: usize = 3; // 写操作最多重试 3 次
 const WRITE_RETRY_DELAY_MS: u64 = 80; // 重试基础延迟 80ms
 
 async fn run_with_write_lock<T, F, Fut>(
-    lock: Arc<Mutex<()>>, // 传入全局写锁，保证串行执行
-    op_name: &str,        // 当前操作名用于日志
-    mut operation: F,     // 实际写入逻辑
+    sessions: Arc<SessionStore>,
+    binding: SessionBinding,
+    op_name: &str,    // 当前操作名用于日志
+    mut operation: F, // 实际写入逻辑
 ) -> Result<T, String>
 where
     F: FnMut() -> Fut,                            // 返回异步写入 Future 的闭包
@@ -39,7 +38,7 @@ where
 {
     let mut attempt: usize = 0; // 当前已重试次数
     loop {
-        let guard = lock.lock().await; // 获取写锁
+        let guard = sessions.commit(&binding).await?; // 每次重试也在提交门禁内核对代次
         let result = operation().await; // 执行实际写入
         drop(guard); // 释放写锁
 
@@ -169,26 +168,27 @@ fn is_remote_source(source: &Option<String>) -> bool {
 pub async fn page_msg(
     param: CursorPageMessageParam,
     state: State<'_, AppData>,
+
+    binding: SessionIdentity,
 ) -> Result<CursorPageResp<Vec<MessageResp>>, String> {
+    let binding = state.session.capture_identity(&binding)?;
     if is_remote_source(&param.source) {
-        return page_msg_remote(param, state).await;
+        return page_msg_remote(param, state, binding).await;
     }
-    page_msg_local(param, state).await
+    page_msg_local(param, state, binding).await
 }
 
 async fn page_msg_local(
     param: CursorPageMessageParam,
     state: State<'_, AppData>,
+    binding: SessionBinding,
 ) -> Result<CursorPageResp<Vec<MessageResp>>, String> {
-    // 获取当前登录用户的 uid
-    let login_uid = {
-        let user_info = state.user_info.lock().await;
-        user_info.uid.clone()
-    };
+    let _gate = state.session.commit(&binding).await?;
+    let login_uid = binding.identity.uid.clone();
 
     // 从数据库查询消息
     let db_result = im_message_repository::cursor_page_messages(
-        &*state.db_conn.read().await,
+        &binding.db,
         param.room_id,
         param.cursor_page_param,
         &login_uid,
@@ -215,7 +215,7 @@ async fn page_msg_local(
         } else if let Some(send_time) = msg.message.send_time {
             // 使用统一的 time_block 计算函数
             resp.time_block = im_message_repository::calculate_time_block(
-                &*state.db_conn.read().await,
+                &binding.db,
                 &msg.message.room_id,
                 &msg.message.id,
                 send_time,
@@ -293,6 +293,7 @@ struct RemoteMsgPageParams {
 async fn page_msg_remote(
     param: CursorPageMessageParam,
     state: State<'_, AppData>,
+    binding: SessionBinding,
 ) -> Result<CursorPageResp<Vec<MessageResp>>, String> {
     let room_id = param.room_id.clone();
     let page_size = param.cursor_page_param.page_size.clamp(1, 100);
@@ -302,7 +303,7 @@ async fn page_msg_remote(
     }
 
     // 网络请求前捕获登录身份
-    let login_uid = { state.user_info.lock().await.uid.clone() };
+    let login_uid = binding.identity.uid.clone();
     if login_uid.is_empty() {
         return Err("未登录，无法回填历史消息".to_string());
     }
@@ -319,20 +320,15 @@ async fn page_msg_remote(
     };
 
     // 不在网络等待期间持有 SQLite 写锁，复用现有认证请求及 token 更新处理
-    let old_tokens = capture_token_snapshot_arc(&state.rc).await;
-    let fetch_result: Result<Option<RemoteMsgPageDto>, anyhow::Error> = {
-        let mut client = state.rc.lock().await;
-        client
-            .im_request(
-                ImUrl::GetMsgPage,
-                None::<serde_json::Value>,
-                Some(remote_params),
-            )
-            .await
-    };
-    {
-        persist_token_if_refreshed_arc(&old_tokens, &state.rc, &state.db_conn, &login_uid).await;
-    }
+    let fetch_result: Result<Option<RemoteMsgPageDto>, CommonError> = request_bound(
+        &state.rc,
+        &state.session,
+        &binding,
+        ImUrl::GetMsgPage,
+        None::<serde_json::Value>,
+        Some(remote_params),
+    )
+    .await;
     let dto = fetch_result
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "远端历史返回空响应".to_string())?;
@@ -353,57 +349,52 @@ async fn page_msg_remote(
     )
     .map_err(|e| e.to_string())?;
 
-    // 提交前再次核对身份：退出/切账号使旧请求失效，不把旧响应写进新用户数据库
-    {
-        let current_uid = state.user_info.lock().await.uid.clone();
-        if current_uid != login_uid {
-            return Err("登录身份已变化，丢弃本次历史回填".to_string());
-        }
-    }
-
-    let write_lock = state.write_lock.clone();
-    let db_conn = state.db_conn.clone();
+    let db_conn = binding.db.clone();
     let room_for_save = room_id.clone();
     let uid_for_save = login_uid.clone();
-    let stats = run_with_write_lock(write_lock, "save_history_page", || {
-        let db_conn = db_conn.clone();
-        let room_for_save = room_for_save.clone();
-        let uid_for_save = uid_for_save.clone();
-        let mut records: Vec<MessageWithThumbnail> = remote_list
-            .clone()
-            .into_iter()
-            .map(|msg_resp| convert_resp_to_record_for_fetch(msg_resp, uid_for_save.clone()))
-            .collect();
-        // 回填页的 time_block 按批次内顺序预填，查询时已有值则保留
-        records.sort_by(|a, b| {
-            let a_time = a.message.send_time.unwrap_or(0);
-            let b_time = b.message.send_time.unwrap_or(0);
-            a_time.cmp(&b_time)
-        });
-        async move {
-            let db = db_conn.read().await;
-            let tx = db.begin().await.map_err(CommonError::DatabaseError)?;
-            // 二次身份核对必须在事务内：防止请求返回后、提交前发生切库
-            let stats = im_message_repository::save_history_page(
-                &tx,
-                records,
-                &uid_for_save,
-                &room_for_save,
-            )
-            .await?;
-            tx.commit().await.map_err(CommonError::DatabaseError)?;
-            Ok(stats)
-        }
-    })
+    let stats = run_with_write_lock(
+        state.session.clone(),
+        binding.clone(),
+        "save_history_page",
+        || {
+            let db_conn = db_conn.clone();
+            let room_for_save = room_for_save.clone();
+            let uid_for_save = uid_for_save.clone();
+            let mut records: Vec<MessageWithThumbnail> = remote_list
+                .clone()
+                .into_iter()
+                .map(|msg_resp| convert_resp_to_record_for_fetch(msg_resp, uid_for_save.clone()))
+                .collect();
+            // 回填页的 time_block 按批次内顺序预填，查询时已有值则保留
+            records.sort_by(|a, b| {
+                let a_time = a.message.send_time.unwrap_or(0);
+                let b_time = b.message.send_time.unwrap_or(0);
+                a_time.cmp(&b_time)
+            });
+            async move {
+                let tx = db_conn.begin().await.map_err(CommonError::DatabaseError)?;
+                // The retry helper holds the shared identity/commit gate for this transaction.
+                let stats = im_message_repository::save_history_page(
+                    &tx,
+                    records,
+                    &uid_for_save,
+                    &room_for_save,
+                )
+                .await?;
+                tx.commit().await.map_err(CommonError::DatabaseError)?;
+                Ok(stats)
+            }
+        },
+    )
     .await?;
 
-    // 查询本次远端 ID 集合的本地可见记录（本地较新版本），复用统一转换
-    let db = state.db_conn.read().await;
+    // Read only the captured database, and reject responses invalidated before publication.
+    let response_gate = state.session.commit(&binding).await?;
+    let db = &binding.db;
     let visible =
         im_message_repository::find_visible_by_ids(&*db, &remote_ids, &room_id, &login_uid)
             .await
             .map_err(|e| e.to_string())?;
-    drop(db);
 
     let mut sorted = visible;
     sorted.sort_by(|a, b| {
@@ -414,7 +405,7 @@ async fn page_msg_remote(
             .then_with(|| a.message.id.cmp(&b.message.id))
     });
 
-    let db2 = state.db_conn.read().await;
+    let db2 = &binding.db;
     let mut message_resps: Vec<MessageResp> = Vec::with_capacity(sorted.len());
     for (index, msg) in sorted.into_iter().enumerate() {
         let mut resp = convert_message_to_resp(msg.clone(), None);
@@ -433,7 +424,7 @@ async fn page_msg_remote(
         }
         message_resps.push(resp);
     }
-    drop(db2);
+    drop(response_gate);
 
     info!(
         target: "tauri_db",
@@ -547,15 +538,21 @@ pub fn convert_message_to_resp(
 /// 检查用户初始化状态并获取消息
 pub async fn check_user_init_and_fetch_messages(
     client: &mut ImRequestClient,
-    db_conn: &DatabaseConnection,
+    binding: &SessionBinding,
+    sessions: &SessionStore,
     uid: &str,
     async_data: bool,
     force_full: bool,
 ) -> Result<(), CommonError> {
+    if uid != binding.identity.uid || !sessions.is_current(binding) {
+        return Err(CommonError::RequestError("同步账号代次已失效".into()));
+    }
+    let db_conn = &binding.db;
     // 防止高频同步，10秒内只允许一次同步(比如弱网、网络不好情况下会重复重连)
     static MESSAGE_SYNC_LOCK: Lazy<tokio::sync::Mutex<()>> =
         Lazy::new(|| tokio::sync::Mutex::new(()));
-    static LAST_MESSAGE_SYNC_MS: AtomicI64 = AtomicI64::new(0);
+    static LAST_MESSAGE_SYNC: Lazy<std::sync::Mutex<Option<(SessionIdentity, i64)>>> =
+        Lazy::new(|| std::sync::Mutex::new(None));
     const MESSAGE_SYNC_COOLDOWN_MS: i64 = 10_000;
 
     info!(
@@ -565,7 +562,13 @@ pub async fn check_user_init_and_fetch_messages(
 
     let now_ms = chrono::Utc::now().timestamp_millis();
     if !force_full {
-        let last = LAST_MESSAGE_SYNC_MS.load(Ordering::Relaxed);
+        let last = LAST_MESSAGE_SYNC
+            .lock()
+            .expect("sync clock poisoned")
+            .as_ref()
+            .filter(|(identity, _)| identity == &binding.identity)
+            .map(|(_, time)| *time)
+            .unwrap_or(0);
         if now_ms - last < MESSAGE_SYNC_COOLDOWN_MS {
             info!(
                 "Skip message sync due to cooldown (last={}ms, now={}ms, uid={})",
@@ -601,7 +604,8 @@ pub async fn check_user_init_and_fetch_messages(
                     uid
                 );
                 // 传递用户的 async_data 参数
-                if let Err(e) = fetch_all_messages(client, db_conn, uid, async_data).await {
+                if let Err(e) = fetch_all_messages(client, binding, sessions, uid, async_data).await
+                {
                     error!("Failed to fetch all messages: {}", e);
                     return Err(e);
                 }
@@ -610,7 +614,7 @@ pub async fn check_user_init_and_fetch_messages(
                     "User {} incremental/offline message update, async_data: {:?}",
                     uid, async_data
                 );
-                fetch_all_messages(client, db_conn, uid, async_data)
+                fetch_all_messages(client, binding, sessions, uid, async_data)
                     .await
                     .map_err(|e| {
                         error!("Failed to update offline messages: {}", e);
@@ -619,7 +623,8 @@ pub async fn check_user_init_and_fetch_messages(
             }
         }
     }
-    LAST_MESSAGE_SYNC_MS.store(now_ms, Ordering::Relaxed);
+    *LAST_MESSAGE_SYNC.lock().expect("sync clock poisoned") =
+        Some((binding.identity.clone(), now_ms));
     drop(guard);
     Ok(())
 }
@@ -627,10 +632,15 @@ pub async fn check_user_init_and_fetch_messages(
 // 获取所有消息并保存到数据库
 pub async fn fetch_all_messages(
     client: &mut ImRequestClient,
-    db_conn: &DatabaseConnection,
+    binding: &SessionBinding,
+    sessions: &SessionStore,
     uid: &str,
     async_data: bool,
 ) -> Result<(), CommonError> {
+    if !sessions.is_current(binding) {
+        return Err(CommonError::RequestError("同步代次失效".into()));
+    }
+    let db_conn = &binding.db;
     info!(
         "Starting to fetch all messages, uid: {}, async_data: {:?}",
         uid, async_data
@@ -647,9 +657,18 @@ pub async fn fetch_all_messages(
         .im_request(ImUrl::GetMsgList, body, None::<serde_json::Value>)
         .await?;
 
-    persist_token_if_refreshed_direct(&old_tokens, client, db_conn, uid).await;
+    persist_captured_tokens(
+        &old_tokens,
+        &capture_token_snapshot_direct(client),
+        binding,
+        sessions,
+    )
+    .await
+    .map_err(CommonError::RequestError)?;
 
-    if let Some(mut messages) = messages {
+    let mut messages =
+        messages.ok_or_else(|| CommonError::RequestError("同步消息响应为空，未完成同步".into()))?;
+    {
         // 排序消息（按发送时间）
         messages.sort_by(|a, b| {
             let a_time = a.message.send_time.unwrap_or(0);
@@ -708,54 +727,37 @@ pub async fn fetch_all_messages(
             last_send_time_map.insert(room_id, Some(send_time));
         }
 
-        // aichatoverview#42: 持久化前先按 client_msg_id 删除本地乐观 temp 行，
-        // 防止 sync 后原来的 T... 行复活成重复气泡。
-        let client_msg_ids: Vec<String> = messages
-            .iter()
-            .filter_map(|m| m.message.client_msg_id.clone())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if !client_msg_ids.is_empty() {
-            let deleted = im_message_repository::delete_temp_messages_by_client_msg_id(
-                db_conn,
-                uid,
-                &client_msg_ids,
-            )
-            .await?;
-            debug!(
-                "fetch_all_messages deleted {} optimistic temp rows by client_msg_id",
-                deleted
-            );
+        // Preserve temp-ID reconciliation within the same bounded transaction as each saved batch.
+        // ponytail: 20 rows per commit gate; tune only with measured SQLite commit latency.
+        for batch in messages.chunks(20) {
+            let client_msg_ids: Vec<String> = batch
+                .iter()
+                .filter_map(|message| message.message.client_msg_id.clone())
+                .filter(|id| !id.is_empty())
+                .collect();
+            let records = batch
+                .iter()
+                .cloned()
+                .map(|message| convert_resp_to_record_for_fetch(message, uid.to_owned()))
+                .collect();
+            let gate = sessions
+                .commit(binding)
+                .await
+                .map_err(CommonError::RequestError)?;
+            let tx = db_conn.begin().await?;
+            im_message_repository::delete_temp_messages_by_client_msg_id(&tx, uid, &client_msg_ids)
+                .await?;
+            im_message_repository::save_all(&tx, records).await?;
+            tx.commit().await?;
+            drop(gate);
+            tokio::task::yield_now().await;
         }
-
-        // 开启事务
-        let tx = db_conn.begin().await?;
-
-        // 转换 MessageResp 为本地存储模型
-        let db_messages: Vec<MessageWithThumbnail> = messages
-            .into_iter()
-            .map(|msg_resp| convert_resp_to_record_for_fetch(msg_resp, uid.to_string()))
-            .collect();
-        // 保存到本地数据库
-        match im_message_repository::save_all(&tx, db_messages).await {
-            Ok(_) => {
-                info!("Messages saved to database successfully");
-            }
-            Err(e) => {
-                error!(
-                    "Failed to save messages to database, detailed error: {:?}",
-                    e
-                );
-                return Err(e.into());
-            }
-        }
-
-        // 消息保存完成后，将用户的 is_init 状态设置为 false
-        im_user_repository::update_user_init_status(&tx, uid, false)
+        let _gate = sessions
+            .commit(binding)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to update user is_init status: {}", e))?;
-
-        // 提交事务
+            .map_err(CommonError::RequestError)?;
+        let tx = db_conn.begin().await?;
+        im_user_repository::update_user_init_status(&tx, uid, false).await?;
         tx.commit().await?;
     }
 
@@ -774,6 +776,8 @@ pub struct SyncMessagesParam {
 pub async fn sync_messages(
     param: Option<SyncMessagesParam>,
     state: State<'_, AppData>,
+
+    binding: SessionIdentity,
 ) -> Result<(), String> {
     let async_data = param.as_ref().and_then(|p| p.async_data).unwrap_or(true);
     let full_sync = param.as_ref().and_then(|p| p.full_sync).unwrap_or(false);
@@ -782,10 +786,12 @@ pub async fn sync_messages(
         _ => state.user_info.lock().await.uid.clone(),
     };
 
+    let binding = state.session.capture_identity(&binding)?;
     let mut client = state.rc.lock().await;
     check_user_init_and_fetch_messages(
         &mut client,
-        &*state.db_conn.read().await,
+        &binding,
+        &state.session,
         &uid,
         async_data,
         full_sync,
@@ -879,20 +885,22 @@ pub async fn send_msg(
     state: State<'_, AppData>,
     success_channel: Channel<MessageResp>,
     error_channel: Channel<serde_json::Value>,
+
+    binding: SessionIdentity,
 ) -> Result<(), String> {
-    // 获取当前登录用户信息
+    let binding = state.session.capture_identity(&binding)?;
+    // 获取当前登录用户信息（数据库与UID来自同一不可变归属）
     let (login_uid, nickname, current_user_type) = {
-        let user_info = state.user_info.lock().await;
         let user_type = ImUserEntity::find()
-            .filter(im_user::Column::Id.eq(&user_info.uid))
+            .filter(im_user::Column::Id.eq(&binding.identity.uid))
             .select_only()
             .column(im_user::Column::UserType)
             .into_tuple::<Option<i32>>()
-            .one(&*state.db_conn.read().await)
+            .one(&binding.db)
             .await
             .unwrap_or(None)
             .flatten();
-        (user_info.uid.clone(), None, user_type) // UserInfo只有uid和token字段，nickname暂时设为None
+        (binding.identity.uid.clone(), None, user_type) // UserInfo只有uid和token字段，nickname暂时设为None
     };
 
     // 生成消息ID
@@ -929,19 +937,18 @@ pub async fn send_msg(
 
     let mut message_record = MessageWithThumbnail::new(message_model, thumbnail_path);
 
-    let write_lock = state.write_lock.clone(); // 克隆全局写锁句柄
-    message_record = run_with_write_lock(write_lock, "send_msg", || {
-        let db_conn = state.db_conn.clone(); // 克隆数据库连接供异步使用
-        let mut record = message_record.clone(); // 拷贝消息记录以便闭包内可变
-        async move {
-            let db = db_conn.read().await;
-            let tx = db.begin().await.map_err(CommonError::DatabaseError)?; // 开启事务
-            record = im_message_repository::save_message(&tx, record).await?; // 保存消息
-            tx.commit().await.map_err(CommonError::DatabaseError)?; // 提交事务
-            Ok(record)
-        }
-    })
-    .await?;
+    message_record =
+        run_with_write_lock(state.session.clone(), binding.clone(), "send_msg", || {
+            let db_conn = binding.db.clone(); // 捕获具体连接，不能读取可变当前库
+            let mut record = message_record.clone(); // 拷贝消息记录以便闭包内可变
+            async move {
+                let tx = db_conn.begin().await.map_err(CommonError::DatabaseError)?; // 开启事务
+                record = im_message_repository::save_message(&tx, record).await?; // 保存消息
+                tx.commit().await.map_err(CommonError::DatabaseError)?; // 提交事务
+                Ok(record)
+            }
+        })
+        .await?;
 
     info!(
         "Message saved to local database, ID: {}",
@@ -951,24 +958,24 @@ pub async fn send_msg(
     let msg_id = message_record.message.id.clone();
 
     // 异步发送到后端接口
-    let db_conn = state.db_conn.clone();
+    let db_conn = binding.db.clone();
+    let sessions = state.session.clone();
     let request_client = state.rc.clone();
     let mut record_for_send = message_record.clone();
-    let uid_for_token = login_uid.clone();
 
     tokio::spawn(async move {
-        let old_tokens = capture_token_snapshot_arc(&request_client).await;
-
-        // 发送到后端接口
-        let result: Result<Option<MessageResp>, anyhow::Error> = {
-            let mut client = request_client.lock().await;
-            client
-                .im_request(ImUrl::SendMsg, Some(send_data), None::<serde_json::Value>)
-                .await
+        let result: Result<Option<MessageResp>, CommonError> = request_bound(
+            &request_client,
+            &sessions,
+            &binding,
+            ImUrl::SendMsg,
+            Some(send_data),
+            None::<serde_json::Value>,
+        )
+        .await;
+        let Ok(_gate) = sessions.commit(&binding).await else {
+            return;
         };
-
-        persist_token_if_refreshed_arc(&old_tokens, &request_client, &db_conn, &uid_for_token)
-            .await;
 
         let mut id = None;
 
@@ -995,7 +1002,7 @@ pub async fn send_msg(
 
         // 更新消息状态
         let model = im_message_repository::update_message_status(
-            &*db_conn.read().await,
+            &db_conn,
             record_for_send,
             status,
             id,
@@ -1039,25 +1046,86 @@ pub async fn send_msg(
 }
 
 #[tauri::command]
-pub async fn save_msg(data: MessageResp, state: State<'_, AppData>) -> Result<(), String> {
-    // 创建 im_message::Model
-    let record = convert_resp_to_record_for_fetch(data, state.user_info.lock().await.uid.clone());
-
-    let lock = state.write_lock.clone();
-    run_with_write_lock(lock, "save_msg", || {
-        let db_conn = state.db_conn.clone();
-        let record = record.clone();
-        async move {
-            let db = db_conn.read().await;
-            let tx = db.begin().await?;
-            im_message_repository::save_message(&tx, record).await?;
-            tx.commit().await?;
-            Ok(())
+pub async fn save_msg(
+    data: MessageResp,
+    state: State<'_, AppData>,
+    binding: SessionIdentity,
+    reconciled_temp_id: Option<String>,
+) -> Result<bool, String> {
+    let binding = state.session.capture_identity(&binding)?;
+    let client_id = data.message.client_msg_id.clone();
+    let mut record = convert_resp_to_record_for_fetch(data, binding.identity.uid.clone());
+    let _gate = state.session.commit(&binding).await?;
+    // A late WS echo with an official ID must also respect a deleted optimistic client ID.
+    for id in [
+        Some(&record.message.id),
+        client_id.as_ref(),
+        reconciled_temp_id.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if im_message_repository::should_skip_message_insert(
+            &binding.db,
+            id,
+            &record.message.room_id,
+            &binding.identity.uid,
+            record.message.send_time,
+        )
+        .await
+        .map_err(|error| error.to_string())?
+        {
+            let tx = binding
+                .db
+                .begin()
+                .await
+                .map_err(|error| error.to_string())?;
+            im_message_repository::record_deleted_message(
+                &tx,
+                &record.message.id,
+                &record.message.room_id,
+                &binding.identity.uid,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            im_message_repository::delete_message_by_id(
+                &tx,
+                &record.message.id,
+                &binding.identity.uid,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            tx.commit().await.map_err(|error| error.to_string())?;
+            return Ok(false);
         }
-    })
-    .await?;
-
-    Ok(())
+    }
+    if let Some(temp_id) = reconciled_temp_id {
+        if !temp_id.starts_with('T') || temp_id == record.message.id {
+            return Err("Invalid optimistic message ID".to_string());
+        }
+        let server_id = record.message.id.clone();
+        record.message.id = temp_id;
+        im_message_repository::update_message_status(
+            &binding.db,
+            record,
+            "success",
+            Some(server_id),
+            binding.identity.uid.clone(),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        return Ok(true);
+    }
+    let tx = binding
+        .db
+        .begin()
+        .await
+        .map_err(|error| error.to_string())?;
+    im_message_repository::save_message(&tx, record)
+        .await
+        .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|error| error.to_string())?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -1066,11 +1134,15 @@ pub async fn update_message_recall_status(
     message_type: u8,
     message_body: String,
     state: State<'_, AppData>,
+
+    binding: SessionIdentity,
 ) -> Result<(), String> {
-    let login_uid = state.user_info.lock().await.uid.clone();
+    let binding = state.session.capture_identity(&binding)?;
+    let _gate = state.session.commit(&binding).await?;
+    let login_uid = binding.identity.uid.clone();
 
     im_message_repository::update_message_recall_status(
-        &*state.db_conn.read().await,
+        &binding.db,
         &message_id,
         message_type,
         &message_body,
@@ -1089,10 +1161,19 @@ pub async fn delete_message(
     message_id: String,
     room_id: Option<String>,
     state: State<'_, AppData>,
-) -> Result<(), String> {
-    let login_uid = state.user_info.lock().await.uid.clone();
 
-    let db = state.db_conn.read().await;
+    binding: SessionIdentity,
+) -> Result<(), String> {
+    let binding = state.session.capture_identity(&binding)?;
+    let _gate = state.session.commit(&binding).await?;
+    let login_uid = binding.identity.uid.clone();
+
+    let tx = binding
+        .db
+        .begin()
+        .await
+        .map_err(|error| error.to_string())?;
+    let db = &tx;
     let resolved_room_id = if let Some(room) = room_id {
         room
     } else {
@@ -1119,6 +1200,8 @@ pub async fn delete_message(
             e.to_string()
         })?;
 
+    tx.commit().await.map_err(|error| error.to_string())?;
+
     // #38: 记录 rows_affected 以坐实 reconcile 路径删 temp 行是否真生效（=1 真删 / =0 调用了但没匹配到行）
     info!(
         "Deleted message {} (room {}) for current user {} from local database, rows_affected={}",
@@ -1132,9 +1215,18 @@ pub async fn delete_message(
 pub async fn delete_room_messages(
     room_id: String,
     state: State<'_, AppData>,
+
+    binding: SessionIdentity,
 ) -> Result<u64, String> {
-    let login_uid = state.user_info.lock().await.uid.clone();
-    let db = state.db_conn.read().await;
+    let binding = state.session.capture_identity(&binding)?;
+    let _gate = state.session.commit(&binding).await?;
+    let login_uid = binding.identity.uid.clone();
+    let tx = binding
+        .db
+        .begin()
+        .await
+        .map_err(|error| error.to_string())?;
+    let db = &tx;
 
     let last_msg_id = im_message_repository::get_room_max_message_id(&*db, &room_id, &login_uid)
         .await
@@ -1163,6 +1255,7 @@ pub async fn delete_room_messages(
             e.to_string()
         })?;
 
+    tx.commit().await.map_err(|error| error.to_string())?;
     info!(
         "Deleted {} messages for room {} (user {})",
         affected_rows, room_id, login_uid

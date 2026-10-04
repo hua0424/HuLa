@@ -1,140 +1,13 @@
-use crate::im_request_client::ImRequestClient;
+use crate::error::CommonError;
+use crate::im_request_client::{ImRequestClient, ImUrl};
 use crate::repository::im_user_repository;
-use sea_orm::DatabaseConnection;
-use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
-use tracing::{info, warn};
+use crate::session::{SessionBinding, SessionStore};
+use tokio::sync::Mutex;
 
 #[derive(Clone, Debug)]
 pub struct TokenSnapshot {
     pub token: Option<String>,
     pub refresh_token: Option<String>,
-}
-
-/// Token 刷新检测器
-/// 用于在 im_request 调用前后检测 token 是否被刷新，并自动持久化到数据库
-pub struct TokenRefreshGuard {
-    old_tokens: TokenSnapshot,
-}
-
-impl TokenRefreshGuard {
-    /// 在 im_request 调用前创建，记录当前的 token 和 refresh_token
-    pub async fn before_request(client: &Mutex<ImRequestClient>) -> Self {
-        let old_tokens = capture_token_snapshot(client).await;
-        Self { old_tokens }
-    }
-
-    /// 在 im_request 调用后检查 token 是否被刷新，如果是则持久化到数据库
-    pub async fn persist_if_refreshed(
-        &self,
-        client: &Mutex<ImRequestClient>,
-        db_conn: &RwLock<DatabaseConnection>,
-        uid: &str,
-    ) {
-        if uid.is_empty() {
-            return;
-        }
-
-        let (new_token, new_refresh_token, token_changed) = {
-            let c = client.lock().await;
-            let changed = self.old_tokens.token != c.token
-                || self.old_tokens.refresh_token != c.refresh_token;
-            (c.token.clone(), c.refresh_token.clone(), changed)
-        };
-
-        if token_changed {
-            if let (Some(token), Some(refresh_token)) = (new_token, new_refresh_token) {
-                match im_user_repository::save_user_tokens(
-                    &*db_conn.read().await,
-                    uid,
-                    &token,
-                    &refresh_token,
-                )
-                .await
-                {
-                    Ok(_) => {
-                        info!(
-                            "[TOKEN_PERSIST] SUCCESS: tokens saved for uid: {}, token_len: {}, refresh_len: {}",
-                            uid,
-                            token.len(),
-                            refresh_token.len()
-                        );
-                    }
-                    Err(e) => {
-                        warn!(
-                            "[TOKEN_PERSIST] FAILED: error saving tokens for uid {}: {}",
-                            uid, e
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// 便捷函数：在 im_request 后检查并持久化刷新的 token
-///
-/// # Arguments
-/// * `old_tokens` - 请求前的 token 快照
-/// * `client` - ImRequestClient 的锁
-/// * `db_conn` - 数据库连接的锁
-/// * `uid` - 用户 ID
-pub async fn persist_token_if_refreshed(
-    old_tokens: &TokenSnapshot,
-    client: &Mutex<ImRequestClient>,
-    db_conn: &RwLock<DatabaseConnection>,
-    uid: &str,
-) {
-    if uid.is_empty() {
-        return;
-    }
-
-    let (new_token, new_refresh_token, token_changed) = {
-        let c = client.lock().await;
-        let changed = old_tokens.token != c.token || old_tokens.refresh_token != c.refresh_token;
-        (c.token.clone(), c.refresh_token.clone(), changed)
-    };
-
-    if token_changed {
-        if let (Some(token), Some(refresh_token)) = (new_token, new_refresh_token) {
-            match im_user_repository::save_user_tokens(
-                &*db_conn.read().await,
-                uid,
-                &token,
-                &refresh_token,
-            )
-            .await
-            {
-                Ok(_) => {
-                    info!(
-                        "[TOKEN_PERSIST] SUCCESS: tokens saved for uid: {}, token_len: {}, refresh_len: {}",
-                        uid,
-                        token.len(),
-                        refresh_token.len()
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        "[TOKEN_PERSIST] FAILED: error saving tokens for uid {}: {}",
-                        uid, e
-                    );
-                }
-            }
-        }
-    }
-}
-
-/// 便捷函数：获取当前的 token 快照用于后续比较
-pub async fn capture_token_snapshot(client: &Mutex<ImRequestClient>) -> TokenSnapshot {
-    let c = client.lock().await;
-    TokenSnapshot {
-        token: c.token.clone(),
-        refresh_token: c.refresh_token.clone(),
-    }
-}
-
-pub async fn capture_token_snapshot_arc(client: &Arc<Mutex<ImRequestClient>>) -> TokenSnapshot {
-    capture_token_snapshot(client.as_ref()).await
 }
 
 pub fn capture_token_snapshot_direct(client: &ImRequestClient) -> TokenSnapshot {
@@ -144,59 +17,189 @@ pub fn capture_token_snapshot_direct(client: &ImRequestClient) -> TokenSnapshot 
     }
 }
 
-/// 便捷函数：获取当前的 refresh_token 用于后续比较
-pub async fn capture_refresh_token(client: &Mutex<ImRequestClient>) -> Option<String> {
-    client.lock().await.refresh_token.clone()
-}
-
-/// 便捷函数：使用 Arc 包装的类型
-pub async fn persist_token_if_refreshed_arc(
-    old_tokens: &TokenSnapshot,
-    client: &Arc<Mutex<ImRequestClient>>,
-    db_conn: &Arc<RwLock<DatabaseConnection>>,
-    uid: &str,
-) {
-    persist_token_if_refreshed(old_tokens, client.as_ref(), db_conn.as_ref(), uid).await
-}
-
-pub async fn capture_refresh_token_arc(client: &Arc<Mutex<ImRequestClient>>) -> Option<String> {
-    capture_refresh_token(client.as_ref()).await
-}
-
-/// 便捷函数：使用直接引用的 ImRequestClient（不需要 Mutex）
-pub async fn persist_token_if_refreshed_direct(
-    old_tokens: &TokenSnapshot,
-    client: &ImRequestClient,
-    db_conn: &DatabaseConnection,
-    uid: &str,
-) {
-    if uid.is_empty() {
-        return;
+/// Persist only tokens captured from this request, under the same account commit gate.
+pub async fn persist_captured_tokens(
+    old: &TokenSnapshot,
+    new: &TokenSnapshot,
+    binding: &SessionBinding,
+    sessions: &SessionStore,
+) -> Result<(), String> {
+    if old.token != new.token || old.refresh_token != new.refresh_token {
+        let _gate = sessions.commit(binding).await?;
+        if let (Some(token), Some(refresh)) = (&new.token, &new.refresh_token) {
+            im_user_repository::save_user_tokens(
+                &binding.db,
+                &binding.identity.uid,
+                token,
+                refresh,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        }
     }
+    Ok(())
+}
 
-    let token_changed =
-        old_tokens.token != client.token || old_tokens.refresh_token != client.refresh_token;
+/// All authenticated native HTTP callers share the before-request and after-IO ownership boundary.
+pub async fn request_bound<
+    T: serde::de::DeserializeOwned,
+    B: serde::Serialize,
+    P: serde::Serialize,
+>(
+    client: &Mutex<ImRequestClient>,
+    sessions: &SessionStore,
+    binding: &SessionBinding,
+    url: ImUrl,
+    body: Option<B>,
+    params: Option<P>,
+) -> Result<Option<T>, CommonError> {
+    let (result, old, new) = {
+        let mut client = client.lock().await;
+        if !sessions.is_current(binding) {
+            return Err(CommonError::RequestError("HTTP请求账号代次已失效".into()));
+        }
+        let old = capture_token_snapshot_direct(&client);
+        let result = client.im_request(url, body, params).await;
+        (result, old, capture_token_snapshot_direct(&client))
+    };
+    persist_captured_tokens(&old, &new, binding, sessions)
+        .await
+        .map_err(CommonError::RequestError)?;
+    let _gate = sessions
+        .commit(binding)
+        .await
+        .map_err(CommonError::RequestError)?;
+    result.map_err(Into::into)
+}
 
-    if token_changed {
-        if let (Some(token), Some(refresh_token)) =
-            (client.token.clone(), client.refresh_token.clone())
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
+    use std::io::{Read, Write};
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn real_delayed_http_history_send_and_contact_responses_cannot_cross_session_commits() {
+        // Only local synthetic sockets/SQLite fixtures; never login or inject faults on the shared test host.
+        for (case, route) in [ImUrl::GetMsgPage, ImUrl::SendMsg, ImUrl::GetContactList]
+            .into_iter()
+            .enumerate()
         {
-            match im_user_repository::save_user_tokens(db_conn, uid, &token, &refresh_token).await {
-                Ok(_) => {
-                    info!(
-                        "[TOKEN_PERSIST] SUCCESS: tokens saved for uid: {}, token_len: {}, refresh_len: {}",
-                        uid,
-                        token.len(),
-                        refresh_token.len()
-                    );
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let (received_tx, received_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut bytes = [0; 4096];
+                while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    let size = stream.read(&mut bytes).unwrap();
+                    if size == 0 {
+                        return;
+                    }
+                    request.extend_from_slice(&bytes[..size]);
                 }
-                Err(e) => {
-                    warn!(
-                        "[TOKEN_PERSIST] FAILED: error saving tokens for uid {}: {}",
-                        uid, e
-                    );
+                received_tx.send(()).unwrap();
+                if release_rx.recv().is_ok() {
+                    let body = r#"{"success":true,"code":0,"data":{"marker":"old"}}"#;
+                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
                 }
+            });
+            let sessions = Arc::new(SessionStore::new(Arc::new(Mutex::new(()))));
+            let old_db = Database::connect("sqlite::memory:").await.unwrap();
+            let new_db = Database::connect("sqlite::memory:").await.unwrap();
+            for db in [&old_db, &new_db] {
+                db.execute_unprepared("CREATE TABLE receipt (value TEXT)")
+                    .await
+                    .unwrap();
             }
+            let epoch = sessions.invalidate().await;
+            let old = sessions
+                .install(epoch, base.clone(), "4".into(), old_db.clone())
+                .await
+                .unwrap();
+            let client = Arc::new(Mutex::new(ImRequestClient::new(base.clone()).unwrap()));
+            client.lock().await.token = Some("synthetic-fixture-token".into());
+            let task = tokio::spawn({
+                let sessions = sessions.clone();
+                let old = old.clone();
+                let client = client.clone();
+                async move {
+                    let response: Option<serde_json::Value> = request_bound(
+                        &client,
+                        &sessions,
+                        &old,
+                        route,
+                        None::<serde_json::Value>,
+                        None::<serde_json::Value>,
+                    )
+                    .await?;
+                    let _gate = sessions
+                        .commit(&old)
+                        .await
+                        .map_err(CommonError::RequestError)?;
+                    old.db
+                        .execute_unprepared("INSERT INTO receipt VALUES ('old')")
+                        .await?;
+                    Ok::<_, CommonError>(response)
+                }
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(5), received_rx)
+                .await
+                .unwrap()
+                .unwrap();
+            let epoch =
+                tokio::time::timeout(std::time::Duration::from_secs(1), sessions.invalidate())
+                    .await
+                    .unwrap();
+            // Same-UID relogin, backend change, and account change exercise the SAME native boundary.
+            let key = if case == 1 {
+                "http://other-fixture.invalid".to_owned()
+            } else {
+                base
+            };
+            let uid = if case == 2 { "5" } else { "4" };
+            let current = sessions
+                .install(epoch, key, uid.into(), new_db.clone())
+                .await
+                .unwrap();
+            assert!(sessions.invalidate_identity(&old.identity).await.is_err());
+            release_tx.send(()).unwrap();
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_secs(5), task)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .is_err()
+            );
+            server.join().unwrap();
+            let _gate = sessions.commit(&current).await.unwrap();
+            current
+                .db
+                .execute_unprepared("INSERT INTO receipt VALUES ('current')")
+                .await
+                .unwrap();
+            let rows = old_db
+                .query_all(Statement::from_string(
+                    DbBackend::Sqlite,
+                    "SELECT value FROM receipt".to_owned(),
+                ))
+                .await
+                .unwrap();
+            assert!(rows.is_empty());
+            let rows = new_db
+                .query_all(Statement::from_string(
+                    DbBackend::Sqlite,
+                    "SELECT value FROM receipt".to_owned(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 1);
         }
     }
 }

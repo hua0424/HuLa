@@ -2,6 +2,7 @@ import { ImUrlEnum, TauriCommand, type NotificationTypeEnum } from '@/enums'
 import type { CacheBadgeReq, LoginUserReq, ModifyUserInfoType, RegisterUserReq, UserItem } from '@/services/types'
 import { ErrorType, invokeSilently, invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { isWeb } from '@/utils/PlatformConstants'
+import type { SessionIdentity } from '@/services/sessionBinding'
 import { useChatStore } from '../stores/chat'
 import { useGroupStore } from '../stores/group'
 
@@ -17,6 +18,7 @@ const getWebImRequest = async () => {
  * IM 请求参数接口
  */
 interface ImRequestParams {
+  binding?: SessionIdentity
   /** API URL 枚举 */
   url: ImUrlEnum
   /** 请求体数据 */
@@ -63,6 +65,7 @@ export async function imRequest<T = any>(
   // 构建调用参数
   const args = {
     url: requestParams.url,
+    binding: requestParams.binding,
     body: requestParams.body || null,
     params: requestParams.params || null
   }
@@ -105,6 +108,7 @@ export async function imRequestSilent<T = any>(requestParams: ImRequestParams): 
   }
   const args = {
     url: requestParams.url,
+    binding: requestParams.binding,
     body: requestParams.body || null,
     params: requestParams.params || null
   }
@@ -223,9 +227,10 @@ export async function getMsgReadCount(msgIds: number[]) {
   )
 }
 
-export async function markMsgRead(roomId: string) {
+export async function markMsgRead(roomId: string, binding?: SessionIdentity) {
   return await imRequest(
     {
+      binding,
       url: ImUrlEnum.MARK_MSG_READ,
       body: {
         roomId
@@ -702,9 +707,13 @@ export async function forgetPassword(body: {
   })
 }
 
-export async function mergeMsg(body: { fromRoomId: string; type: number; roomIds: string[]; messageIds: string[] }) {
+export async function mergeMsg(
+  body: { fromRoomId: string; type: number; roomIds: string[]; messageIds: string[] },
+  binding?: SessionIdentity
+) {
   return await imRequest({
     url: ImUrlEnum.MERGE_MSG,
+    binding,
     body
   })
 }

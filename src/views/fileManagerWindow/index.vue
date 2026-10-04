@@ -17,7 +17,7 @@
 </template>
 
 <script setup lang="ts">
-import { invoke } from '@tauri-apps/api/core'
+import { invokeScoped as invoke, sessionBinding, isSessionCurrent } from '@/services/sessionBinding'
 import { getCurrentWebviewWindow, WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import FileContent from '@/components/fileManager/FileContent.vue'
 import SideNavigation from '@/components/fileManager/SideNavigation.vue'
@@ -33,8 +33,18 @@ const userList = ref<any[]>([])
 const loading = ref(false)
 const navigationItems = ref<any[]>([])
 
+const originBinding = sessionBinding.value
+watch(
+  sessionBinding,
+  () => {
+    timeGroupedFiles.value = []
+    userList.value = []
+  },
+  { flush: 'sync' }
+)
 // 查询文件
 const queryFiles = async () => {
+  if (!originBinding || !isSessionCurrent(originBinding)) return
   try {
     loading.value = true
 
@@ -65,9 +75,11 @@ const queryFiles = async () => {
     }
 
     const response = (await invoke('query_files', {
+      binding: originBinding,
       param: queryParam
     })) as any
 
+    if (!isSessionCurrent(originBinding)) return
     timeGroupedFiles.value = response.timeGroupedFiles
     userList.value = response.userList
   } catch (error) {

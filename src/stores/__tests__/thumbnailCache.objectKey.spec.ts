@@ -43,7 +43,8 @@ const getMessageMock = vi.fn().mockReturnValue(undefined)
 vi.mock('@/stores/chat', () => ({
   useChatStore: () => ({
     updateMsg: updateMsgMock,
-    getMessage: getMessageMock
+    getMessage: getMessageMock,
+    messageMap: {}
   })
 }))
 
@@ -60,7 +61,11 @@ vi.mock('@/utils/TauriInvokeHandler', () => ({
 }))
 
 vi.mock('@/utils/PlatformConstants', () => ({
-  isMobile: vi.fn().mockReturnValue(false)
+  isMobile: vi.fn().mockReturnValue(false),
+  isWeb: () => false
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: async () => ({ sessionEpoch: 1, binding: { backendKey: 'http://fixture/api', uid: '158', sessionEpoch: 1 } })
 }))
 
 vi.mock('@tauri-apps/api/path', () => ({
@@ -77,9 +82,11 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 }))
 
 import { useThumbnailCacheStore } from '@/stores/thumbnailCache'
+import { initializeSessionBinding } from '@/services/sessionBinding'
 
 describe('BL-003 thumbnailCache objectKey support', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await initializeSessionBinding()
     setActivePinia(createPinia())
     updateMsgMock.mockClear()
     getMessageMock.mockReturnValue(undefined)

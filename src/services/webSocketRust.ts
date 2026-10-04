@@ -1,5 +1,5 @@
-import { invoke } from '@tauri-apps/api/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { invokeScoped as invoke, listenBound as listen } from '@/services/sessionBinding'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 import { error, info, warn } from '@tauri-apps/plugin-log'
 import { useMitt } from '@/hooks/useMitt'
 import { MittEnum } from '@/enums'

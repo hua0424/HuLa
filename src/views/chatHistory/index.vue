@@ -97,7 +97,7 @@
 </template>
 
 <script setup lang="ts">
-import { invoke } from '@tauri-apps/api/core'
+import { invokeScoped as invoke, sessionBinding, isSessionCurrent } from '@/services/sessionBinding'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useDebounceFn } from '@vueuse/core'
 import { useRoute } from 'vue-router'
@@ -287,9 +287,18 @@ const handleVideoClick = async (videoUrl: string) => {
   }
 }
 
+const originBinding = sessionBinding.value
+watch(
+  sessionBinding,
+  () => {
+    messages.value = []
+    hasMore.value = false
+  },
+  { flush: 'sync' }
+)
 // 加载消息
 const loadMessages = async () => {
-  if (!roomId.value) return
+  if (!roomId.value || !originBinding || !isSessionCurrent(originBinding)) return
 
   loading.value = true
 
@@ -311,8 +320,12 @@ const loadMessages = async () => {
       }
     }
 
-    const response = await invoke<ChatHistoryResponse>(TauriCommand.QUERY_CHAT_HISTORY, { param: params })
+    const response = await invoke<ChatHistoryResponse>(TauriCommand.QUERY_CHAT_HISTORY, {
+      binding: originBinding,
+      param: params
+    })
 
+    if (!isSessionCurrent(originBinding)) return
     if (currentPage.value === 1) {
       messages.value = response.messages
     } else {

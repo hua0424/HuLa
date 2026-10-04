@@ -240,6 +240,7 @@
       "group_name_empty": "群名称不能为空",
       "group_name_too_long": "群名称不能超过32个字符",
       "delete_history_success": "聊天记录已删除",
+      "local_cache_failed": "保存本地消息失败，可重试加载历史记录",
       "delete_friend_success": "已删除好友",
       "dissolve_not_allowed": "无法解散频道",
       "dissolve_success": "已解散群聊",

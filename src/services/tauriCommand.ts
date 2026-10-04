@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeScoped as invoke } from '@/services/sessionBinding'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import rustWebSocketClient from '@/services/webSocketRust'
 import { TauriCommand } from '../enums'

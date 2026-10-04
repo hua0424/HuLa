@@ -7,6 +7,7 @@ pub mod chat_history_command;
 pub mod contact_command;
 pub mod database_command;
 pub mod file_manager_command;
+pub mod local_cache_command;
 pub mod markdown_command;
 pub mod message_command;
 pub mod message_mark_command;

@@ -548,6 +548,12 @@ export enum TauriCommand {
   CURSOR_PAGE_ROOM_MEMBERS = 'cursor_page_room_members',
   /** 列出所有会话列表 */
   LIST_CONTACTS = 'list_contacts_command',
+  GET_SESSION_BINDING = 'get_session_binding',
+  READ_THINKING_CACHE = 'read_thinking_cache',
+  CACHE_THINKING_METADATA = 'cache_thinking_metadata',
+  CACHE_THINKING_BODY = 'cache_thinking_body',
+  READ_LOCAL_SNAPSHOT = 'read_local_snapshot',
+  CACHE_LOCAL_SNAPSHOT = 'cache_local_snapshot',
   /** 分页查询会话消息 */
   PAGE_MSG = 'page_msg',
   /** 保存用户信息 */

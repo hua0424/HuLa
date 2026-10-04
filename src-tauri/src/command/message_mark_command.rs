@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use crate::error::CommonError;
+use crate::session::SessionIdentity;
 use crate::{AppData, command::message_command::MessageMark};
 use entity::im_message;
 use sea_orm::ColumnTrait;
-use sea_orm::{EntityTrait, IntoActiveModel, QueryFilter, Set, TransactionTrait};
+use sea_orm::{EntityTrait, IntoActiveModel, QueryFilter, Set};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tracing::{error, info};
@@ -25,11 +26,15 @@ pub struct ChatMessageMarkReq {
 pub async fn save_message_mark(
     data: ChatMessageMarkReq,
     state: State<'_, AppData>,
+    binding: SessionIdentity,
 ) -> Result<(), String> {
+    let binding = state.session.capture_identity(&binding)?;
+    let _gate = state.session.commit(&binding).await?;
     let result: Result<(), CommonError> = async {
-        let db = state.db_conn.read().await;
+        let db = &binding.db;
         let messages: Vec<im_message::Model> = im_message::Entity::find()
             .filter(im_message::Column::Id.eq(data.msg_id.clone()))
+            .filter(im_message::Column::LoginUid.eq(&binding.identity.uid))
             .all(&*db)
             .await?;
 
@@ -54,11 +59,6 @@ pub async fn save_message_mark(
                     .await?;
             }
         }
-
-        // 开启事务保存到数据库
-        let tx = db.begin().await?;
-        // im_message_mark_repository::save_msg_mark(&tx, message_mark).await?;
-        tx.commit().await?;
 
         info!(
             "消息标记保存成功，消息ID: {}, 标记类型: {}",

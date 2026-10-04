@@ -1,5 +1,6 @@
 use crate::AppData;
 use crate::repository::im_message_repository::{self, MessageWithThumbnail};
+use crate::session::SessionIdentity;
 use entity::im_message;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
 
@@ -74,12 +75,13 @@ pub struct FileQueryResponse {
 pub async fn query_files(
     param: FileQueryParam,
     state: State<'_, AppData>,
+
+    binding: SessionIdentity,
 ) -> Result<FileQueryResponse, String> {
     // 获取当前登录用户的 uid
-    let login_uid = {
-        let user_info = state.user_info.lock().await;
-        user_info.uid.clone()
-    };
+    let binding = state.session.capture_identity(&binding)?;
+    let _gate = state.session.commit(&binding).await?;
+    let login_uid = binding.identity.uid.clone();
 
     // 构建查询条件 - 只查询文件类型的消息
     let _query_condition = crate::command::chat_history_command::ChatHistoryQueryCondition {
@@ -96,7 +98,7 @@ pub async fn query_files(
     };
 
     // 查询数据库
-    let db = state.db_conn.read().await;
+    let db = &binding.db;
     let messages = match param.navigation_type.as_str() {
         "myFiles" => {
             // 查询所有房间的文件
@@ -481,13 +483,15 @@ pub async fn get_navigation_items() -> Result<Vec<NavigationItem>, String> {
 
 /// 调试命令：获取数据库中的消息统计信息
 #[tauri::command]
-pub async fn debug_message_stats(state: State<'_, AppData>) -> Result<serde_json::Value, String> {
-    let login_uid = {
-        let user_info = state.user_info.lock().await;
-        user_info.uid.clone()
-    };
+pub async fn debug_message_stats(
+    state: State<'_, AppData>,
+    binding: SessionIdentity,
+) -> Result<serde_json::Value, String> {
+    let binding = state.session.capture_identity(&binding)?;
+    let _gate = state.session.commit(&binding).await?;
+    let login_uid = binding.identity.uid.clone();
 
-    let db = state.db_conn.read().await;
+    let db = &binding.db;
 
     // 查询总消息数
     let total_messages = im_message::Entity::find()
