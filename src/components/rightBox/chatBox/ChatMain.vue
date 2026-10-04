@@ -905,6 +905,8 @@ const handleLoadMore = async (): Promise<void> => {
 // aichatoverview#285：历史加载失败重试 / 无滚动条时继续加载（复用滚动锚点逻辑，不自动循环）
 const handleHistoryRetry = async (): Promise<void> => {
   await handleLoadMore()
+  // aichatoverview#350：窗口校准旧失败随历史重试一并重查（保持可读内容）
+  await chatStore.retryWindowCalibration()
 }
 
 const handleViewAnnouncement = (): void => {

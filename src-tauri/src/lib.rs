@@ -79,8 +79,8 @@ use crate::command::file_manager_command::{
     debug_message_stats, get_navigation_items, query_files,
 };
 use crate::command::message_command::{
-    delete_message, delete_room_messages, page_msg, save_msg, send_msg, sync_messages,
-    update_message_recall_status,
+    calibrate_window, delete_message, delete_room_messages, page_msg, save_msg, send_msg,
+    sync_messages, update_message_recall_status,
 };
 use crate::command::message_mark_command::save_message_mark;
 use crate::command::oauth_command::OauthServerState;
@@ -449,6 +449,7 @@ fn get_invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         hide_contact_command,
         page_msg,
         sync_messages,
+        calibrate_window,
         send_msg,
         save_msg,
         delete_message,

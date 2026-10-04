@@ -556,6 +556,8 @@ export enum TauriCommand {
   CACHE_LOCAL_SNAPSHOT = 'cache_local_snapshot',
   /** 分页查询会话消息 */
   PAGE_MSG = 'page_msg',
+  /** 当前阅读窗口校准（aichatoverview#350） */
+  CALIBRATE_WINDOW = 'calibrate_window',
   /** 保存用户信息 */
   SAVE_USER_INFO = 'save_user_info',
   /** 更新用户最后操作时间 */
@@ -779,6 +781,8 @@ export enum ImUrlEnum {
   GET_MSG_LIST = 'getMsgList',
   /** aichatoverview#285：按房间查历史分页（Web 历史入口用此枚举，/list 仅按 msgIds 合并消息） */
   GET_MSG_PAGE = 'getMsgPage',
+  /** aichatoverview#350：当前阅读窗口校准 */
+  GET_MSG_WINDOW = 'getMsgWindow',
   /** 获取成员统计 */
   GET_MEMBER_STATISTIC = 'getMemberStatistic',
 
