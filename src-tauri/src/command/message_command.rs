@@ -491,10 +491,38 @@ struct WindowRequestBody {
     page_size: u32,
 }
 
+/// aichatoverview#350 wire-compat：服务端 Long 全局转字符串，WindowBound.timeMs
+/// 实为字符串（"1791070187188"），而 sendTime（LocalDateTime→时间戳）为数字；
+/// 两形态都接受，缺失/空为 None（与 #285 total 双形态同口径）。
+fn de_opt_i64_str_or_num<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .map(Some)
+            .ok_or_else(|| serde::de::Error::custom(format!("timeMs 非法数字: {n}"))),
+        serde_json::Value::String(s) => {
+            let t = s.trim();
+            if t.is_empty() {
+                return Ok(None);
+            }
+            t.parse::<i64>()
+                .map(Some)
+                .map_err(|_| serde::de::Error::custom(format!("timeMs 非法字符串: {s:?}")))
+        }
+        _ => Err(serde::de::Error::custom("timeMs 类型非法")),
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowBoundDto {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_str_or_num")]
     time_ms: Option<i64>,
     #[serde(default)]
     id: Option<String>,
@@ -2118,5 +2146,71 @@ mod tests {
         // 泛化失败可重试，但不是成功空也不是失权
         let other = map_window_request_error("network_error: timeout".to_string());
         assert!(other.starts_with("window_error:"), "got: {}", other);
+    }
+
+    #[test]
+    fn window_bound_accepts_string_time_ms_from_wire() {
+        // aichatoverview#350 回归：真实包体 coveredLower/Upper.timeMs 为字符串
+        //（LuohuoJacksonModule Long→String），此前 Option<i64> 直接解码失败。
+        let lower: WindowBoundDto = serde_json::from_value(json!({
+            "timeMs": "1791070187188",
+            "id": "212834869724672"
+        }))
+        .expect("string timeMs parses");
+        assert_eq!(lower.time_ms, Some(1791070187188));
+        assert_eq!(lower.id.as_deref(), Some("212834869724672"));
+        let upper: WindowBoundDto = serde_json::from_value(json!({
+            "timeMs": "1791112189184",
+            "id": "213011038881280"
+        }))
+        .expect("string timeMs parses");
+        assert_eq!(upper.time_ms, Some(1791112189184));
+    }
+
+    #[test]
+    fn window_bound_accepts_numeric_time_ms_after_server_fix() {
+        // 服务端改为数字输出后仍须通过（双形态兼容，不锁死任一形态）。
+        let numeric: WindowBoundDto = serde_json::from_value(json!({
+            "timeMs": 1791070187188i64,
+            "id": "212834869724672"
+        }))
+        .expect("numeric timeMs parses");
+        assert_eq!(numeric.time_ms, Some(1791070187188));
+        let missing: WindowBoundDto =
+            serde_json::from_value(json!({"id": "1"})).expect("missing timeMs");
+        assert!(missing.time_ms.is_none());
+        let null: WindowBoundDto = serde_json::from_value(json!({
+            "timeMs": null,
+            "id": "1"
+        }))
+        .expect("null timeMs");
+        assert!(null.time_ms.is_none());
+    }
+
+    #[test]
+    fn window_envelope_with_nonempty_bounds_validates() {
+        // 非空 bounds 的完整 envelope 必须能解析并通过校验（此前 fixture 全为 null）。
+        let dto: WindowCalibrateDto = serde_json::from_value(json!({
+            "schemaVersion": "msg-window-v1",
+            "capabilities": ["messages", "known-receipts"],
+            "requestId": "wcal-wire3",
+            "items": [],
+            "coveredLower": {"timeMs": "1791070187188", "id": "212834869724672"},
+            "coveredUpper": {"timeMs": "1791112189184", "id": "213011038881280"},
+            "complete": false,
+            "knownReceipts": [],
+            "knownComplete": true
+        }))
+        .expect("nonempty bounds envelope parses");
+        let validated = validate_window_dto(dto, &[]).expect("valid envelope");
+        assert_eq!(
+            validated.covered_lower.unwrap().time_ms,
+            Some(1791070187188)
+        );
+        assert_eq!(
+            validated.covered_upper.unwrap().time_ms,
+            Some(1791112189184)
+        );
+        assert!(!validated.complete);
     }
 }
