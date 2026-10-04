@@ -56,9 +56,11 @@ import {
   type RemoteStatus
 } from '@/utils/historyBackfill'
 import {
+  buildThinkingKnownIds,
   buildWindowRange,
   isWindowUnsupported,
   mergeWindowResult,
+  validateThinkingEnvelope,
   type WindowCalibOutcome as WindowOutcome,
   type WindowMergeMsg
 } from '@/utils/windowCalibrate'
@@ -974,7 +976,11 @@ export const useChatStore = defineStore(
         .value(roomId)
         .map((m) => ({ id: String(m.message.id), sendTime: m.message.sendTime ?? 0 }))
       const anchorId = visible.length ? visible[0].id : ''
-      const range = buildWindowRange(visible, pageSize, reqId)
+      // aichatoverview#351：附带已知思考 ID，逐条回执（十进制，上限 100）。
+      const knownThinkingIds = buildThinkingKnownIds(
+        [...(thinkingByTrigger.get(roomId)?.values() ?? [])].flatMap((list) => list.map((s) => s.thinkingId))
+      )
+      const range = buildWindowRange(visible, pageSize, reqId, knownThinkingIds)
 
       let data: {
         items?: unknown[]
@@ -984,6 +990,15 @@ export const useChatStore = defineStore(
         knownComplete?: boolean
         schemaVersion?: string
       }
+      // aichatoverview#351：Web 直调的思考 envelope 暂存，消息合并后独立消费。
+      let webEnvelope: {
+        thinkingAccess?: unknown
+        thinkingTriggers?: unknown
+        thinkingItems?: unknown
+        thinkingComplete?: unknown
+        thinkingKnownReceipts?: unknown
+        thinkingKnownComplete?: unknown
+      } | null = null
       try {
         if (isWeb()) {
           // Web 直调服务端 envelope：同口径严格校验，不推测旧服务端能力
@@ -999,6 +1014,12 @@ export const useChatStore = defineStore(
             complete?: boolean
             knownReceipts?: Array<{ id?: string; available?: boolean }>
             knownComplete?: boolean
+            thinkingAccess?: unknown
+            thinkingTriggers?: unknown
+            thinkingItems?: unknown
+            thinkingComplete?: unknown
+            thinkingKnownReceipts?: unknown
+            thinkingKnownComplete?: unknown
           }
           if (
             !envelope ||
@@ -1022,6 +1043,7 @@ export const useChatStore = defineStore(
             unavailableIds: envelope.knownReceipts.filter((r) => !r.available).map((r) => String(r.id)),
             complete: envelope.complete && envelope.knownComplete
           }
+          webEnvelope = envelope
         } else {
           data = (await invokeWithErrorHandler(
             TauriCommand.CALIBRATE_WINDOW,
@@ -1070,6 +1092,39 @@ export const useChatStore = defineStore(
       )
       // 在途触及导致部分跳过时不假称已校准
       const status = data.complete && !wsTouched ? 'ok' : 'partial'
+      // aichatoverview#351：思考 envelope 独立消费——缺失/非法保持缓存，
+      // 明确无权隐藏本房卡片与正文，均不影响消息结果。
+      if (isWeb() && webEnvelope) {
+        const thinking = validateThinkingEnvelope(webEnvelope, knownThinkingIds)
+        if (thinking?.access) {
+          mergeThinkingMetadata(roomId, thinking.items)
+          const loaded = metadataSet(roomId)
+          for (const t of thinking.triggers) loaded.add(t)
+          if (thinkingCacheErrors.value[roomId]) delete thinkingCacheErrors.value[roomId]
+        } else if (thinking && !thinking.access) {
+          clearThinking(roomId)
+        }
+      } else if (!isWeb()) {
+        // Tauri：Rust 已按提交门禁落库思考元数据；读回缓存并入卡片，失败不影响消息。
+        // 明确 thinkingAccess=false 时隐藏本房卡片与正文且不读回（Rust 已清本房缓存行，
+        // 重进房不复活）；缺字段/失败（undefined）保持既有缓存。
+        const tauriThinkingAccess = (data as { thinkingAccess?: unknown }).thinkingAccess
+        if (tauriThinkingAccess === false) {
+          clearThinking(roomId)
+        } else {
+          try {
+            const cached = Object.values(messageMap[roomId] ?? {}) as MessageType[]
+            await loadLocalThinkingForMessages(roomId, cached, binding)
+            const savedTriggers = (data as { thinkingTriggers?: unknown }).thinkingTriggers
+            if (Array.isArray(savedTriggers)) {
+              const loaded = metadataSet(roomId)
+              for (const t of savedTriggers) if (typeof t === 'string') loaded.add(t)
+            }
+          } catch {
+            // 保持缓存，消息结果不受影响。
+          }
+        }
+      }
       !isWeb() &&
         (await info(
           `[window-calibrate] roomId=${roomId} merged=${merged.merged} deleted=${merged.deleted} anchorKept=${merged.anchorKept} status=${status}`

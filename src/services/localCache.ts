@@ -5,6 +5,7 @@ import { imRequest } from '@/utils/ImRequestUtils'
 import { isWeb } from '@/utils/PlatformConstants'
 import { assertSessionCurrent, type SessionIdentity } from '@/services/sessionBinding'
 import { loadThinkingByTrigger, type ThinkingDetail } from '@/services/thinkingService'
+import { thinkingETagStale } from '@/utils/windowCalibrate'
 
 export type CachedThinking = {
   metadata: ThinkingMetadataItem
@@ -106,8 +107,12 @@ const readThinkingBody = async (
         idString(item.metadata.triggerMsgId) === thinking.triggerMsgId
     )
     metadata = cached?.metadata
-    if (cached?.bodyLoaded && typeof cached.content === 'string')
-      return { content: cached.content, status: cached.metadata.status }
+    // aichatoverview#351：相同正文命中缓存；ETag 差异使当前校验状态失效，
+    // 仍入视野按需重取，不直接采用旧正文。任一端缺 ETag 不判差异。
+    if (cached?.bodyLoaded && typeof cached.content === 'string') {
+      if (!thinkingETagStale(cached.bodyETag, metadata?.bodyETag))
+        return { content: cached.content, status: cached.metadata.status }
+    }
   }
   const detail = await imRequest<ThinkingDetail & { content?: string | null }>(
     {
@@ -144,11 +149,35 @@ const readThinkingBody = async (
       if (!items || !metadata) throw new Error('思考元数据尚未成功取得')
       await cacheThinkingMetadata(binding, thinking.roomId, [thinking.triggerMsgId], items)
     }
+    // aichatoverview#351：detail 的归属、hash、状态须与本轮已确认元数据匹配；
+    // ETag 不一致有界重查一次，仍不一致保留已读内容、不假已验证。
+    if (metadata?.bodyETag && detail.bodyETag && metadata.bodyETag !== detail.bodyETag) {
+      const items = await loadThinkingByTrigger({
+        binding,
+        roomId: thinking.roomId,
+        triggerMsgIds: [thinking.triggerMsgId]
+      })
+      const fresh = items?.find(
+        (item) =>
+          idString(item.id) === thinking.thinkingId &&
+          idString(item.aiclawUid) === String(thinking.aiclawId) &&
+          idString(item.triggerMsgId) === thinking.triggerMsgId
+      )
+      if (fresh?.bodyETag) {
+        metadata = fresh
+        if (items) await cacheThinkingMetadata(binding, thinking.roomId, [thinking.triggerMsgId], items)
+      }
+      if (metadata?.bodyETag && detail.bodyETag && metadata.bodyETag !== detail.bodyETag)
+        throw new Error('思考正文校验已失效，可重试')
+    }
+    const bodyETag = detail.bodyETag ?? metadata?.bodyETag ?? null
+    if (!metadata) throw new Error('思考元数据尚未成功取得')
+    const confirmed: ThinkingMetadataItem = metadata
     await cacheThinkingMetadata(
       binding,
       thinking.roomId,
       [thinking.triggerMsgId],
-      [{ ...metadata, status: detail.status, durationMs: detail.durationMs ?? undefined }]
+      [{ ...confirmed, status: detail.status, durationMs: detail.durationMs ?? undefined, bodyETag }]
     )
     await invokeWithErrorHandler(
       TauriCommand.CACHE_THINKING_BODY,
@@ -158,7 +187,8 @@ const readThinkingBody = async (
         triggerMsgId: thinking.triggerMsgId,
         aiclawUid: String(thinking.aiclawId),
         thinkingId: thinking.thinkingId,
-        content
+        content,
+        bodyEtag: bodyETag
       },
       { showError: false }
     )

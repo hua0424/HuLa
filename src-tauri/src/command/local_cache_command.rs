@@ -47,6 +47,7 @@ pub async fn cache_thinking_body(
     aiclaw_uid: String,
     thinking_id: String,
     content: String,
+    body_etag: Option<String>,
     window: tauri::Window,
     state: State<'_, AppData>,
 ) -> Result<(), String> {
@@ -61,6 +62,7 @@ pub async fn cache_thinking_body(
         &aiclaw_uid,
         &thinking_id,
         &content,
+        body_etag.as_deref(),
     )
     .await
 }

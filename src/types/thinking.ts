@@ -65,6 +65,11 @@ export interface ThinkingMetadataItem {
   hasResponse?: number
   /** 创建时间（服务端毫秒时间戳或 LocalDateTime 字符串） */
   createTime: string | number
+  /**
+   * 正文 bodyETag（服务端 SHA-256，UTF-8 字节）；null/缺失表示无从校验，
+   * 不作无思考证据（aichatoverview#351）。
+   */
+  bodyETag?: string | null
 }
 
 /** 将服务端 thinking 状态码映射为前端 ThinkingStatus */
