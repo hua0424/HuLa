@@ -12,6 +12,10 @@ pub struct ThinkingMetadata {
     pub duration_ms: Option<i64>,
     pub has_response: Option<i32>,
     pub create_time: String,
+    /// aichatoverview#351：服务端正文 ETag；None 表示无从校验，不作无思考证据。
+    /// 注意：显式 rename 保持线上 bodyETag（camelCase 会误成 bodyEtag）。
+    #[serde(default, rename = "bodyETag")]
+    pub body_etag: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -21,7 +25,8 @@ pub struct CachedThinking {
     pub room_id: String,
     pub content: Option<String>,
     pub body_loaded: bool,
-    // Reserved for #351; reading cached content alone is not ETag validation.
+    // aichatoverview#351：已读正文 ETag 与验证时间；只读缓存不算已验证。
+    #[serde(default, rename = "bodyETag")]
     pub body_etag: Option<String>,
     pub body_verified_at: Option<i64>,
 }
@@ -155,6 +160,14 @@ pub async fn save_thinking_metadata(
             "INSERT INTO im_thinking_cache (thinking_id,room_id,trigger_msg_id,aiclaw_uid,raw_status,metadata) VALUES (?,?,?,?,?,?) ON CONFLICT(thinking_id) DO UPDATE SET raw_status=excluded.raw_status,metadata=excluded.metadata",
             [metadata.id.into(), room_id.into(), metadata.trigger_msg_id.into(), metadata.aiclaw_uid.into(), metadata.status.into(), payload.into()]))
             .await.map_err(|e| e.to_string())?;
+        // aichatoverview#351：ETag 差异使当前校验状态失效——保留已读内容，
+        // 只清 body_verified_at（入视野再按需重取）；任一端缺 ETag 不判差异。
+        if let Some(new_etag) = item.body_etag.as_deref() {
+            tx.execute(Statement::from_sql_and_values(DbBackend::Sqlite,
+                "UPDATE im_thinking_cache SET body_verified_at=NULL WHERE thinking_id=? AND body_loaded=1 AND body_etag IS NOT NULL AND body_etag<>?",
+                [item.id.clone().into(), new_etag.into()]))
+                .await.map_err(|e| e.to_string())?;
+        }
     }
     for id in &visible {
         tx.execute(Statement::from_sql_and_values(
@@ -177,6 +190,7 @@ pub async fn save_thinking_body(
     aiclaw_uid: &str,
     thinking_id: &str,
     content: &str,
+    body_etag: Option<&str>,
 ) -> Result<(), String> {
     validate_window(room_id, &[trigger_msg_id.to_owned()])?;
     if !valid_id(thinking_id) || !valid_id(aiclaw_uid) {
@@ -188,9 +202,15 @@ pub async fn save_thinking_body(
     {
         return Err("触发消息已删除或清空，不能恢复思考正文".into());
     }
+    // aichatoverview#351：经归属匹配的权威 detail 写入才算本轮已验证，记 ETag 与验证时间；
+    // 成功空正文（""）有效，body_loaded=1。
+    let verified_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .map_err(|e| e.to_string())?;
     let result = db.execute(Statement::from_sql_and_values(DbBackend::Sqlite,
-        "UPDATE im_thinking_cache SET content=?,body_loaded=1 WHERE thinking_id=? AND room_id=? AND trigger_msg_id=? AND aiclaw_uid=?",
-        [content.into(), thinking_id.into(), room_id.into(), trigger_msg_id.into(), aiclaw_uid.into()]))
+        "UPDATE im_thinking_cache SET content=?,body_loaded=1,body_etag=?,body_verified_at=? WHERE thinking_id=? AND room_id=? AND trigger_msg_id=? AND aiclaw_uid=?",
+        [content.into(), body_etag.into(), verified_at.into(), thinking_id.into(), room_id.into(), trigger_msg_id.into(), aiclaw_uid.into()]))
         .await.map_err(|e| e.to_string())?;
     if result.rows_affected() != 1 {
         return Err("思考正文必须匹配已取得的元数据归属".into());
@@ -261,6 +281,7 @@ mod tests {
             duration_ms: Some(5),
             has_response: Some(1),
             create_time: "2026-10-02T01:00:00".into(),
+            body_etag: None,
         }
     }
 
@@ -282,9 +303,18 @@ mod tests {
         save_thinking_metadata(&db, "4", "3", &["10".into()], &[item("100", "20", 1)])
             .await
             .unwrap();
-        save_thinking_body(&db, "4", "3", "10", "20", "100", "retained fixture body")
-            .await
-            .unwrap();
+        save_thinking_body(
+            &db,
+            "4",
+            "3",
+            "10",
+            "20",
+            "100",
+            "retained fixture body",
+            Some("etag-fixture"),
+        )
+        .await
+        .unwrap();
         save_snapshot(&db, "sessions", &serde_json::json!([{ "roomId": "3" }]))
             .await
             .unwrap();
@@ -333,11 +363,11 @@ mod tests {
         assert_eq!(initial.loaded_trigger_ids.len(), 2); // '11' is successful empty metadata.
         assert!(!initial.items[0].body_loaded);
         assert!(
-            save_thinking_body(&db, "4", "3", "10", "99", "100", "wrong")
+            save_thinking_body(&db, "4", "3", "10", "99", "100", "wrong", None)
                 .await
                 .is_err()
         );
-        save_thinking_body(&db, "4", "3", "10", "20", "100", "")
+        save_thinking_body(&db, "4", "3", "10", "20", "100", "", None)
             .await
             .unwrap();
         save_thinking_metadata(&db, "4", "3", &["10".into()], &[item("100", "20", 0)])
@@ -352,7 +382,8 @@ mod tests {
         assert!(body.body_loaded);
         assert_eq!(body.content.as_deref(), Some(""));
         assert_eq!(body.metadata.status, 4);
-        assert!(body.body_etag.is_none() && body.body_verified_at.is_none());
+        // 经归属匹配的权威写入即本轮已验证（记验证时间）；本次写入未带 ETag，故无 ETag。
+        assert!(body.body_etag.is_none() && body.body_verified_at.is_some());
         assert!(
             read_thinking_window(&db, "5", "3", &ids)
                 .await
@@ -387,7 +418,7 @@ mod tests {
                 .is_empty()
         );
         assert!(
-            save_thinking_body(&db, "4", "3", "10", "20", "100", "late")
+            save_thinking_body(&db, "4", "3", "10", "20", "100", "late", None)
                 .await
                 .is_err()
         );
@@ -547,9 +578,18 @@ mod tests {
         save_thinking_metadata(&db, "4", "3", &ids, &[item("100", "20", 1)])
             .await
             .unwrap();
-        save_thinking_body(&db, "4", "3", "10", "20", "100", "cached")
-            .await
-            .unwrap();
+        save_thinking_body(
+            &db,
+            "4",
+            "3",
+            "10",
+            "20",
+            "100",
+            "cached",
+            Some("etag-cached"),
+        )
+        .await
+        .unwrap();
         assert!(
             save_thinking_metadata(&db, "4", "3", &ids, &[item("100", "99", 1)])
                 .await
@@ -565,5 +605,50 @@ mod tests {
             read_snapshot(&db, "sessions").await.unwrap().unwrap(),
             serde_json::json!([{ "roomId": "3" }])
         );
+    }
+
+    #[tokio::test]
+    async fn etag_mismatch_invalidates_verification_but_keeps_read_body() {
+        let db = setup().await;
+        let ids = vec!["10".into()];
+        let mut meta = item("100", "20", 1);
+        meta.body_etag = Some("etag-a".into());
+        save_thinking_metadata(&db, "4", "3", &ids, &[meta])
+            .await
+            .unwrap();
+        save_thinking_body(
+            &db,
+            "4",
+            "3",
+            "10",
+            "20",
+            "100",
+            "cached body",
+            Some("etag-a"),
+        )
+        .await
+        .unwrap();
+        let loaded = read_thinking_window(&db, "4", "3", &ids).await.unwrap();
+        assert!(loaded.items[0].body_loaded);
+        assert!(loaded.items[0].body_verified_at.is_some());
+        assert_eq!(loaded.items[0].body_etag.as_deref(), Some("etag-a"));
+        // 同一正文 ETag 不变：仍已验证。
+        let mut same = item("100", "20", 1);
+        same.body_etag = Some("etag-a".into());
+        save_thinking_metadata(&db, "4", "3", &ids, &[same])
+            .await
+            .unwrap();
+        let reloaded = read_thinking_window(&db, "4", "3", &ids).await.unwrap();
+        assert!(reloaded.items[0].body_verified_at.is_some());
+        // ETag 差异：当前校验状态失效，已读内容保留、不假已验证。
+        let mut changed = item("100", "20", 1);
+        changed.body_etag = Some("etag-b".into());
+        save_thinking_metadata(&db, "4", "3", &ids, &[changed])
+            .await
+            .unwrap();
+        let stale = read_thinking_window(&db, "4", "3", &ids).await.unwrap();
+        assert!(stale.items[0].body_verified_at.is_none());
+        assert!(stale.items[0].body_loaded);
+        assert_eq!(stale.items[0].content.as_deref(), Some("cached body"));
     }
 }

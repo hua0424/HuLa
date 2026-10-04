@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildWindowRange, isDecimalId, isWindowUnsupported, mergeWindowResult } from '@/utils/windowCalibrate'
+import {
+  buildThinkingKnownIds,
+  buildWindowRange,
+  isDecimalId,
+  isWindowUnsupported,
+  mergeWindowResult,
+  thinkingETagStale,
+  validateThinkingEnvelope
+} from '@/utils/windowCalibrate'
 
 describe('windowCalibrate', () => {
   it('isDecimalId 排除乐观 temp 行与空值', () => {
@@ -116,5 +124,100 @@ describe('windowCalibrate', () => {
     expect(isWindowUnsupported('404 Not Found')).toBe(true)
     expect(isWindowUnsupported('network_error: timeout')).toBe(false)
     expect(isWindowUnsupported('请重新登录')).toBe(false)
+  })
+
+  it('buildWindowRange 附带已知思考 ID（十进制截断 100）', () => {
+    const visible = [{ id: '7001', sendTime: 1000 }]
+    const range = buildWindowRange(visible, 20, 'req-t', ['501', 'T9', '999'])
+    expect(range.knownThinkingIds).toEqual(['501', '999'])
+    const many = Array.from({ length: 150 }, (_, i) => `${5000 + i}`)
+    expect(buildWindowRange([], 20, 'req-t2', many).knownThinkingIds).toHaveLength(100)
+  })
+
+  it('buildThinkingKnownIds 过滤非十进制并截断', () => {
+    expect(buildThinkingKnownIds(['501', 502, 'T1', ''])).toEqual(['501', '502'])
+  })
+
+  it('thinkingETagStale 仅两端齐全且不等才判过期', () => {
+    expect(thinkingETagStale('a', 'a')).toBe(false)
+    expect(thinkingETagStale('a', 'b')).toBe(true)
+    expect(thinkingETagStale(null, 'b')).toBe(false)
+    expect(thinkingETagStale('a', null)).toBe(false)
+    expect(thinkingETagStale(undefined, undefined)).toBe(false)
+  })
+
+  const thinkingEnvelope = () => ({
+    thinkingAccess: true,
+    thinkingTriggers: ['7001'],
+    thinkingItems: [
+      {
+        id: '501',
+        aiclawUid: '100',
+        triggerMsgId: '7001',
+        status: 1,
+        durationMs: 120,
+        hasResponse: 1,
+        createTime: '2026-10-04T12:00:00',
+        bodyETag: 'etag-501'
+      },
+      {
+        id: 502,
+        aiclawUid: 200,
+        triggerMsgId: '7001',
+        status: 4,
+        durationMs: 130,
+        hasResponse: 0,
+        createTime: 1791112189184,
+        bodyETag: 'etag-502'
+      }
+    ],
+    thinkingComplete: true,
+    thinkingKnownReceipts: [
+      {
+        id: '501',
+        available: true,
+        metadata: {
+          id: '501',
+          aiclawUid: '100',
+          triggerMsgId: '7001',
+          status: 1,
+          createTime: '2026-10-04T12:00:00',
+          bodyETag: 'etag-501'
+        }
+      },
+      { id: '999', available: false, metadata: null }
+    ],
+    thinkingKnownComplete: true
+  })
+
+  it('validateThinkingEnvelope 同触发多助理归属与顺序、回执对齐', () => {
+    const thinking = validateThinkingEnvelope(thinkingEnvelope(), ['501', '999'])
+    expect(thinking?.access).toBe(true)
+    expect(thinking?.triggers).toEqual(['7001'])
+    expect(thinking?.items).toHaveLength(2)
+    expect(thinking?.items[0].aiclawUid).toBe('100')
+    expect(thinking?.items[1].aiclawUid).toBe('200')
+    expect(thinking?.items[1].bodyETag).toBe('etag-502')
+  })
+
+  it('validateThinkingEnvelope 缺字段/回执不对齐/越界一律 null（保持缓存）', () => {
+    expect(validateThinkingEnvelope(null, [])).toBeNull()
+    expect(validateThinkingEnvelope({}, [])).toBeNull()
+    expect(validateThinkingEnvelope(thinkingEnvelope(), ['501'])).toBeNull()
+    const badOrder = thinkingEnvelope()
+    badOrder.thinkingKnownReceipts = [...badOrder.thinkingKnownReceipts].reverse()
+    expect(validateThinkingEnvelope(badOrder, ['501', '999'])).toBeNull()
+    const outOfSet = thinkingEnvelope()
+    ;(outOfSet.thinkingItems[0] as Record<string, unknown>).triggerMsgId = '7002'
+    expect(validateThinkingEnvelope(outOfSet, ['501', '999'])).toBeNull()
+    const badStatus = thinkingEnvelope()
+    ;(badStatus.thinkingItems[0] as Record<string, unknown>).status = 9
+    expect(validateThinkingEnvelope(badStatus, ['501', '999'])).toBeNull()
+  })
+
+  it('validateThinkingEnvelope 明确无权返回 access=false（调用方隐藏，不清缓存）', () => {
+    const thinking = validateThinkingEnvelope({ thinkingAccess: false }, [])
+    expect(thinking?.access).toBe(false)
+    expect(thinking?.items).toEqual([])
   })
 })

@@ -13,6 +13,12 @@ export type ThinkingDetail = {
   clientRunId?: string | null
   status: number
   durationMs?: number | null
+  hasResponse?: number | null
+  createTime?: string | number | null
+  /** 完整思考文本（detail 按需拉取） */
+  content?: string | null
+  /** 正文 bodyETag：与元数据同一正文字节算出，只判相等（aichatoverview#351） */
+  bodyETag?: string | null
 }
 
 export const loadThinkingDetail = async (

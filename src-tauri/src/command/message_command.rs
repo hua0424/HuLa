@@ -471,6 +471,9 @@ pub struct CalibrateWindowParam {
     known_msg_ids: Vec<String>,
     #[serde(default)]
     page_size: Option<u32>,
+    /// aichatoverview#351：已知思考 id（十进制字符串，上限 100），逐条回执。
+    #[serde(default)]
+    known_thinking_ids: Vec<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -489,6 +492,8 @@ struct WindowRequestBody {
     to_id: Option<String>,
     known_msg_ids: Vec<String>,
     page_size: u32,
+    /// aichatoverview#351：已知思考 id（十进制字符串）。
+    known_thinking_ids: Vec<String>,
 }
 
 /// aichatoverview#350 wire-compat：服务端 Long 全局转字符串，WindowBound.timeMs
@@ -517,6 +522,121 @@ where
         }
         _ => Err(serde::de::Error::custom("timeMs 类型非法")),
     }
+}
+
+/// aichatoverview#351：服务端 Long 全局转字符串，思考 id 类字段同样 tolerant
+///（数字/数字字符串/空缺），非法类型按缺失处理（思考判 unsupported，不连累消息）。
+fn de_opt_string_str_or_num<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Number(n) => Ok(Some(n.to_string())),
+        serde_json::Value::String(s) => {
+            if s.trim().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(s))
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+/// aichatoverview#351：createTime 字符串/数字/缺失 tolerant（其他形态记空串，不伪造时间）。
+fn de_string_str_or_num_default<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Null => Ok(String::new()),
+        serde_json::Value::Number(n) => Ok(n.to_string()),
+        serde_json::Value::String(s) => Ok(s),
+        _ => Ok(String::new()),
+    }
+}
+
+/// aichatoverview#351：status/hasResponse 数字/数字字符串 tolerant（越界或非法按缺失处理）。
+fn de_opt_i32_str_or_num<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Number(n) => Ok(n.as_i64().and_then(|x| i32::try_from(x).ok())),
+        serde_json::Value::String(s) => {
+            let t = s.trim();
+            if t.is_empty() {
+                return Ok(None);
+            }
+            Ok(t.parse::<i32>().ok())
+        }
+        _ => Ok(None),
+    }
+}
+
+/// aichatoverview#351：durationMs 数字/数字字符串 tolerant（非法按缺失处理）。
+/// 与 #350 timeMs 共用形态但失败策略不同：思考字段永不连累消息，故单独列出。
+fn de_opt_i64_thinking<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Number(n) => Ok(n.as_i64()),
+        serde_json::Value::String(s) => {
+            let t = s.trim();
+            if t.is_empty() {
+                return Ok(None);
+            }
+            Ok(t.parse::<i64>().ok())
+        }
+        _ => Ok(None),
+    }
+}
+
+/// aichatoverview#351：窗口思考元数据（服务端 AiclawThinkingListItemResp + bodyETag）。
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ThinkingItemDto {
+    #[serde(default, deserialize_with = "de_opt_string_str_or_num")]
+    id: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_string_str_or_num")]
+    aiclaw_uid: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_string_str_or_num")]
+    trigger_msg_id: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_i32_str_or_num")]
+    status: Option<i32>,
+    #[serde(default, deserialize_with = "de_opt_i64_thinking")]
+    duration_ms: Option<i64>,
+    #[serde(default, deserialize_with = "de_opt_i32_str_or_num")]
+    has_response: Option<i32>,
+    #[serde(default, deserialize_with = "de_string_str_or_num_default")]
+    create_time: String,
+    /// 注意：camelCase 会把 body_etag 变成 bodyEtag，但线上字段是 bodyETag
+    ///（服务端 Java 字段原样），必须显式 rename。
+    #[serde(default, rename = "bodyETag")]
+    body_etag: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ThinkingReceiptDto {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    available: Option<bool>,
+    #[serde(default)]
+    metadata: Option<ThinkingItemDto>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -563,6 +683,19 @@ struct WindowCalibrateDto {
     known_receipts: Option<Vec<KnownReceiptDto>>,
     #[serde(default)]
     known_complete: Option<bool>,
+    /// aichatoverview#351：可选思考 envelope（缺字段即 thinking_unsupported，不影响消息）。
+    #[serde(default)]
+    thinking_access: Option<bool>,
+    #[serde(default)]
+    thinking_triggers: Option<Vec<String>>,
+    #[serde(default)]
+    thinking_items: Option<Vec<ThinkingItemDto>>,
+    #[serde(default)]
+    thinking_complete: Option<bool>,
+    #[serde(default)]
+    thinking_known_receipts: Option<Vec<ThinkingReceiptDto>>,
+    #[serde(default)]
+    thinking_known_complete: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -581,6 +714,12 @@ pub struct CalibrateWindowResult {
     pub unavailable_ids: Vec<String>,
     pub covered_lower: Option<WindowBoundDto>,
     pub covered_upper: Option<WindowBoundDto>,
+    /// aichatoverview#351：思考校准摘要（None 表示本轮未校准思考，缓存保持）。
+    pub thinking_access: Option<bool>,
+    pub thinking_complete: Option<bool>,
+    pub thinking_merged: usize,
+    /// aichatoverview#351：本轮实际入库的固定触发集合（落库成功时非空）。
+    pub thinking_triggers: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -663,6 +802,116 @@ fn validate_window_dto(
     })
 }
 
+/// aichatoverview#351：思考 envelope 独立校验结果（与消息范围完整性独立）。
+#[derive(Debug)]
+struct ValidatedThinking {
+    /// 服务端回显的固定触发集合（实际查询口径）。
+    triggers: Vec<String>,
+    /// 归一化后的思考元数据（id 升序，同触发允许多助理）。
+    items: Vec<crate::repository::local_cache_repository::ThinkingMetadata>,
+    complete: bool,
+    known_complete: bool,
+    access: bool,
+}
+
+/// aichatoverview#351：思考 envelope 独立校验（纯函数，可单测）。
+///
+/// 缺字段/回执不对齐/元数据归属非法一律判 thinking_unsupported（保持既有缓存、
+/// 未校准、可重试），绝不移除既有元数据、不影响消息校准结果、不当失权。
+fn validate_thinking_dto(
+    dto: &WindowCalibrateDto,
+    requested_known: &[String],
+) -> Result<ValidatedThinking, String> {
+    let unsupported = |why: String| format!("thinking_unsupported: {}", why);
+    let access = dto
+        .thinking_access
+        .ok_or_else(|| unsupported("缺 thinkingAccess".to_string()))?;
+    let triggers = dto
+        .thinking_triggers
+        .clone()
+        .ok_or_else(|| unsupported("缺 thinkingTriggers".to_string()))?;
+    if triggers.len() > 100 || triggers.iter().any(|t| !is_decimal_id(t)) {
+        return Err(unsupported("thinkingTriggers 非十进制或超 100".to_string()));
+    }
+    let raw_items = dto
+        .thinking_items
+        .clone()
+        .ok_or_else(|| unsupported("缺 thinkingItems".to_string()))?;
+    let complete = dto
+        .thinking_complete
+        .ok_or_else(|| unsupported("缺 thinkingComplete".to_string()))?;
+    let receipts_raw = dto
+        .thinking_known_receipts
+        .clone()
+        .ok_or_else(|| unsupported("缺 thinkingKnownReceipts".to_string()))?;
+    let known_complete = dto
+        .thinking_known_complete
+        .ok_or_else(|| unsupported("缺 thinkingKnownComplete".to_string()))?;
+    if receipts_raw.len() != requested_known.len() {
+        return Err(unsupported(format!(
+            "thinkingKnownReceipts 数量 {} 与请求 {} 不一致",
+            receipts_raw.len(),
+            requested_known.len()
+        )));
+    }
+    for (i, r) in receipts_raw.iter().enumerate() {
+        let id =
+            r.id.clone()
+                .ok_or_else(|| unsupported("思考回执缺 id".to_string()))?;
+        if id != requested_known[i] {
+            return Err(unsupported("思考回执顺序与请求不一致".to_string()));
+        }
+        let available = r
+            .available
+            .ok_or_else(|| unsupported("思考回执缺 available".to_string()))?;
+        match (available, r.metadata.clone()) {
+            (true, Some(_)) | (false, None) => {}
+            (true, None) => return Err(unsupported("available 思考回执缺 metadata".to_string())),
+            (false, Some(_)) => {
+                return Err(unsupported(
+                    "unavailable 思考回执不应带 metadata".to_string(),
+                ));
+            }
+        }
+    }
+    // 元数据归属三元组 + 原始状态缺一不可；多助理同触发保持 id 升序。
+    let mut items = Vec::with_capacity(raw_items.len());
+    for m in &raw_items {
+        let id = m.id.clone().filter(|s| is_decimal_id(s));
+        let actor = m.aiclaw_uid.clone().filter(|s| is_decimal_id(s));
+        let trigger = m.trigger_msg_id.clone().filter(|s| is_decimal_id(s));
+        let status = m.status.filter(|s| (0..=4).contains(s));
+        match (id, actor, trigger, status) {
+            (Some(id), Some(actor), Some(trigger), Some(status)) => {
+                if !triggers.contains(&trigger) {
+                    return Err(unsupported(format!("思考元数据越界：trigger {}", trigger)));
+                }
+                items.push(
+                    crate::repository::local_cache_repository::ThinkingMetadata {
+                        id,
+                        aiclaw_uid: actor,
+                        trigger_msg_id: trigger,
+                        status,
+                        duration_ms: m.duration_ms,
+                        has_response: m.has_response,
+                        create_time: m.create_time.clone(),
+                        body_etag: m.body_etag.clone(),
+                    },
+                );
+            }
+            _ => return Err(unsupported("思考元数据归属或状态无效".to_string())),
+        }
+    }
+    items.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(ValidatedThinking {
+        triggers,
+        items,
+        complete,
+        known_complete,
+        access,
+    })
+}
+
 /// aichatoverview#350：传输层错误分级（纯函数，可单测）。
 ///
 /// 404 类文本（旧服务端无此路由）判 unsupported；鉴权失败原文透出（调用方转登录，
@@ -727,6 +976,13 @@ pub async fn calibrate_window(
         .filter(|id| is_decimal_id(id))
         .take(100)
         .collect();
+    // aichatoverview#351：已知思考 id 同口径过滤，逐条回执。
+    let known_thinking_ids: Vec<String> = param
+        .known_thinking_ids
+        .into_iter()
+        .filter(|id| is_decimal_id(id))
+        .take(100)
+        .collect();
     let mode = match param.mode.as_deref().map(str::trim) {
         None | Some("") | Some("tail") => "tail".to_string(),
         Some("range") => "range".to_string(),
@@ -756,6 +1012,7 @@ pub async fn calibrate_window(
         to_id: clean_id(param.to_id),
         known_msg_ids: known_msg_ids.clone(),
         page_size,
+        known_thinking_ids: known_thinking_ids.clone(),
     };
     let dto_result: Result<Option<WindowCalibrateDto>, String> = request_bound(
         &state.rc,
@@ -788,6 +1045,20 @@ pub async fn calibrate_window(
             return Err("window_error: 窗口校准返回空响应".to_string());
         }
         Ok(Some(dto)) => dto,
+    };
+    // aichatoverview#351：思考独立校验——失败只记 outcome，不影响消息、不清缓存。
+    let thinking = match validate_thinking_dto(&dto, &known_thinking_ids) {
+        Ok(t) => Some(t),
+        Err(e) => {
+            warn!(
+                target: "tauri_db",
+                "[window-calibrate] roomId={} requestId={} outcome=thinking-skipped detail={}",
+                room_id,
+                request_id,
+                e
+            );
+            None
+        }
     };
     let window = match validate_window_dto(dto, &known_msg_ids) {
         Err(e) => {
@@ -1024,6 +1295,51 @@ pub async fn calibrate_window(
     }
     drop(response_gate);
 
+    // aichatoverview#351：思考元数据经提交门禁落库——归属冲突等失败只记 outcome，
+    // 消息结果不受影响；thinkingAccess=false 时不同步（隐藏卡片与正文）。
+    let (thinking_access, thinking_complete, thinking_merged, thinking_triggers) = match thinking {
+        Some(t) if t.access => {
+            let item_count = t.items.len();
+            let complete = t.complete && t.known_complete;
+            let triggers = t.triggers.clone();
+            let save_gate = state.session.commit(&binding).await;
+            match save_gate {
+                Err(e) => {
+                    warn!(
+                        target: "tauri_db",
+                        "[window-calibrate] roomId={} requestId={} outcome=thinking-save-failed detail={}",
+                        room_id, request_id, e
+                    );
+                    (Some(true), Some(false), 0, Vec::new())
+                }
+                Ok(gate) => {
+                    let saved = crate::repository::local_cache_repository::save_thinking_metadata(
+                        &binding.db,
+                        &login_uid,
+                        &room_id,
+                        &t.triggers,
+                        &t.items,
+                    )
+                    .await;
+                    drop(gate);
+                    match saved {
+                        Ok(_) => (Some(true), Some(complete), item_count, triggers),
+                        Err(e) => {
+                            warn!(
+                                target: "tauri_db",
+                                "[window-calibrate] roomId={} requestId={} outcome=thinking-save-failed detail={}",
+                                room_id, request_id, e
+                            );
+                            (Some(true), Some(false), 0, Vec::new())
+                        }
+                    }
+                }
+            }
+        }
+        Some(t) => (Some(t.access), Some(false), 0, Vec::new()),
+        None => (None, None, 0, Vec::new()),
+    };
+
     info!(
         target: "tauri_db",
         "[window-calibrate] roomId={} requestId={} complete={} knownComplete={} inserted={} existing={} tombstone={} recalled={} hidden={} unhidden={} unconfirmed={}",
@@ -1054,6 +1370,10 @@ pub async fn calibrate_window(
         unavailable_ids: unavailable_effective,
         covered_lower: window.covered_lower,
         covered_upper: window.covered_upper,
+        thinking_access,
+        thinking_complete,
+        thinking_merged,
+        thinking_triggers,
     })
 }
 
@@ -2212,5 +2532,111 @@ mod tests {
             Some(1791112189184)
         );
         assert!(!validated.complete);
+    }
+
+    fn window_with_thinking() -> serde_json::Value {
+        let mut v = window_dto_fixture();
+        v["thinkingAccess"] = serde_json::json!(true);
+        v["thinkingTriggers"] = serde_json::json!(["7001"]);
+        // 数字 id 形态同样接受（服务端 Long→String 全局模块之外的容忍口径）。
+        v["thinkingItems"] = serde_json::json!([
+            {"id": "501", "aiclawUid": "100", "triggerMsgId": "7001", "status": 1,
+             "durationMs": 120, "hasResponse": 1,
+             "createTime": "2026-10-04T12:00:00", "bodyETag": "etag-501"},
+            {"id": 502, "aiclawUid": 200, "triggerMsgId": "7001", "status": 4,
+             "durationMs": 130, "hasResponse": 0,
+             "createTime": 1791112189184i64, "bodyETag": "etag-502"}
+        ]);
+        v["thinkingComplete"] = serde_json::json!(true);
+        v["thinkingKnownReceipts"] = serde_json::json!([
+            {"id": "501", "available": true, "metadata":
+                {"id": "501", "aiclawUid": "100", "triggerMsgId": "7001", "status": 1,
+                 "durationMs": 120, "hasResponse": 1,
+                 "createTime": "2026-10-04T12:00:00", "bodyETag": "etag-501"}},
+            {"id": "999", "available": false, "metadata": null}
+        ]);
+        v["thinkingKnownComplete"] = serde_json::json!(true);
+        v
+    }
+
+    #[test]
+    fn thinking_envelope_validates_multi_assistant_and_receipts() {
+        // aichatoverview#351：同触发多助理归属与顺序、逐已知思考 ID 回执、ETag 保留。
+        let dto: WindowCalibrateDto =
+            serde_json::from_value(window_with_thinking()).expect("thinking envelope parses");
+        let known = vec!["501".to_string(), "999".to_string()];
+        let thinking = validate_thinking_dto(&dto, &known).expect("valid thinking");
+        assert!(thinking.access && thinking.complete && thinking.known_complete);
+        assert_eq!(thinking.triggers, vec!["7001".to_string()]);
+        assert_eq!(thinking.items.len(), 2);
+        assert_eq!(thinking.items[0].aiclaw_uid, "100");
+        assert_eq!(thinking.items[1].aiclaw_uid, "200");
+        assert_eq!(thinking.items[1].body_etag.as_deref(), Some("etag-502"));
+        assert_eq!(thinking.items[1].status, 4);
+        // 消息校验不受思考字段影响。
+        let msg = validate_window_dto(dto, &["100".to_string(), "999".to_string()])
+            .expect("messages unaffected");
+        assert!(msg.complete);
+    }
+
+    #[test]
+    fn thinking_missing_fields_is_unsupported_messages_unaffected() {
+        // 缺思考字段（旧服务端）：思考判 thinking_unsupported，消息仍可校准。
+        let dto: WindowCalibrateDto =
+            serde_json::from_value(window_dto_fixture()).expect("fixture parses");
+        let err = validate_thinking_dto(&dto, &[]).expect_err("thinking must be unsupported");
+        assert!(err.starts_with("thinking_unsupported:"), "got: {}", err);
+        validate_window_dto(dto, &["100".to_string(), "999".to_string()])
+            .expect("messages still validate");
+    }
+
+    #[test]
+    fn thinking_receipt_mismatch_is_unsupported() {
+        let dto: WindowCalibrateDto =
+            serde_json::from_value(window_with_thinking()).expect("thinking envelope parses");
+        // 回执缺一条
+        let err = validate_thinking_dto(&dto, &["501".to_string()]).expect_err("count");
+        assert!(err.starts_with("thinking_unsupported:"), "got: {}", err);
+        // available 回执缺 metadata
+        let mut v = window_with_thinking();
+        v["thinkingKnownReceipts"][0]["metadata"] = serde_json::Value::Null;
+        let dto2: WindowCalibrateDto = serde_json::from_value(v).unwrap();
+        let err2 = validate_thinking_dto(&dto2, &["501".to_string(), "999".to_string()])
+            .expect_err("content");
+        assert!(err2.starts_with("thinking_unsupported:"), "got: {}", err2);
+        // unavailable 回执不应带 metadata
+        let mut v3 = window_with_thinking();
+        v3["thinkingKnownReceipts"][1]["metadata"] = v3["thinkingItems"][0].clone();
+        let dto3: WindowCalibrateDto = serde_json::from_value(v3).unwrap();
+        let err3 = validate_thinking_dto(&dto3, &["501".to_string(), "999".to_string()])
+            .expect_err("unavailable");
+        assert!(err3.starts_with("thinking_unsupported:"), "got: {}", err3);
+    }
+
+    #[test]
+    fn thinking_metadata_outside_trigger_set_is_unsupported() {
+        // 元数据 trigger 不在固定集合内：越界，不入库。
+        let mut v = window_with_thinking();
+        v["thinkingItems"][0]["triggerMsgId"] = serde_json::json!("7002");
+        let dto: WindowCalibrateDto = serde_json::from_value(v).unwrap();
+        let err = validate_thinking_dto(&dto, &["501".to_string(), "999".to_string()])
+            .expect_err("out-of-set");
+        assert!(err.starts_with("thinking_unsupported:"), "got: {}", err);
+    }
+
+    #[test]
+    fn thinking_garbage_fields_are_unsupported_never_window_error() {
+        // 思考字段形态再离谱也只影响思考（unsupported）：DTO 必须能解析，消息不受影响。
+        let mut v = window_with_thinking();
+        v["thinkingItems"][0]["status"] = serde_json::json!("active");
+        v["thinkingItems"][1]["id"] = serde_json::json!(true);
+        v["thinkingItems"][1]["createTime"] = serde_json::json!([2026, 10, 4]);
+        let dto: WindowCalibrateDto =
+            serde_json::from_value(v).expect("garbage thinking still parses");
+        let err = validate_thinking_dto(&dto, &["501".to_string(), "999".to_string()])
+            .expect_err("unsupported");
+        assert!(err.starts_with("thinking_unsupported:"), "got: {}", err);
+        validate_window_dto(dto, &["100".to_string(), "999".to_string()])
+            .expect("messages unaffected");
     }
 }
