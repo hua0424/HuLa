@@ -101,13 +101,6 @@ const { overlayVisible, markAsyncLoaded } = useOverlayController({
 })
 
 let initPromise: Promise<void> | null = null
-// 只有首次登录需要延迟异步组件的加载，后续重新登录直接渲染
-const maybeDelayForInitialRender = async () => {
-  if (!shouldBlockInitialRender.value) {
-    return
-  }
-  await new Promise((resolve) => setTimeout(resolve, 600))
-}
 
 // 根据当前 uid 判断是否需要阻塞首屏并重新同步（依赖持久化的初始化完成名单）
 const syncInitialSyncState = () => {
@@ -170,7 +163,6 @@ const AsyncLeft = defineAsyncComponent({
   loader: async () => {
     const blockInit = shouldBlockInitialRender.value
     const initTask = ensureInitStarted(blockInit)
-    await maybeDelayForInitialRender()
     loadingText.value = t('home.loading.left_panel')
     const comp = await import('./left/index.vue')
     loadingPercentage.value = 33
@@ -202,7 +194,6 @@ const AsyncRight = defineAsyncComponent({
   loader: async () => {
     const blockInit = shouldBlockInitialRender.value
     const initTask = ensureInitStarted(blockInit)
-    await maybeDelayForInitialRender()
     await import('./center/index.vue')
     loadingText.value = t('home.loading.right_panel')
     const comp = await import('./right/index.vue')
