@@ -669,7 +669,6 @@ struct WindowCalibrateDto {
     #[serde(default)]
     capabilities: Option<Vec<String>>,
     #[serde(default)]
-    #[allow(dead_code)]
     request_id: Option<String>,
     #[serde(default)]
     items: Option<Vec<MessageResp>>,
@@ -912,6 +911,18 @@ fn validate_thinking_dto(
     })
 }
 
+/// aichatoverview#351 N2：窗口应答新鲜度 fence（纯函数，可单测）。
+///
+/// 服务端回显 requestId；缺回显按旧服务端形状放行（既有 unsupported 路径处理），
+/// 回显与本轮发送不一致即迟到/乱序的旧包——整包丢弃（不写消息、不碰思考缓存），
+/// 迟到旧授权不得经 re-grant 通道复活已清理项。
+fn is_window_response_stale(echo: Option<&str>, sent: &str) -> bool {
+    match echo {
+        None => false,
+        Some(echo) => echo != sent,
+    }
+}
+
 /// aichatoverview#350：传输层错误分级（纯函数，可单测）。
 ///
 /// 404 类文本（旧服务端无此路由）判 unsupported；鉴权失败原文透出（调用方转登录，
@@ -1046,6 +1057,18 @@ pub async fn calibrate_window(
         }
         Ok(Some(dto)) => dto,
     };
+    // aichatoverview#351 N2：迟到/乱序旧包整包丢弃——应答 requestId 回显与本轮
+    // 发送不一致即重放旧授权，不写消息、不碰思考缓存（已清零不得复活）。
+    if is_window_response_stale(dto.request_id.as_deref(), &request_id) {
+        warn!(
+            target: "tauri_db",
+            "[window-calibrate] roomId={} requestId={} outcome=request-stale detail=echo {:?}",
+            room_id,
+            request_id,
+            dto.request_id,
+        );
+        return Err("window_error: 窗口校准应答已过期".to_string());
+    }
     // aichatoverview#351：思考独立校验——失败只记 outcome，不影响消息、不清缓存。
     let thinking = match validate_thinking_dto(&dto, &known_thinking_ids) {
         Ok(t) => Some(t),
@@ -2665,6 +2688,24 @@ mod tests {
         assert!(!thinking.access);
         validate_window_dto(dto, &["100".to_string(), "999".to_string()])
             .expect("messages unaffected");
+    }
+
+    #[test]
+    fn window_stale_response_fence_rejects_replayed_old_grant() {
+        // aichatoverview#351 N2：失权清零后，旧授权应答重放新轮询必须判 stale
+        //（调用方整包丢弃，不写消息、不碰思考缓存）；回显一致放行，缺回显
+        // 按旧服务端形状放行（既有 unsupported 路径处理）。
+        assert!(!is_window_response_stale(Some("wcal-new"), "wcal-new"));
+        assert!(is_window_response_stale(Some("wcal-old"), "wcal-new"));
+        assert!(!is_window_response_stale(None, "wcal-new"));
+        // 旧授权 envelope 本身合法，但回显是上一轮的——fence 照样拦截。
+        let mut v = window_with_thinking();
+        v["requestId"] = serde_json::json!("wcal-old");
+        let dto: WindowCalibrateDto = serde_json::from_value(v).expect("old grant parses");
+        assert!(is_window_response_stale(
+            dto.request_id.as_deref(),
+            "wcal-new"
+        ));
     }
 
     #[test]
