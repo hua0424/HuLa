@@ -821,8 +821,11 @@ watch(
   { immediate: true }
 )
 
-/** 监听会话变化 */
+/** 监听会话变化（#349：MSG_INIT 多次触发只注册一次，避免 watchEffect 泄漏重复）。 */
+let msgInitWatcherArmed = false
 useMitt.on(MittEnum.MSG_INIT, async () => {
+  if (msgInitWatcherArmed) return
+  msgInitWatcherArmed = true
   watchEffect(async () => {
     // 在同步阶段明确提取需要监听的属性
     const sessionRoomId = globalStore.currentSessionRoomId

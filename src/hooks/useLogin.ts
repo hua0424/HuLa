@@ -21,7 +21,8 @@ import { getAllUserState, getUserDetail } from '../utils/ImRequestUtils'
 import { useNetwork } from '@vueuse/core'
 import { UserInfoType } from '../services/types'
 import { getEnhancedFingerprint } from '../services/fingerprint'
-import { captureSessionBinding, invokeScoped as invoke } from '@/services/sessionBinding'
+import { captureSessionBinding, invokeScoped as invoke, isSessionCurrent } from '@/services/sessionBinding'
+import { createBootAttempt, createRequestId, logBoot, scheduleIdle } from '@/utils/bootAttempt'
 import { useMitt } from './useMitt'
 // 安全日志：Tauri 环境用 plugin-log，浏览器 Web 环境降级到 console.log
 const logInfo = (msg: string): void => {
@@ -199,65 +200,57 @@ export const useLogin = () => {
     }
   }
 
-  // 全量同步
-  const runFullSync = async (preserveSession?: string) => {
-    await chatStore.getSessionList(true)
-    // 如果有需要保留的会话且该会话仍存在于列表中，则恢复选中状态
-    if (preserveSession) {
-      const sessionExists = chatStore.sessionList.some((s) => s.roomId === preserveSession)
-      if (sessionExists) {
-        // 会话存在，保持选中状态不变
-      } else {
-        // 会话不存在了，清空选中
-        globalStore.updateCurrentSessionRoomId('')
-      }
-    } else {
-      // 没有需要保留的会话，重置
-      globalStore.updateCurrentSessionRoomId('')
+  // aichatoverview#349：分阶段同步。
+  // 前台只等本地可读（会话列表本地快照 + 当前窗口首屏），其余全量预热
+  // （全部群成员/群资料/各会话消息页/角标/表情预取）进 idle 补齐队列，不阻塞窗口与发送。
+  // 每个补齐任务带独立 requestId，排队/执行/丢弃/失败分别记入 boot 日志。
+  const scheduleBackfill = async (
+    bootAttempt: string,
+    tasks: Array<{ phase: string; run: () => Promise<unknown> | unknown }>
+  ) => {
+    const binding = isWeb() ? null : await captureSessionBinding().catch(() => null)
+    if (!binding && !isWeb()) {
+      logBoot(bootAttempt, createRequestId(bootAttempt, 'backfill'), 'backfill_dropped', 'binding expired')
+      return
     }
-
-    // 加载所有群的成员数据
-    const groupSessions = chatStore.getGroupSessions()
-    await Promise.all([
-      ...groupSessions.map((session) => groupStore.getGroupUserList(session.roomId, true)),
-      groupStore.setGroupDetails(),
-      chatStore.setAllSessionMsgList(20),
-      cachedStore.getAllBadgeList()
-    ])
+    tasks.forEach(({ phase, run }, index) => {
+      const requestId = createRequestId(bootAttempt, phase)
+      logBoot(bootAttempt, requestId, 'backfill_queued', `depth=${tasks.length - index}`)
+      scheduleIdle(async () => {
+        if (binding && !isSessionCurrent(binding)) {
+          logBoot(bootAttempt, requestId, 'backfill_dropped', 'binding expired')
+          return
+        }
+        try {
+          await run()
+          logBoot(bootAttempt, requestId, 'backfill_done')
+        } catch (error) {
+          logBoot(bootAttempt, requestId, 'backfill_failed', error instanceof Error ? error.message : String(error))
+        }
+      })
+    })
   }
 
-  // 增量同步
-  const runIncrementalSync = async (preserveSession?: string) => {
-    // 优先保证会话列表最新消息和未读数：拉会话即可让未读/最新一条消息就绪
-    await chatStore.getSessionList(true)
-    // 如果有需要保留的会话且该会话仍存在于列表中，则保持选中状态
-    if (preserveSession) {
-      const sessionExists = chatStore.sessionList.some((s) => s.roomId === preserveSession)
-      if (!sessionExists) {
-        // 会话不存在了，清空选中
-        globalStore.updateCurrentSessionRoomId('')
-      }
-      // 会话存在则保持当前状态不变
+  const restoreSessionSelection = (previousSessionRoomId: string) => {
+    if (!previousSessionRoomId) {
+      return
     }
-    // 没有需要保留的会话时也保持当前状态（增量同步不重置）
-
-    // 加载所有群的成员数据和群公告，确保切换会话时数据已就绪
-    const groupSessions = chatStore.getGroupSessions()
-    await Promise.allSettled([
-      ...groupSessions.map((session) => groupStore.getGroupUserList(session.roomId, true)),
-      groupStore.setGroupDetails(),
-      chatStore.setAllSessionMsgList(20),
-      cachedStore.getAllBadgeList()
-    ]).catch(() => {
-      void logInfo('[useLogin] 增量预热任务失败')
-    })
+    const sessionExists = chatStore.sessionList.some((s) => s.roomId === previousSessionRoomId)
+    if (!sessionExists) {
+      // 会话已不存在，清空选中（增量同步不重置仍存在的选中）
+      globalStore.updateCurrentSessionRoomId('')
+    }
   }
 
   const init = async (options?: { isInitialSync?: boolean }) => {
     const emojiStore = useEmojiStore()
+    // aichatoverview#349：同 bootAttempt 串起认证/库绑定/本地可读/补齐全链路。
+    const bootAttempt = createBootAttempt()
+    const requestIdFor = (phase: string) => createRequestId(bootAttempt, phase)
 
     // 保存当前选中的会话，同步后如果该会话仍存在则恢复选中状态
     const previousSessionRoomId = globalStore.currentSessionRoomId
+    logBoot(bootAttempt, requestIdFor('boot_start'), 'boot_start', `previousSession=${previousSessionRoomId || '-'}`)
 
     // 清空 localStorage，防止页面刷新时恢复旧账号数据
     clearUserLocalStorage()
@@ -270,110 +263,166 @@ export const useLogin = () => {
     chatStore.sessionList.length = 0
     groupStore.groupDetails.length = 0
 
-    // 连接 ws
-    await rustWebSocketClient.initConnect()
-
-    // 立即获取新账号的会话列表（优先加载，减少空白时间）
-    chatStore.getSessionList(true).catch(() => {
-      void logInfo('[useLogin] 获取会话列表失败')
+    // #349：业务监听先于 WS 启动（幂等实现，重复调用不重复注册 Tauri 监听）。
+    // mitt 业务消费者在 App setup 顶层早已注册；这里保证生产者侧就绪才建连。
+    const listenersReq = requestIdFor('listeners')
+    await rustWebSocketClient.setupBusinessMessageListeners().catch((error: unknown) => {
+      logBoot(bootAttempt, listenersReq, 'listeners_failed', error instanceof Error ? error.message : String(error))
     })
+    logBoot(bootAttempt, listenersReq, 'listeners_ready')
 
-    // 用户相关数据初始化
-    userStatusStore.stateList = await getAllUserState()
-    const userDetail: any = await getUserDetail()
-    userStatusStore.stateId = userDetail.userStateId
-    const account = {
-      ...userDetail,
-      client: isDesktop() ? 'PC' : 'MOBILE'
-    }
-    userStore.userInfo = account
-    // 记住密码时保存密码到登录历史
-    // 注意: 桌面端 init() 运行在 home 窗口,这里的 useLogin()/info 与登录窗口是不同实例,
-    // info.value.password 为空。Login 窗口在登录成功后会将密码(+timestamp)暂存到
-    // localStorage.__pendingHistoryPassword,这里读取并校验 TTL,过期视为残留废弃。
-    // TTL 30s: 覆盖 home 窗口创建 + WS 连接 + getAllUserState/getUserDetail 两次 HTTP,
-    // 同时避免明文密码长期残留 (init() 内 await 链已经消耗 1-3s,不能太短)
-    const HISTORY_PASSWORD_TTL_MS = 30_000
-    const historyEntry: any = { ...account }
-    let pendingPassword = ''
+    // 连接 ws：只等连接/鉴权，不等全量同步。
+    // 服务端认证结果由 Rust 侧独立报告（auth_failed 位/4001 自愈），此处只记建连。
+    chatStore.syncLoading = true
     try {
-      const raw = localStorage.getItem('__pendingHistoryPassword')
-      if (raw) {
-        const parsed = JSON.parse(raw) as { password?: string; ts?: number }
-        if (parsed?.password && parsed?.ts && Date.now() - parsed.ts < HISTORY_PASSWORD_TTL_MS) {
-          pendingPassword = parsed.password
+      await rustWebSocketClient.initConnect()
+      logBoot(bootAttempt, requestIdFor('ws_connect'), 'ws_connect')
+
+      // 会话列表优先本地可读：store 内先读本地快照上屏，再触发后台同步。
+      await chatStore.getSessionList(true)
+      logBoot(bootAttempt, requestIdFor('local_readable'), 'local_readable', `sessions=${chatStore.sessionList.length}`)
+      restoreSessionSelection(previousSessionRoomId)
+
+      // 用户相关数据初始化（在线状态独立分区：失败只记日志，不挡本地可读与发送）
+      try {
+        userStatusStore.stateList = await getAllUserState()
+        logBoot(bootAttempt, requestIdFor('profile_state'), 'profile_state_ready')
+      } catch (error) {
+        logBoot(
+          bootAttempt,
+          requestIdFor('profile_state'),
+          'profile_state_failed',
+          error instanceof Error ? error.message : String(error)
+        )
+      }
+      const userDetail: any = await getUserDetail()
+      userStatusStore.stateId = userDetail.userStateId
+      const account = {
+        ...userDetail,
+        client: isDesktop() ? 'PC' : 'MOBILE'
+      }
+      userStore.userInfo = account
+      // 记住密码时保存密码到登录历史
+      // 注意: 桌面端 init() 运行在 home 窗口,这里的 useLogin()/info 与登录窗口是不同实例,
+      // info.value.password 为空。Login 窗口在登录成功后会将密码(+timestamp)暂存到
+      // localStorage.__pendingHistoryPassword,这里读取并校验 TTL,过期视为残留废弃。
+      // TTL 30s: 覆盖 home 窗口创建 + WS 连接 + getAllUserState/getUserDetail 两次 HTTP,
+      // 同时避免明文密码长期残留 (init() 内 await 链已经消耗 1-3s,不能太短)
+      const HISTORY_PASSWORD_TTL_MS = 30_000
+      const historyEntry: any = { ...account }
+      let pendingPassword = ''
+      try {
+        const raw = localStorage.getItem('__pendingHistoryPassword')
+        if (raw) {
+          const parsed = JSON.parse(raw) as { password?: string; ts?: number }
+          if (parsed?.password && parsed?.ts && Date.now() - parsed.ts < HISTORY_PASSWORD_TTL_MS) {
+            pendingPassword = parsed.password
+          }
+        }
+      } catch (_e) {
+        // 解析失败,忽略
+      }
+      const existingEntry = loginHistoriesStore.loginHistories.find((h: any) => h.account === account.account)
+      if (localStorage.getItem('rememberPassword') === 'true') {
+        historyEntry.password = info.value.password || pendingPassword || existingEntry?.password || ''
+      } else {
+        // 取消记住密码: 显式清空 history 中的旧密码
+        historyEntry.password = ''
+      }
+      // 用完即删,避免明文密码长期残留
+      localStorage.removeItem('__pendingHistoryPassword')
+      loginHistoriesStore.addLoginHistory(historyEntry)
+      // 初始化表情列表并在后台预取本地缓存（使用 worker + 并发限制）
+      void emojiStore.initEmojis().catch(() => {
+        void logInfo('[login] 初始化表情失败')
+      })
+
+      // 在 sqlite 中存储用户信息（本次 UID 的库绑定点：发送乐观消息依赖它）
+      await invokeWithErrorHandler(
+        TauriCommand.SAVE_USER_INFO,
+        {
+          userInfo: {
+            uid: account.uid,
+            // aichatoverview#47: 把当前用户类型入库，send_msg 创建乐观消息时使用。
+            userType: userDetail.userType
+          }
+        },
+        {
+          customErrorMessage: '保存用户信息失败',
+          errorType: ErrorType.Client
+        }
+      )
+      logBoot(bootAttempt, requestIdFor('db_binding'), 'db_binding', `uid=${account.uid}`)
+
+      // 数据初始化（配置分区独立失败：用缓存或默认值继续，不挡本地可读与发送）
+      try {
+        const cachedConfig = localStorage.getItem('config')
+        if (cachedConfig) {
+          configStore.config = JSON.parse(cachedConfig).config
+        } else {
+          await configStore.initConfig()
+        }
+        logBoot(bootAttempt, requestIdFor('profile_config'), 'profile_config_ready')
+      } catch (error) {
+        logBoot(
+          bootAttempt,
+          requestIdFor('profile_config'),
+          'profile_config_failed',
+          error instanceof Error ? error.message : String(error)
+        )
+      }
+      const isInitialSync = options?.isInitialSync ?? !initialSyncStore.isSynced(account.uid)
+      logBoot(bootAttempt, requestIdFor('boot_mode'), 'boot_mode', `isInitialSync=${isInitialSync}`)
+
+      // 当前窗口首屏：本地页优先，缺页才补远端（store 内房级锁已覆盖并发）；
+      // 失败只记日志，会话列表仍可读。
+      const currentRoomId = globalStore.currentSessionRoomId
+      if (currentRoomId) {
+        try {
+          await chatStore.fetchCurrentRoomRemoteOnce()
+          logBoot(bootAttempt, requestIdFor('current_window'), 'current_window_ready', `room=${currentRoomId}`)
+        } catch (error) {
+          logBoot(
+            bootAttempt,
+            requestIdFor('current_window'),
+            'current_window_failed',
+            error instanceof Error ? error.message : String(error)
+          )
         }
       }
-    } catch (_e) {
-      // 解析失败,忽略
-    }
-    const existingEntry = loginHistoriesStore.loginHistories.find((h: any) => h.account === account.account)
-    if (localStorage.getItem('rememberPassword') === 'true') {
-      historyEntry.password = info.value.password || pendingPassword || existingEntry?.password || ''
-    } else {
-      // 取消记住密码: 显式清空 history 中的旧密码
-      historyEntry.password = ''
-    }
-    // 用完即删,避免明文密码长期残留
-    localStorage.removeItem('__pendingHistoryPassword')
-    loginHistoriesStore.addLoginHistory(historyEntry)
-    // 初始化表情列表并在后台预取本地缓存（使用 worker + 并发限制）
-    void emojiStore.initEmojis().catch(() => {
-      void logInfo('[login] 初始化表情失败')
-    })
 
-    // 在 sqlite 中存储用户信息
-    await invokeWithErrorHandler(
-      TauriCommand.SAVE_USER_INFO,
+      // 强制持久化
+      chatStore.$persist?.()
+      cachedStore.$persist?.()
+      globalStore.$persist?.()
+
+      await setLoginState()
+      logBoot(bootAttempt, requestIdFor('foreground'), 'foreground_ready')
+    } finally {
+      // 前台只等本地可读与当前窗口；syncLoading 关闭后列表 spinner 消失，后台补齐继续。
+      chatStore.syncLoading = false
+    }
+
+    // #349：全量预热进 idle 补齐（不阻塞返回，移动端 splash 也可直接关闭）。
+    // 现有 HTTP/Rust 锁语义保留：Rust 侧 MESSAGE_SYNC_LOCK + 10s 冷却不断，
+    // 前端房级锁（remoteSyncLocks）与 pLimit 并发不变。
+    const groupSessions = chatStore.getGroupSessions()
+    void scheduleBackfill(bootAttempt, [
       {
-        userInfo: {
-          uid: account.uid,
-          // aichatoverview#47: 把当前用户类型入库，send_msg 创建乐观消息时使用。
-          userType: userDetail.userType
-        }
+        phase: 'backfill_members',
+        run: () =>
+          Promise.all([
+            ...groupSessions.map((session) => groupStore.getGroupUserList(session.roomId, true)),
+            groupStore.setGroupDetails()
+          ])
       },
+      { phase: 'backfill_msgs', run: () => chatStore.setAllSessionMsgList(20) },
+      { phase: 'backfill_badges', run: () => cachedStore.getAllBadgeList() },
       {
-        customErrorMessage: '保存用户信息失败',
-        errorType: ErrorType.Client
+        phase: 'backfill_emoji',
+        run: () => emojiStore.prefetchEmojiToLocal().catch(() => logInfo('[login] 预热表情缓存失败'))
       }
-    )
-
-    // 数据初始化
-    const cachedConfig = localStorage.getItem('config')
-    if (cachedConfig) {
-      configStore.config = JSON.parse(cachedConfig).config
-    } else {
-      await configStore.initConfig()
-    }
-    const isInitialSync = options?.isInitialSync ?? !initialSyncStore.isSynced(account.uid)
-
-    // 登录后立即预热表情本地缓存（异步，不阻塞后续流程）
-    void emojiStore.prefetchEmojiToLocal().catch(() => {
-      void logInfo('[login] 预热表情缓存失败')
-    })
-
-    if (isInitialSync) {
-      chatStore.syncLoading = true
-      try {
-        await runFullSync(previousSessionRoomId)
-      } finally {
-        chatStore.syncLoading = false
-      }
-    } else {
-      chatStore.syncLoading = true
-      try {
-        await runIncrementalSync(previousSessionRoomId)
-      } finally {
-        // 增量登录仅等待会话准备好就关闭提示，后台同步继续进行
-        chatStore.syncLoading = false
-      }
-    }
-    // 强制持久化
-    chatStore.$persist?.()
-    cachedStore.$persist?.()
-    globalStore.$persist?.()
-
-    await setLoginState()
+    ])
   }
 
   /**
