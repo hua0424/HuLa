@@ -1296,7 +1296,8 @@ pub async fn calibrate_window(
     drop(response_gate);
 
     // aichatoverview#351：思考元数据经提交门禁落库——归属冲突等失败只记 outcome，
-    // 消息结果不受影响；thinkingAccess=false 时不同步（隐藏卡片与正文）。
+    // 消息结果不受影响；明确 thinkingAccess=false 时清本房思考缓存行与回执
+    // （隐藏卡片与正文，重进房/读回不复活）；thinking_unsupported 或泛化失败不清缓存。
     let (thinking_access, thinking_complete, thinking_merged, thinking_triggers) = match thinking {
         Some(t) if t.access => {
             let item_count = t.items.len();
@@ -1336,7 +1337,35 @@ pub async fn calibrate_window(
                 }
             }
         }
-        Some(t) => (Some(t.access), Some(false), 0, Vec::new()),
+        Some(_) => {
+            // 明确无权：清本房思考缓存（失败只记 outcome，消息不受影响）。
+            let clear_gate = state.session.commit(&binding).await;
+            match clear_gate {
+                Err(e) => {
+                    warn!(
+                        target: "tauri_db",
+                        "[window-calibrate] roomId={} requestId={} outcome=thinking-clear-failed detail={}",
+                        room_id, request_id, e
+                    );
+                }
+                Ok(gate) => {
+                    let cleared = crate::repository::local_cache_repository::clear_thinking_room(
+                        &binding.db,
+                        &room_id,
+                    )
+                    .await;
+                    drop(gate);
+                    if let Err(e) = cleared {
+                        warn!(
+                            target: "tauri_db",
+                            "[window-calibrate] roomId={} requestId={} outcome=thinking-clear-failed detail={}",
+                            room_id, request_id, e
+                        );
+                    }
+                }
+            }
+            (Some(false), Some(false), 0, Vec::new())
+        }
         None => (None, None, 0, Vec::new()),
     };
 
@@ -2622,6 +2651,20 @@ mod tests {
         let err = validate_thinking_dto(&dto, &["501".to_string(), "999".to_string()])
             .expect_err("out-of-set");
         assert!(err.starts_with("thinking_unsupported:"), "got: {}", err);
+    }
+
+    #[test]
+    fn thinking_explicit_no_access_validates_without_touching_messages() {
+        // aichatoverview#351：明确 thinkingAccess=false 是完整 envelope（与缺字段的
+        // thinking_unsupported 严格区分——前者清本房缓存，后者保持缓存）。
+        let mut v = window_with_thinking();
+        v["thinkingAccess"] = serde_json::json!(false);
+        let dto: WindowCalibrateDto = serde_json::from_value(v).expect("no-access envelope parses");
+        let thinking = validate_thinking_dto(&dto, &["501".to_string(), "999".to_string()])
+            .expect("explicit no-access validates");
+        assert!(!thinking.access);
+        validate_window_dto(dto, &["100".to_string(), "999".to_string()])
+            .expect("messages unaffected");
     }
 
     #[test]

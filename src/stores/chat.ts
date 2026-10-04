@@ -1106,16 +1106,23 @@ export const useChatStore = defineStore(
         }
       } else if (!isWeb()) {
         // Tauri：Rust 已按提交门禁落库思考元数据；读回缓存并入卡片，失败不影响消息。
-        try {
-          const cached = Object.values(messageMap[roomId] ?? {}) as MessageType[]
-          await loadLocalThinkingForMessages(roomId, cached, binding)
-          const savedTriggers = (data as { thinkingTriggers?: unknown }).thinkingTriggers
-          if (Array.isArray(savedTriggers)) {
-            const loaded = metadataSet(roomId)
-            for (const t of savedTriggers) if (typeof t === 'string') loaded.add(t)
+        // 明确 thinkingAccess=false 时隐藏本房卡片与正文且不读回（Rust 已清本房缓存行，
+        // 重进房不复活）；缺字段/失败（undefined）保持既有缓存。
+        const tauriThinkingAccess = (data as { thinkingAccess?: unknown }).thinkingAccess
+        if (tauriThinkingAccess === false) {
+          clearThinking(roomId)
+        } else {
+          try {
+            const cached = Object.values(messageMap[roomId] ?? {}) as MessageType[]
+            await loadLocalThinkingForMessages(roomId, cached, binding)
+            const savedTriggers = (data as { thinkingTriggers?: unknown }).thinkingTriggers
+            if (Array.isArray(savedTriggers)) {
+              const loaded = metadataSet(roomId)
+              for (const t of savedTriggers) if (typeof t === 'string') loaded.add(t)
+            }
+          } catch {
+            // 保持缓存，消息结果不受影响。
           }
-        } catch {
-          // 保持缓存，消息结果不受影响。
         }
       }
       !isWeb() &&

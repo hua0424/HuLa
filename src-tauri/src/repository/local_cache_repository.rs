@@ -218,6 +218,32 @@ pub async fn save_thinking_body(
     Ok(())
 }
 
+/// aichatoverview#351：明确无权隐藏本房思考卡与正文——清该房思考缓存行与回执，
+/// 重进房/读回不复活。仅显式 thinkingAccess=false 时调用；thinking_unsupported 或
+/// 泛化失败（无明确无权证据）不清缓存。
+pub async fn clear_thinking_room(db: &DatabaseConnection, room_id: &str) -> Result<(), String> {
+    if !valid_id(room_id) {
+        return Err("缓存房间ID无效".into());
+    }
+    let tx = db.begin().await.map_err(|e| e.to_string())?;
+    tx.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "DELETE FROM im_thinking_cache WHERE room_id=?",
+        [room_id.into()],
+    ))
+    .await
+    .map_err(|e| e.to_string())?;
+    tx.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "DELETE FROM im_thinking_receipt WHERE room_id=?",
+        [room_id.into()],
+    ))
+    .await
+    .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub async fn read_snapshot(
     db: &DatabaseConnection,
     name: &str,
@@ -650,5 +676,40 @@ mod tests {
         assert!(stale.items[0].body_verified_at.is_none());
         assert!(stale.items[0].body_loaded);
         assert_eq!(stale.items[0].content.as_deref(), Some("cached body"));
+    }
+
+    #[tokio::test]
+    async fn explicit_no_access_clears_room_thinking_without_touching_other_rooms() {
+        // aichatoverview#351：明确 thinkingAccess=false 清本房缓存行与回执
+        // （重进房/读回不复活），他房不受影响，非法 id 不清任何内容。
+        let db = setup().await;
+        db.execute_unprepared("INSERT INTO im_message (id,uid,room_id,login_uid,send_status) VALUES ('20','2','9','4','success')").await.unwrap();
+        save_thinking_metadata(&db, "4", "3", &["10".into()], &[item("100", "20", 1)])
+            .await
+            .unwrap();
+        save_thinking_body(&db, "4", "3", "10", "20", "100", "cached", Some("etag-a"))
+            .await
+            .unwrap();
+        let mut other = item("200", "21", 1);
+        other.trigger_msg_id = "20".into();
+        save_thinking_metadata(&db, "4", "9", &["20".into()], &[other])
+            .await
+            .unwrap();
+        clear_thinking_room(&db, "3").await.unwrap();
+        let cleared = read_thinking_window(&db, "4", "3", &["10".into()])
+            .await
+            .unwrap();
+        assert!(cleared.items.is_empty());
+        assert!(cleared.loaded_trigger_ids.is_empty());
+        let kept = read_thinking_window(&db, "4", "9", &["20".into()])
+            .await
+            .unwrap();
+        assert_eq!(kept.items.len(), 1);
+        assert_eq!(kept.items[0].metadata.id, "200");
+        assert!(clear_thinking_room(&db, "T3").await.is_err());
+        let still = read_thinking_window(&db, "4", "9", &["20".into()])
+            .await
+            .unwrap();
+        assert_eq!(still.items.len(), 1);
     }
 }
