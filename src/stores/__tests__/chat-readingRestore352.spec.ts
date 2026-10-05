@@ -117,6 +117,7 @@ describe('阅读位置持久化与重登恢复 (#352)', () => {
         ipc.cached = args
         return undefined
       }
+      if (command === 'read_local_snapshot' && args?.name === 'reading') return null
       if (command === 'page_msg') return { list: [], cursor: '', isLast: true, total: 0 }
       if (command === 'read_thinking_cache') return { items: [], loadedTriggerIds: [], visibleTriggerIds: [] }
       if (command === 'calibrate_window')
@@ -125,6 +126,8 @@ describe('阅读位置持久化与重登恢复 (#352)', () => {
     }
     const store = useChatStore()
     store.sessionList = [makeSession('r1')]
+    // R4：先读后写——落盘前先触盘标 loaded（盘空也算已读回），否则空守卫跳过写盘。
+    await store.loadReadingSnapshot()
     store.reportReadingAnchor('r1', { anchorMsgId: 'm5', anchorSendTime: 50, offsetPx: 12, wasAtBottom: false })
     expect(store.getSavedReadPosition('r1')?.anchorMsgId).toBe('m5')
     await store.flushReadingPositions()
@@ -197,6 +200,49 @@ describe('阅读位置持久化与重登恢复 (#352)', () => {
       expect(store.pendingScrollRestore).toEqual({ roomId: 'r1', anchorMsgId: 'm5', offsetPx: 12 })
     )
     expect(store.messageMap['r1']?.['m5']).toBeTruthy()
+  })
+
+  it('R4：首读失败+进房先读后写：空内存不覆盖盘上有效快照，重读仍 pin 住', async () => {
+    const newer = Array.from({ length: 20 }, (_, i) => msg(`m${11 + i}`, 110 + i * 10))
+    const older = Array.from({ length: 10 }, (_, i) => msg(`m${1 + i}`, 10 + i * 10))
+    // 盘上有效快照（warm 重登前落盘）。
+    let disk: any = {
+      version: 1,
+      lastRoomId: 'r1',
+      positions: { r1: { anchorMsgId: 'm5', anchorSendTime: 50, offsetPx: 12, wasAtBottom: false, updatedAt: 1 } }
+    }
+    let reads = 0
+    armDefaultIpc((args: any) => {
+      if (args?.param?.source === 'remote') return { list: [], cursor: '', isLast: true, total: 0 }
+      if (args?.param?.cursor) return { list: older, cursor: '', isLast: true, total: older.length }
+      return { list: newer, cursor: 'c1', isLast: false, total: newer.length }
+    })
+    const prevHandler = ipc.handler
+    ipc.handler = async (command: string, args: any) => {
+      // 首读失败（warm-boot 绑定/快照竞态），重读才命中盘上有效快照。
+      if (command === 'read_local_snapshot' && args?.name === 'reading') {
+        if (reads++ === 0) return null
+        return disk
+      }
+      if (command === 'cache_local_snapshot' && args?.name === 'reading') {
+        disk = args.payload
+        return undefined
+      }
+      return prevHandler!(command, args)
+    }
+    const store = useChatStore()
+    const globalStore = useGlobalStore()
+    store.sessionList = [makeSession('r1')]
+    // 上次房间 r1（hydrated previous），首读失败仍选回本房，随后进房重读恢复。
+    expect(await store.restoreLastReading('r1')).toBe('restored:r1')
+    expect(globalStore.currentSessionRoomId).toBe('r1')
+    await vi.waitFor(() =>
+      expect(store.pendingScrollRestore).toEqual({ roomId: 'r1', anchorMsgId: 'm5', offsetPx: 12 })
+    )
+    expect(store.messageMap['r1']?.['m5']).toBeTruthy()
+    // 盘上有效锚点未被空内存覆盖，快照已标已读回。
+    expect(disk?.positions?.['r1']?.anchorMsgId).toBe('m5')
+    expect(store.readingSnapshotLoaded).toBe(true)
   })
 
   it('锚点真删选时间邻近可读位置（撤回占位保留 id 则直接命中）', async () => {

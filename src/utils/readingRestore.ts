@@ -136,13 +136,17 @@ export type MountRestoreDecision = 'restore' | 'arm' | 'bottom'
  * 挂载时房间已就位、无切房过渡，房间 watcher 看不到变化。
  * pending 已就绪直接 RESTORE；有未恢复的非底部锚点则先 armed 等回填；
  * 否则回底部（新房间/已在底部/无记录）。
+ * R4：快照尚未从盘读回（loaded=false）时不判 bottom，持 armed 等 store 回填——
+ * 空内存的 bottom 判定会触发到底+上报，覆盖尚未读到的有效锚点。
  */
 export const decideMountRestore = (
   pendingRoomId: string | null | undefined,
   currentRoomId: string | null | undefined,
-  saved: { wasAtBottom: boolean; anchorMsgId: string } | null
+  saved: { wasAtBottom: boolean; anchorMsgId: string } | null,
+  loaded = true
 ): MountRestoreDecision => {
   if (currentRoomId && pendingRoomId === currentRoomId) return 'restore'
+  if (loaded === false) return currentRoomId ? 'arm' : 'bottom'
   if (currentRoomId && saved && !saved.wasAtBottom && saved.anchorMsgId) return 'arm'
   return 'bottom'
 }

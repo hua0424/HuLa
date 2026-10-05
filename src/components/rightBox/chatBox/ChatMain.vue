@@ -599,21 +599,25 @@ watch(
 // aichatoverview#352：该房间遗留非底部阅读位置时改为恢复意图——
 // 先不抢底，等 store 回填锚点后 RESTORE 一次 pin 住；超时未等到则回底部。
 // 切房 watcher 与 warm 重登挂载共用（后者无房间过渡，watcher 看不到变化）。
+// R4：快照未就绪的空 hold 与锚点 armed 共用同一兜底（等回填，超时强制到底）。
+const holdRestoreArmed = (): void => {
+  restoreArmedRef.value = true
+  scrollIntent.value = ScrollIntentEnum.NONE
+  restoreFallbackTimer = setTimeout(() => {
+    restoreFallbackTimer = null
+    if (restoreArmedRef.value && !chatStore.pendingScrollRestore) {
+      disarmRestore()
+      // 恢复未兑现（锚点回填超时）：这是本房间自己的兜底，强制到底，不受旧恢复窗口影响。
+      scrollToBottom({ force: true })
+    }
+  }, 3000)
+}
 const armRestoreForRoom = (): boolean => {
   const roomId = currentRoomId.value
   const saved = roomId ? chatStore.getSavedReadPosition(roomId) : null
   disarmRestore()
   if (roomId && saved && !saved.wasAtBottom && saved.anchorMsgId) {
-    restoreArmedRef.value = true
-    scrollIntent.value = ScrollIntentEnum.NONE
-    restoreFallbackTimer = setTimeout(() => {
-      restoreFallbackTimer = null
-      if (restoreArmedRef.value && !chatStore.pendingScrollRestore) {
-        disarmRestore()
-        // 恢复未兑现（锚点回填超时）：这是本房间自己的兜底，强制到底，不受旧恢复窗口影响。
-        scrollToBottom({ force: true })
-      }
-    }, 3000)
+    holdRestoreArmed()
     return true
   }
   return false
@@ -832,6 +836,9 @@ const reportVisibleAnchor = (container: HTMLElement): void => {
   if (restoringRef.value || isLoadingMore.value || isAutoScrolling.value) return
   const roomId = currentRoomId.value
   if (!roomId) return
+  // aichatoverview#352 R4：快照未从盘读回不上报——此时首条可见只是最新页闪现，
+  // 上报会以更新鲜的 updatedAt 覆盖有效锚点（合并丢弃盘上有效）。
+  if (!chatStore.readingSnapshotLoaded) return
   if (restoreArmedRef.value || chatStore.pendingScrollRestore?.roomId === roomId) return
   const containerRect = container.getBoundingClientRect()
   const nodes = container.querySelectorAll('[data-message-id]')
@@ -1174,15 +1181,19 @@ onMounted(() => {
 
   // aichatoverview#352 warm 重登：挂载时房间可能已就位（无切房过渡，
   // 房间 watcher 不触发），按同一决策补恢复 armed；pending 已就绪则直接 RESTORE。
+  // R4：快照未就绪时持空 armed 等回填（超时回底部），不判 bottom 抢底不上报。
   const mountDecision = decideMountRestore(
     chatStore.pendingScrollRestore?.roomId,
     currentRoomId.value,
-    currentRoomId.value ? chatStore.getSavedReadPosition(currentRoomId.value) : null
+    currentRoomId.value ? chatStore.getSavedReadPosition(currentRoomId.value) : null,
+    chatStore.readingSnapshotLoaded
   )
   if (mountDecision === 'restore') {
     restoreArmedRef.value = true
     scrollIntent.value = ScrollIntentEnum.RESTORE
-  } else if (mountDecision === 'arm' && armRestoreForRoom()) {
+  } else if (mountDecision === 'arm') {
+    // 有锚点按锚点 armed；快照未就绪按空 hold 等回填，都不抢底。
+    if (!armRestoreForRoom()) holdRestoreArmed()
     suppressTopLoadMore.value = true
   } else {
     scrollToBottom()
