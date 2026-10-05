@@ -1,6 +1,5 @@
 use crate::error::CommonError;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
-use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
@@ -94,7 +93,26 @@ impl DatabaseSettings {
         app_handle: &AppHandle,
         uid: Option<&str>,
     ) -> Result<DatabaseConnection, CommonError> {
-        let db_filename = Self::get_db_filename(uid);
+        self.connect_filename(app_handle, &Self::get_db_filename(uid))
+            .await
+    }
+
+    pub async fn scoped_connection_string(
+        &self,
+        app_handle: &AppHandle,
+        backend_key: &str,
+        uid: &str,
+    ) -> Result<DatabaseConnection, CommonError> {
+        let filename = scoped_db_filename(backend_key, uid).map_err(anyhow::Error::msg)?;
+        // Unknown db_{uid}.sqlite files are deliberately not opened, copied, or claimed.
+        self.connect_filename(app_handle, &filename).await
+    }
+
+    async fn connect_filename(
+        &self,
+        app_handle: &AppHandle,
+        db_filename: &str,
+    ) -> Result<DatabaseConnection, CommonError> {
         info!("Database filename: {}", db_filename);
 
         // 数据库路径配置：
@@ -122,22 +140,7 @@ impl DatabaseSettings {
         };
         info!("Database path: {:?}", db_path);
 
-        if db_path.exists() {
-            let mut header = [0u8; 16];
-            let need_repair = match std::fs::File::open(&db_path) {
-                Ok(mut f) => {
-                    let _ = f.read(&mut header);
-                    header != *b"SQLite format 3\0"
-                }
-                Err(_) => false,
-            };
-            if need_repair {
-                let backup = db_path.with_extension("corrupted");
-                let _ =
-                    std::fs::rename(&db_path, &backup).or_else(|_| std::fs::remove_file(&db_path));
-            }
-        }
-
+        // A corrupt/unreadable cache is a storage error, never authorization to remove user data.
         let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
 
         // 配置数据库连接选项
@@ -152,32 +155,20 @@ impl DatabaseSettings {
             .sqlx_logging(cfg!(debug_assertions))
             .sqlx_logging_level(tracing::log::LevelFilter::Info);
 
-        match Database::connect(opt).await {
-            Ok(db) => Ok(db),
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("file is not a database") || msg.contains("code: 26") {
-                    let _ = std::fs::remove_file(&db_path);
-                    let mut opt2 =
-                        ConnectOptions::new(format!("sqlite:{}?mode=rwc", db_path.display()));
-                    opt2.max_connections(20)
-                        .min_connections(2)
-                        .connect_timeout(Duration::from_secs(30))
-                        .acquire_timeout(Duration::from_secs(30))
-                        .idle_timeout(Duration::from_secs(600))
-                        .max_lifetime(Duration::from_secs(1800))
-                        .sqlx_logging(cfg!(debug_assertions))
-                        .sqlx_logging_level(tracing::log::LevelFilter::Info);
-                    let db = Database::connect(opt2)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Database connection failed: {}", e))?;
-                    Ok(db)
-                } else {
-                    Err(anyhow::anyhow!("Database connection failed: {}", e).into())
-                }
-            }
-        }
+        Database::connect(opt).await.map_err(|e| {
+            anyhow::anyhow!("Database connection failed (file preserved): {}", e).into()
+        })
     }
+}
+
+pub fn scoped_db_filename(backend_key: &str, uid: &str) -> Result<String, String> {
+    use md5::{Digest, Md5};
+    if uid.is_empty() || uid.len() > 32 || !uid.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("用户ID必须是十进制字符串".into());
+    }
+    // The digest is a bounded filename, not a security proof. im_cache_scope verifies the full key.
+    let digest = Md5::digest(backend_key.as_bytes());
+    Ok(format!("db_v2_{digest:x}_{uid}.sqlite"))
 }
 
 impl Environment {

@@ -1,6 +1,7 @@
 import { ImUrlEnum } from '@/enums'
 import { imRequestSilent } from '@/utils/ImRequestUtils'
 import type { ThinkingMetadataItem } from '@/types/thinking'
+import type { SessionIdentity } from '@/services/sessionBinding'
 
 /** GET detail is authenticated and must return ownership fields before it can recover a missed START. */
 export type ThinkingDetail = {
@@ -12,14 +13,24 @@ export type ThinkingDetail = {
   clientRunId?: string | null
   status: number
   durationMs?: number | null
+  hasResponse?: number | null
+  createTime?: string | number | null
+  /** 完整思考文本（detail 按需拉取） */
+  content?: string | null
+  /** 正文 bodyETag：与元数据同一正文字节算出，只判相等（aichatoverview#351） */
+  bodyETag?: string | null
 }
 
-export const loadThinkingDetail = async (thinkingId: string): Promise<ThinkingDetail | null> => {
+export const loadThinkingDetail = async (
+  thinkingId: string,
+  binding?: SessionIdentity
+): Promise<ThinkingDetail | null> => {
   try {
     return (
       (await imRequestSilent<ThinkingDetail>({
         url: ImUrlEnum.AICLAW_THINKING_DETAIL,
-        params: { thinkingId }
+        params: { thinkingId },
+        binding
       })) ?? null
     )
   } catch {
@@ -29,6 +40,7 @@ export const loadThinkingDetail = async (thinkingId: string): Promise<ThinkingDe
 }
 
 export type LoadThinkingByTriggerParams = {
+  binding?: SessionIdentity
   /** 房间 ID */
   roomId: string | number
   /** 触发消息 ID 列表（非空、≤100） */
@@ -46,21 +58,23 @@ export type LoadThinkingByTriggerParams = {
  */
 export const loadThinkingByTrigger = async ({
   roomId,
-  triggerMsgIds
-}: LoadThinkingByTriggerParams): Promise<ThinkingMetadataItem[]> => {
+  triggerMsgIds,
+  binding
+}: LoadThinkingByTriggerParams): Promise<ThinkingMetadataItem[] | null> => {
   if (!roomId || !triggerMsgIds?.length) return []
 
   try {
     const data = await imRequestSilent<ThinkingMetadataItem[]>({
       url: ImUrlEnum.AICLAW_THINKING_BY_TRIGGER,
+      binding,
       body: {
         roomId: String(roomId),
         triggerMsgIds
       }
     })
-    return data ?? []
-  } catch (error) {
-    console.error('[thinkingService] loadThinkingByTrigger failed:', error)
-    return []
+    return Array.isArray(data) ? data : null
+  } catch {
+    console.warn('[thinkingService] metadata request failed; successful cache retained')
+    return null
   }
 }

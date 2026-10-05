@@ -1,6 +1,7 @@
 use crate::AppData;
 use crate::command::message_command::MessageResp;
 use crate::repository::im_message_repository;
+use crate::session::SessionIdentity;
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -44,6 +45,8 @@ pub struct ChatHistoryResponse {
 pub async fn query_chat_history(
     param: ChatHistoryQueryParam,
     state: State<'_, AppData>,
+
+    binding: SessionIdentity,
 ) -> Result<ChatHistoryResponse, String> {
     info!(
         "查询聊天历史记录 - 房间ID: {}, 消息类型: {:?}, 搜索关键词: {:?}, 排序: {:?}, 页码: {}",
@@ -55,10 +58,9 @@ pub async fn query_chat_history(
     );
 
     // 获取当前登录用户的 uid
-    let login_uid = {
-        let user_info = state.user_info.lock().await;
-        user_info.uid.clone()
-    };
+    let binding = state.session.capture_identity(&binding)?;
+    let _gate = state.session.commit(&binding).await?;
+    let login_uid = binding.identity.uid.clone();
 
     // 构建查询条件
     let query_condition = ChatHistoryQueryCondition {
@@ -72,13 +74,12 @@ pub async fn query_chat_history(
     };
 
     // 查询数据库
-    let messages =
-        im_message_repository::query_chat_history(&*state.db_conn.read().await, query_condition)
-            .await
-            .map_err(|e| {
-                error!("查询聊天历史记录失败: {}", e);
-                e.to_string()
-            })?;
+    let messages = im_message_repository::query_chat_history(&binding.db, query_condition)
+        .await
+        .map_err(|e| {
+            error!("查询聊天历史记录失败: {}", e);
+            e.to_string()
+        })?;
 
     // 转换为响应格式
     let message_resps: Vec<MessageResp> = messages

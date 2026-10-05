@@ -1,7 +1,23 @@
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { info } from '@tauri-apps/plugin-log'
 import { sendNotification } from '@tauri-apps/plugin-notification'
-import { homeWindowOnlyStorage } from '@/stores/persistHomeWindowOnly'
+import { scopedChatStorage, isChatHomeWindow } from '@/stores/persistHomeWindowOnly'
+import { watch } from 'vue'
+import {
+  captureSessionBinding,
+  eventSession,
+  isSessionCurrent,
+  sessionBinding,
+  SessionExpiredError,
+  type SessionIdentity
+} from '@/services/sessionBinding'
+import {
+  cacheLocalSnapshot,
+  readLocalSnapshot,
+  cacheThinkingMetadata,
+  readThinkingCache,
+  type CachedThinking
+} from '@/services/localCache'
 import { orderBy, uniqBy } from 'es-toolkit'
 import pLimit from 'p-limit'
 import { defineStore } from 'pinia'
@@ -9,7 +25,12 @@ import { useRoute } from 'vue-router'
 import { ErrorType } from '@/common/exception'
 import { MittEnum, MessageStatusEnum, MsgEnum, RoomTypeEnum, StoresEnum, TauriCommand } from '@/enums'
 import type { MarkItemType, MessageType, RevokedMsgType, SessionItem } from '@/services/types'
-import { mapServerThinkingStatus, parseThinkingCreateTime, type ThinkingState } from '@/types/thinking'
+import {
+  mapServerThinkingStatus,
+  parseThinkingCreateTime,
+  type ThinkingState,
+  type ThinkingMetadataItem
+} from '@/types/thinking'
 import { useGlobalStore } from '@/stores/global.ts'
 import { useFeedStore } from '@/stores/feed.ts'
 import { useGroupStore } from '@/stores/group.ts'
@@ -34,6 +55,24 @@ import {
   shouldAdvanceRemote,
   type RemoteStatus
 } from '@/utils/historyBackfill'
+import {
+  buildThinkingKnownIds,
+  buildWindowRange,
+  isWindowUnsupported,
+  mergeWindowResult,
+  validateThinkingEnvelope,
+  type WindowCalibOutcome as WindowOutcome,
+  type WindowMergeMsg
+} from '@/utils/windowCalibrate'
+import {
+  normalizeReadingSnapshot,
+  pickRestoreRoom,
+  READING_SNAPSHOT_VERSION,
+  resolveRestoreAnchor,
+  RESTORE_BACKFILL_PAGES,
+  type ReadingSnapshot,
+  type ReadPosition
+} from '@/utils/readingRestore'
 
 type RecalledMessage = {
   messageId: string
@@ -83,6 +122,27 @@ export const useChatStore = defineStore(
     const sessionUnreadStore = useSessionUnreadStore()
     const aiclawStore = useAiclawStore()
 
+    let accountEpoch = 0
+    const thinkingCacheErrors = ref<Record<string, string>>({})
+    const deletedThinkingTriggers = new Map<string, Set<string>>()
+    const metadataRequests = new Map<string, Promise<void>>()
+    const captureAccount = async () => {
+      if (isWeb()) return null
+      const origin = sessionBinding.value
+      const epoch = accountEpoch
+      const binding = await captureSessionBinding()
+      if (!origin || !accountCurrent(origin, epoch)) throw new SessionExpiredError()
+      return binding
+    }
+    const accountCurrent = (binding: SessionIdentity | null, epoch: number) =>
+      accountEpoch === epoch && (!binding || isSessionCurrent(binding))
+    const unreadOwner = () =>
+      isWeb()
+        ? userStore.userInfo?.uid
+        : sessionBinding.value
+          ? JSON.stringify([sessionBinding.value.backendKey, sessionBinding.value.uid])
+          : undefined
+
     // 会话列表
     const sessionList = ref<SessionItem[]>([])
     // 会话列表的快速查找 Map，通过 roomId 进行 O(1) 查找
@@ -102,7 +162,7 @@ export const useChatStore = defineStore(
         return
       }
       // apply 方法返回需要更新的会话映射，通过 updateSession 触发响应式更新
-      const updates = sessionUnreadStore.apply(userStore.userInfo?.uid, targetSessions)
+      const updates = sessionUnreadStore.apply(unreadOwner(), targetSessions)
 
       // 使用 updateSession 统一更新，确保响应式正确触发
       for (const [roomId, unreadCount] of Object.entries(updates)) {
@@ -115,7 +175,7 @@ export const useChatStore = defineStore(
       if (!roomId) {
         return
       }
-      sessionUnreadStore.set(userStore.userInfo?.uid, roomId, count)
+      sessionUnreadStore.set(unreadOwner(), roomId, count)
     }
 
     // 在删除会话或清理数据时同步移除缓存，避免旧数据污染
@@ -123,7 +183,7 @@ export const useChatStore = defineStore(
       if (!roomId) {
         return
       }
-      sessionUnreadStore.remove(userStore.userInfo?.uid, roomId)
+      sessionUnreadStore.remove(unreadOwner(), roomId)
     }
 
     // 将已有的会话列表同步到 sessionMap，解决持久化恢复或请求失败时 map 为空的问题
@@ -161,6 +221,7 @@ export const useChatStore = defineStore(
     // 在刷新会话列表后，处理服务器返回的“旧未读”——本地之前已读（未读数为0）、活跃时间未变但服务端仍返回未读
     const reconcileStaleUnread = async (prevSessions?: Record<string, SessionItem>) => {
       if (!prevSessions) return
+      const epoch = accountEpoch
       const promises: Promise<unknown>[] = []
 
       for (const session of sessionList.value) {
@@ -181,8 +242,8 @@ export const useChatStore = defineStore(
           updateSession(session.roomId, { unreadCount: 0 })
           // 补一次已读上报，通过队列执行避免并发触发限流
           promises.push(
-            markMsgReadQueue(() => markMsgRead(session.roomId)).catch((error) => {
-              console.error('[chat] 补偿已读上报失败:', error)
+            enqueueMarkMsgRead(session.roomId).catch((error) => {
+              if (!(error instanceof SessionExpiredError)) console.error('[chat] 补偿已读上报失败:', error)
             })
           )
         }
@@ -191,13 +252,14 @@ export const useChatStore = defineStore(
       if (promises.length) {
         // 补偿请求在后台执行，不阻塞主流程，避免 syncLoading 卡住
         Promise.allSettled(promises).then(() => {
-          requestUnreadCountUpdate()
+          if (epoch === accountEpoch) requestUnreadCountUpdate()
         })
       }
     }
 
     // 使用本地记录的"最后已读活跃时间"兜底清理陈旧未读，避免重登时短暂闪现
     const reconcileUnreadWithReadHistory = async () => {
+      const epoch = accountEpoch
       const promises: Promise<unknown>[] = []
 
       for (const session of sessionList.value) {
@@ -213,8 +275,8 @@ export const useChatStore = defineStore(
           })
           updateSession(session.roomId, { unreadCount: 0 })
           promises.push(
-            markMsgReadQueue(() => markMsgRead(session.roomId)).catch((error) => {
-              console.error('[chat] 基于已读历史的补偿上报失败:', error)
+            enqueueMarkMsgRead(session.roomId).catch((error) => {
+              if (!(error instanceof SessionExpiredError)) console.error('[chat] 基于已读历史的补偿上报失败:', error)
             })
           )
         }
@@ -223,7 +285,7 @@ export const useChatStore = defineStore(
       if (promises.length) {
         // 补偿请求在后台执行，不阻塞主流程，避免 syncLoading 卡住
         Promise.allSettled(promises).then(() => {
-          requestUnreadCountUpdate()
+          if (epoch === accountEpoch) requestUnreadCountUpdate()
         })
       }
     }
@@ -461,6 +523,9 @@ export const useChatStore = defineStore(
       }
 
       const roomId = globalStore.currentSessionRoomId
+      const origin = sessionBinding.value
+      const epoch = accountEpoch
+      if (!isWeb() && !origin) return
 
       // 清理其他房间的消息缓存，释放内存
       clearOtherRoomsMessages(roomId)
@@ -474,7 +539,11 @@ export const useChatStore = defineStore(
       // 2. 切房重新加载首屏时统一初始化本次浏览进度（本地/远端双游标，远端未知）；
       // 就地重置保持对象身份，旧请求的浏览代次已推进，其结果会被丢弃而不污染新进度
       browseSeq[roomId] = (browseSeq[roomId] ?? 0) + 1
+      const requestBrowse = browseSeq[roomId]
       Object.assign(ensureProgress(roomId), newRoomProgress())
+      // aichatoverview#350：新浏览窗口的校准状态回到未校准（旧结果不污染新进度）
+      windowCalibOf(roomId).status = 'unknown'
+      windowCalibOf(roomId).error = ''
 
       // 3. 清空回复映射
       if (currentReplyMap.value) {
@@ -491,17 +560,67 @@ export const useChatStore = defineStore(
         await ensureFirstScreen(roomId)
       } catch (error) {
         console.error('无法加载消息:', error)
-        if (globalStore.currentSessionRoomId === roomId) {
+        if (
+          accountCurrent(origin, epoch) &&
+          globalStore.currentSessionRoomId === roomId &&
+          browseSeq[roomId] === requestBrowse
+        ) {
           const progress = ensureProgress(roomId)
           progress.isLoading = false
           progress.error = error instanceof Error ? error.message : String(error)
         }
       }
 
-      // 无论什么情况，切换到会话后就标记已读
-      if (globalStore.currentSessionRoomId) {
-        markSessionRead(globalStore.currentSessionRoomId)
+      // A late room/account action cannot mark the new selection read or clear its reply.
+      if (
+        !accountCurrent(origin, epoch) ||
+        globalStore.currentSessionRoomId !== roomId ||
+        browseSeq[roomId] !== requestBrowse
+      )
+        return
+
+      // aichatoverview#352：非底部遗留位置做锚点恢复（锚点缺失有界回填，
+      // 仍缺失选时间邻近可读位置，空列表回底部；pending 由 ChatMain DOM 就绪后消费）。
+      // warm 重登时 changeRoom 可能先于快照读回到达：内存无记录时重读一次再判定。
+      let saved = getSavedReadPosition(roomId)
+      if (!saved) {
+        await loadReadingSnapshot().catch(() => null)
+        if (!accountCurrent(origin, epoch) || globalStore.currentSessionRoomId !== roomId) return
+        saved = getSavedReadPosition(roomId)
       }
+      if (saved && !saved.wasAtBottom && saved.anchorMsgId) {
+        const backfilled = await ensureAnchorLoaded(roomId, saved.anchorMsgId)
+        if (
+          accountCurrent(origin, epoch) &&
+          globalStore.currentSessionRoomId === roomId &&
+          browseSeq[roomId] === requestBrowse
+        ) {
+          const list = chatMessageListByRoomId
+            .value(roomId)
+            .map((m) => ({ id: String(m.message.id), sendTime: m.message.sendTime ?? 0 }))
+          const resolution = resolveRestoreAnchor(list, saved)
+          if (resolution.kind !== 'bottom') {
+            pendingScrollRestore.value = { roomId, anchorMsgId: resolution.anchorMsgId, offsetPx: saved.offsetPx }
+          }
+          !isWeb() &&
+            (await info(
+              `[restore] roomId=${roomId} backfilled=${backfilled} kind=${resolution.kind} ` +
+                `pending=${resolution.kind !== 'bottom'} list=${list.length}`
+            ))
+        } else {
+          return
+        }
+      } else {
+        !isWeb() &&
+          (await info(
+            `[restore] roomId=${roomId} skip anchor=${saved?.anchorMsgId ?? '-'} ` +
+              `wasAtBottom=${saved?.wasAtBottom ?? '-'}`
+          ))
+      }
+      // aichatoverview#352 R4：先读后写——快照判定完成后再记录本次房间并落盘，空内存不再覆盖有效快照。
+      readingLastRoomId = roomId
+      void flushReadingPositions()
+      markSessionRead(roomId)
 
       // 重置当前回复的消息
       currentMsgReply.value = {}
@@ -678,6 +797,8 @@ export const useChatStore = defineStore(
       async: boolean | undefined,
       source: 'local' | 'remote'
     ): Promise<PageLoadResult> => {
+      const binding = await captureAccount()
+      const requestAccountEpoch = accountEpoch
       const progress = ensureProgress(roomId)
       progress.isLoading = true
       progress.error = ''
@@ -720,6 +841,7 @@ export const useChatStore = defineStore(
           data = await invokeWithErrorHandler(
             TauriCommand.PAGE_MSG,
             {
+              binding,
               param: {
                 pageSize: pageSize,
                 cursor: effectiveRemoteCursor,
@@ -737,6 +859,8 @@ export const useChatStore = defineStore(
       } catch (error) {
         // 网络/鉴权/解析失败：保留已显示消息、原游标和原终止状态，展示错误及重试入口；
         // loading 只在同代或无他人在途时释放，避免误清新代次请求的持有
+        if (!accountCurrent(binding, requestAccountEpoch))
+          return { roomId, source, count: 0, ok: false, error: '账号代次已失效' }
         if ((browseSeq[roomId] ?? 0) === requestBrowseSeq) {
           const current = ensureProgress(roomId)
           current.isLoading = false
@@ -749,6 +873,8 @@ export const useChatStore = defineStore(
       }
 
       // 切房后不能把旧请求的成功写到新房间；旧代次顺带释放无人持有的 loading
+      if (!accountCurrent(binding, requestAccountEpoch))
+        return { roomId, source, count: 0, ok: false, error: '账号代次已失效' }
       if ((browseSeq[roomId] ?? 0) !== requestBrowseSeq) {
         releaseRoomLoadingIfIdle(roomId, `${roomId}|${source}|${cursor}`)
         return { roomId, source, count: 0, ok: false, error: '房间已切换，丢弃本次结果' }
@@ -786,6 +912,7 @@ export const useChatStore = defineStore(
       const wsTouched = (roomMsgSeq[roomId] ?? 0) !== requestMsgSeq
       let merged = 0
       for (const msg of list) {
+        if (binding) Object.assign(msg, { _sessionBinding: binding })
         normalizeMsgSendTime(msg)
         const msgId = msg.message.id
         if (!msgId) continue
@@ -801,13 +928,14 @@ export const useChatStore = defineStore(
         merged++
       }
 
-      // REQ-014：每加载一页消息后，按 triggerMsgId 批量反查 thinking 元数据
-      // 思考元数据失败独立记录，不把已落库/显示的消息误记为消息拉取失败
-      try {
-        await loadThinkingByTriggerForMessages(roomId, list)
-      } catch (error) {
-        console.error('[chat] thinking 元数据加载失败（消息已正常显示）:', error)
-      }
+      // Local completion includes successful thinking cache, never a metadata HTTP wait.
+      await loadLocalThinkingForMessages(roomId, list, binding)
+      if (!accountCurrent(binding, requestAccountEpoch) || (browseSeq[roomId] ?? 0) !== requestBrowseSeq)
+        return { roomId, source, count: 0, ok: false, error: '窗口代次已失效' }
+      void loadThinkingByTriggerForMessages(roomId, list, binding).catch(() => {
+        if (accountCurrent(binding, requestAccountEpoch))
+          thinkingCacheErrors.value[roomId] = '思考元数据加载失败，可重试'
+      })
 
       !isWeb() &&
         (await info(
@@ -823,9 +951,407 @@ export const useChatStore = defineStore(
       const progress = ensureProgress(roomId)
       const localCount = Object.keys(messageMap[roomId] ?? {}).length
       if (decideFirstScreen(localCount, progress.remoteStatus) === 'backfill-remote') {
-        return getPageMsg(size, roomId, '', true, 'remote')
+        const remoteResult = await getPageMsg(size, roomId, '', true, 'remote')
+        if (remoteResult.ok) void calibrateWindow(roomId)
+        return remoteResult
       }
+      // 首屏不等待校准：后台核对当前页差异，失败保留可读内容
+      void calibrateWindow(roomId)
       return localResult
+    }
+
+    // aichatoverview#350：当前阅读窗口校准状态（unknown 未校准 / calibrating 校准中 /
+    // ok 已校准 / partial 部分确认可读 / unsupported 旧服务端 / error 失败可重试）。
+    // 冲突项重查完成前不报 ok；任何失败都不清空已有可读内容。
+    interface WindowCalibState {
+      status: WindowOutcome['status']
+      error: string
+      updatedAt: number
+    }
+    const windowCalib = reactive<Record<string, WindowCalibState>>({})
+    const windowCalibOf = (roomId: string): WindowCalibState =>
+      (windowCalib[roomId] ??= { status: 'unknown', error: '', updatedAt: 0 })
+    // 同房间校准单飞；预热/切房晚返回不得覆盖前台已推进的状态（浏览代次丢弃）
+    const inflightCalib = new Map<string, Promise<WindowOutcome>>()
+
+    const calibrateWindow = async (
+      roomId: string = globalStore.currentSessionRoomId,
+      opts?: { force?: boolean; requestId?: string }
+    ): Promise<WindowOutcome> => {
+      if (!roomId) return { roomId: '', ok: false, status: 'unknown', error: 'roomId 为空' }
+      if (!opts?.force && windowCalibOf(roomId).status === 'unsupported') {
+        return { roomId, ok: false, status: 'unsupported', error: windowCalibOf(roomId).error }
+      }
+      const inflight = inflightCalib.get(roomId)
+      if (inflight) return inflight
+      const task = runWindowCalibration(roomId, opts?.requestId ?? `wcal-${Date.now().toString(36)}-${roomId}`)
+      inflightCalib.set(roomId, task)
+      try {
+        return await task
+      } finally {
+        if (inflightCalib.get(roomId) === task) inflightCalib.delete(roomId)
+      }
+    }
+
+    // 旧失败可重试入口（重进房间/手动刷新自动触发；历史重试按钮顺带触发）
+    const retryWindowCalibration = async (roomId: string = globalStore.currentSessionRoomId) =>
+      calibrateWindow(roomId, { force: true })
+
+    // aichatoverview#352：房间阅读位置。持久化走 backend+UID 隔离的 `reading`
+    // 快照（SQLite 按 backend+UID 分库；Web 回退到 uid 作用域 localStorage），
+    // 只存轻量锚点（房间/首条可见消息/偏移/是否在底），不存整个消息 Map。
+    const readingPositions = reactive<Record<string, ReadPosition>>({})
+    let readingLastRoomId = ''
+    // aichatoverview#352 R4：快照是否已从盘读回（warm 重登挂载/上报/落盘先等它，避免空内存覆盖有效快照）。
+    const readingSnapshotLoaded = ref(false)
+    // 组件侧待执行的滚动恢复（DOM 就绪后消费一次；用户滚动可取消）。
+    const pendingScrollRestore = ref<{ roomId: string; anchorMsgId: string; offsetPx: number } | null>(null)
+    let readingPersistTimer: ReturnType<typeof setTimeout> | null = null
+    const READING_PERSIST_DEBOUNCE_MS = 1500
+
+    const readingWebKey = () => `aichat-reading:${userStore.userInfo?.uid || 'anon'}`
+
+    // 组件滚动上报：只更新运行时并防抖落盘，不阻塞滚动。
+    const reportReadingAnchor = (
+      roomId: string,
+      anchor: { anchorMsgId: string; anchorSendTime: number; offsetPx: number; wasAtBottom: boolean }
+    ) => {
+      if (!roomId || !anchor.anchorMsgId) return
+      readingPositions[roomId] = {
+        anchorMsgId: anchor.anchorMsgId,
+        anchorSendTime: Number.isFinite(anchor.anchorSendTime) ? anchor.anchorSendTime : 0,
+        offsetPx: Math.max(0, anchor.offsetPx || 0),
+        wasAtBottom: anchor.wasAtBottom === true,
+        updatedAt: Date.now()
+      }
+      if (readingPersistTimer) clearTimeout(readingPersistTimer)
+      readingPersistTimer = setTimeout(() => {
+        readingPersistTimer = null
+        void flushReadingPositions()
+      }, READING_PERSIST_DEBOUNCE_MS)
+    }
+
+    const getSavedReadPosition = (roomId: string): ReadPosition | null =>
+      roomId ? (readingPositions[roomId] ?? null) : null
+
+    const clearPendingRestore = () => {
+      pendingScrollRestore.value = null
+    }
+
+    // 立即落盘（切房/登出前调用；失败只记日志，永不打断阅读）。
+    // aichatoverview#352 R4：快照未从盘读回时不写盘——空内存会覆盖有效快照（warm 重登确定性零恢复）。
+    const flushReadingPositions = async () => {
+      if (readingPersistTimer) {
+        clearTimeout(readingPersistTimer)
+        readingPersistTimer = null
+      }
+      if (!readingSnapshotLoaded.value) return
+      const epoch = accountEpoch
+      const payload: ReadingSnapshot = {
+        version: READING_SNAPSHOT_VERSION,
+        lastRoomId: readingLastRoomId || globalStore.currentSessionRoomId || '',
+        positions: { ...readingPositions }
+      }
+      try {
+        if (isWeb()) {
+          localStorage.setItem(readingWebKey(), JSON.stringify(payload))
+          return
+        }
+        const binding = await captureAccount().catch(() => null)
+        if (!accountCurrent(binding, epoch)) return
+        if (!binding) return
+        await cacheLocalSnapshot(binding, 'reading', payload)
+        if (!accountCurrent(binding, epoch)) return
+      } catch {
+        // 持久化失败保留内存位置，不假称已缓存、不打断阅读。
+      }
+    }
+
+    // 读回快照（按 updatedAt 合并，避免覆盖本轮更新鲜的上报）。
+    // 成功触盘即标 loaded（含盘空），绑定缺失/异常不标——调用方继续 hold，不写盘。
+    const loadReadingSnapshot = async (): Promise<ReadingSnapshot | null> => {
+      const epoch = accountEpoch
+      try {
+        let raw: unknown = null
+        if (isWeb()) {
+          const text = localStorage.getItem(readingWebKey())
+          raw = text ? JSON.parse(text) : null
+          readingSnapshotLoaded.value = true
+        } else {
+          const binding = await captureAccount().catch(() => null)
+          if (!accountCurrent(binding, epoch) || !binding) return null
+          raw = await readLocalSnapshot(binding, 'reading')
+          if (!accountCurrent(binding, epoch)) return null
+          readingSnapshotLoaded.value = true
+        }
+        const snapshot = normalizeReadingSnapshot(raw)
+        if (!snapshot) return null
+        if (snapshot.lastRoomId) readingLastRoomId = snapshot.lastRoomId
+        for (const [roomId, pos] of Object.entries(snapshot.positions)) {
+          const current = readingPositions[roomId]
+          if (!current || pos.updatedAt >= current.updatedAt) readingPositions[roomId] = pos
+        }
+        return snapshot
+      } catch {
+        return null
+      }
+    }
+
+    // 锚点不在首屏时有界向前回填（复用 loadMore，不从第一页循环下载到该位置）。
+    // warm 重登首屏本地页瞬时失败会留下 error：直接返回等于零回填；
+    // 错误清零后由本轮 loadMore 重试（单页失败捕获继续，本轮最多 5 页，有界）。
+    const ensureAnchorLoaded = async (roomId: string, anchorMsgId: string): Promise<boolean> => {
+      const requestBrowse = browseSeq[roomId] ?? 0
+      for (let page = 0; page < RESTORE_BACKFILL_PAGES; page++) {
+        if ((browseSeq[roomId] ?? 0) !== requestBrowse) return false
+        if (messageMap[roomId]?.[anchorMsgId]) return true
+        const progress = ensureProgress(roomId)
+        if (progress.isLast) return !!messageMap[roomId]?.[anchorMsgId]
+        if (progress.error) progress.error = ''
+        try {
+          await loadMore()
+        } catch {
+          // 瞬时失败（绑定/DB 竞态）不中断回填，下一页继续重试。
+        }
+      }
+      return !!messageMap[roomId]?.[anchorMsgId]
+    }
+
+    // 重登/重进房间恢复上次房间与阅读位置。返回简短结论供 boot 日志与验收记录。
+    // 目标明确不存在（权威列表成功且本地无缓存）才回列表；网络失败保留本地目标。
+    const restoreLastReading = async (previousRoomId = ''): Promise<string> => {
+      const snapshot = await loadReadingSnapshot()
+      const ids = sessionList.value.map((s) => s.roomId)
+      // 同轮已有选中优先（切号重进），否则用持久化上次房间（仍在列表才恢复）。
+      const snapshotTarget = pickRestoreRoom(snapshot, ids)
+      const preferred = (previousRoomId && ids.includes(previousRoomId) ? previousRoomId : '') || snapshotTarget || ''
+      if (preferred) {
+        if (globalStore.currentSessionRoomId !== preferred) {
+          globalStore.updateCurrentSessionRoomId(preferred)
+        } else {
+          // 选中未变化 watcher 不触发，显式重进以执行恢复。
+          await changeRoom()
+        }
+        return `restored:${preferred}`
+      }
+      const missing = previousRoomId || snapshot?.lastRoomId || ''
+      if (!missing) return 'empty'
+      const hasLocal = !!messageMap[missing] && Object.keys(messageMap[missing]).length > 0
+      if (!sessionOptions.value.isError && !hasLocal) {
+        if (globalStore.currentSessionRoomId) globalStore.updateCurrentSessionRoomId('')
+        return `gone:${missing}`
+      }
+      if (globalStore.currentSessionRoomId !== missing) {
+        globalStore.updateCurrentSessionRoomId(missing)
+      } else {
+        await changeRoom()
+      }
+      return `local-only:${missing}`
+    }
+
+    const runWindowCalibration = async (roomId: string, reqId: string): Promise<WindowOutcome> => {
+      const state = windowCalibOf(roomId)
+      state.status = 'calibrating'
+      state.error = ''
+      const finish = (outcome: WindowOutcome): WindowOutcome => {
+        state.status = outcome.status
+        state.error = outcome.error ?? ''
+        state.updatedAt = Date.now()
+        return outcome
+      }
+      let binding: SessionIdentity | null = null
+      const epoch = accountEpoch
+      try {
+        binding = await captureAccount()
+      } catch (error) {
+        return finish({
+          roomId,
+          ok: false,
+          status: 'error',
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+      // 结果绑定请求时浏览代次与消息更新序号
+      const requestBrowseSeq = browseSeq[roomId] ?? 0
+      const requestMsgSeq = roomMsgSeq[roomId] ?? 0
+      const existedIds = new Set(Object.keys(messageMap[roomId] ?? {}))
+      const visible = chatMessageListByRoomId
+        .value(roomId)
+        .map((m) => ({ id: String(m.message.id), sendTime: m.message.sendTime ?? 0 }))
+      const anchorId = visible.length ? visible[0].id : ''
+      // aichatoverview#351：附带已知思考 ID，逐条回执（十进制，上限 100）。
+      const knownThinkingIds = buildThinkingKnownIds(
+        [...(thinkingByTrigger.get(roomId)?.values() ?? [])].flatMap((list) => list.map((s) => s.thinkingId))
+      )
+      const range = buildWindowRange(visible, pageSize, reqId, knownThinkingIds)
+
+      let data: {
+        items?: unknown[]
+        unavailableIds?: Array<string | number>
+        complete?: boolean
+        knownReceipts?: Array<{ id?: string; available?: boolean }>
+        knownComplete?: boolean
+        schemaVersion?: string
+      }
+      // aichatoverview#351：Web 直调的思考 envelope 暂存，消息合并后独立消费。
+      let webEnvelope: {
+        thinkingAccess?: unknown
+        thinkingTriggers?: unknown
+        thinkingItems?: unknown
+        thinkingComplete?: unknown
+        thinkingKnownReceipts?: unknown
+        thinkingKnownComplete?: unknown
+      } | null = null
+      try {
+        if (isWeb()) {
+          // Web 直调服务端 envelope：同口径严格校验，不推测旧服务端能力
+          const { imRequest } = await import('@/utils/ImRequestUtils')
+          const { ImUrlEnum } = await import('@/enums')
+          const envelope = (await imRequest({
+            url: ImUrlEnum.GET_MSG_WINDOW,
+            body: { roomId, ...range }
+          })) as {
+            requestId?: unknown
+            schemaVersion?: string
+            capabilities?: string[]
+            items?: unknown[]
+            complete?: boolean
+            knownReceipts?: Array<{ id?: string; available?: boolean }>
+            knownComplete?: boolean
+            thinkingAccess?: unknown
+            thinkingTriggers?: unknown
+            thinkingItems?: unknown
+            thinkingComplete?: unknown
+            thinkingKnownReceipts?: unknown
+            thinkingKnownComplete?: unknown
+          }
+          // aichatoverview#351 N2：迟到/乱序旧包整包丢弃——应答 requestId 回显与本轮
+          // 发送不一致即重放旧授权，不写消息、不碰思考缓存（已清零不得复活）。
+          // 缺回显按旧服务端形状放行（下方 strict 校验走 unsupported，不写缓存）。
+          if (envelope?.requestId != null && String(envelope.requestId) !== reqId) {
+            return finish({
+              roomId,
+              ok: false,
+              status: 'error',
+              error: 'window_error: 窗口校准应答已过期'
+            })
+          }
+          if (
+            !envelope ||
+            envelope.schemaVersion !== 'msg-window-v1' ||
+            !envelope.capabilities?.includes('messages') ||
+            !envelope.capabilities?.includes('known-receipts') ||
+            !Array.isArray(envelope.items) ||
+            typeof envelope.complete !== 'boolean' ||
+            !Array.isArray(envelope.knownReceipts) ||
+            typeof envelope.knownComplete !== 'boolean'
+          ) {
+            return finish({
+              roomId,
+              ok: false,
+              status: 'unsupported',
+              error: 'window_unsupported: envelope 缺字段或版本未知'
+            })
+          }
+          data = {
+            items: envelope.items,
+            unavailableIds: envelope.knownReceipts.filter((r) => !r.available).map((r) => String(r.id)),
+            complete: envelope.complete && envelope.knownComplete
+          }
+          webEnvelope = envelope
+        } else {
+          data = (await invokeWithErrorHandler(
+            TauriCommand.CALIBRATE_WINDOW,
+            { binding, param: { roomId, ...range } },
+            {
+              customErrorMessage: '校准当前窗口失败',
+              errorType: ErrorType.Network
+            }
+          )) as { items?: unknown[]; unavailableIds?: Array<string | number>; complete?: boolean }
+          if (!data || !Array.isArray(data.items) || !Array.isArray(data.unavailableIds)) {
+            return finish({ roomId, ok: false, status: 'unsupported', error: 'window_unsupported: 校准响应缺字段' })
+          }
+        }
+      } catch (error) {
+        // 切房/退出：丢弃本次结果，不污染新房间状态
+        if (!accountCurrent(binding, epoch) || (browseSeq[roomId] ?? 0) !== requestBrowseSeq) {
+          return { roomId, ok: false, status: state.status, error: '窗口代次已失效' }
+        }
+        const message = error instanceof Error ? error.message : String(error)
+        // 鉴权失败原文透出（转登录，不重试）；旧服务端/404 判 unsupported 保持可读
+        if (/请重新登录|token过期|Token expired/i.test(message)) {
+          return finish({ roomId, ok: false, status: 'error', error: message })
+        }
+        if (isWindowUnsupported(message)) {
+          return finish({ roomId, ok: false, status: 'unsupported', error: message })
+        }
+        console.error(`[chat] calibrateWindow 失败:`, error)
+        return finish({ roomId, ok: false, status: 'error', error: message })
+      }
+
+      if (!accountCurrent(binding, epoch) || (browseSeq[roomId] ?? 0) !== requestBrowseSeq) {
+        return { roomId, ok: false, status: state.status, error: '窗口代次已失效' }
+      }
+      if (!messageMap[roomId]) messageMap[roomId] = {}
+      const wsTouched = (roomMsgSeq[roomId] ?? 0) !== requestMsgSeq
+      for (const msg of (data.items ?? []) as MessageType[]) {
+        if (binding) Object.assign(msg, { _sessionBinding: binding })
+        normalizeMsgSendTime(msg)
+      }
+      // 原地合并：请求期间被 WS 更新过的 ID 不被旧快照覆盖，发送中占位永不覆盖
+      const merged = mergeWindowResult(
+        messageMap[roomId],
+        { items: (data.items ?? []) as WindowMergeMsg[], unavailableIds: data.unavailableIds ?? [] },
+        { existedIds, wsTouched, isTransient: (m) => shouldKeepTransientMessage(m as MessageType) },
+        anchorId
+      )
+      // 在途触及导致部分跳过时不假称已校准
+      const status = data.complete && !wsTouched ? 'ok' : 'partial'
+      // aichatoverview#351：思考 envelope 独立消费——缺失/非法保持缓存，
+      // 明确无权隐藏本房卡片与正文，均不影响消息结果。
+      if (isWeb() && webEnvelope) {
+        const thinking = validateThinkingEnvelope(webEnvelope, knownThinkingIds)
+        if (thinking?.access) {
+          mergeThinkingMetadata(roomId, thinking.items)
+          const loaded = metadataSet(roomId)
+          for (const t of thinking.triggers) loaded.add(t)
+          if (thinkingCacheErrors.value[roomId]) delete thinkingCacheErrors.value[roomId]
+        } else if (thinking && !thinking.access) {
+          clearThinking(roomId)
+        }
+      } else if (!isWeb()) {
+        // Tauri：Rust 已按提交门禁落库思考元数据；读回缓存并入卡片，失败不影响消息。
+        // 明确 thinkingAccess=false 时隐藏本房卡片与正文且不读回（Rust 已清本房缓存行，
+        // 重进房不复活）；缺字段/失败（undefined）保持既有缓存。
+        const tauriThinkingAccess = (data as { thinkingAccess?: unknown }).thinkingAccess
+        if (tauriThinkingAccess === false) {
+          clearThinking(roomId)
+        } else {
+          try {
+            const cached = Object.values(messageMap[roomId] ?? {}) as MessageType[]
+            await loadLocalThinkingForMessages(roomId, cached, binding)
+            const savedTriggers = (data as { thinkingTriggers?: unknown }).thinkingTriggers
+            if (Array.isArray(savedTriggers)) {
+              const loaded = metadataSet(roomId)
+              for (const t of savedTriggers) if (typeof t === 'string') loaded.add(t)
+            }
+          } catch {
+            // 保持缓存，消息结果不受影响。
+          }
+        }
+      }
+      !isWeb() &&
+        (await info(
+          `[window-calibrate] roomId=${roomId} merged=${merged.merged} deleted=${merged.deleted} anchorKept=${merged.anchorKept} status=${status}`
+        ))
+      return finish({
+        roomId,
+        ok: true,
+        status,
+        merged: merged.merged,
+        deleted: merged.deleted,
+        anchorKept: merged.anchorKept
+      })
     }
 
     // aichatoverview#285：账号退出/切换清理全部进度与进行中请求，旧请求结果不再写入
@@ -834,12 +1360,27 @@ export const useChatStore = defineStore(
       for (const roomId of Object.keys(messageOptions)) {
         delete messageOptions[roomId]
       }
+      // aichatoverview#352：阅读位置运行态同账号代次失效（持久化快照保留，下次登录重读）。
+      for (const roomId of Object.keys(readingPositions)) {
+        delete readingPositions[roomId]
+      }
+      readingLastRoomId = ''
+      readingSnapshotLoaded.value = false
+      pendingScrollRestore.value = null
+      if (readingPersistTimer) {
+        clearTimeout(readingPersistTimer)
+        readingPersistTimer = null
+      }
       for (const roomId of Object.keys(browseSeq)) {
         delete browseSeq[roomId]
       }
       for (const roomId of Object.keys(roomMsgSeq)) {
         delete roomMsgSeq[roomId]
       }
+      for (const roomId of Object.keys(windowCalib)) {
+        delete windowCalib[roomId]
+      }
+      inflightCalib.clear()
       inflightPageMsg.clear()
       lastGoodRemoteCursor.clear()
       remoteSyncLocks.clear()
@@ -859,6 +1400,8 @@ export const useChatStore = defineStore(
 
     // 获取会话列表
     const getSessionList = async (_isFresh = false) => {
+      const binding = await captureAccount()
+      const epoch = accountEpoch
       try {
         if (sessionOptions.value.isLoading) return
         sessionOptions.value.isLoading = true
@@ -894,6 +1437,18 @@ export const useChatStore = defineStore(
           return
         }
 
+        if (!sessionList.value.length && binding) {
+          try {
+            const snapshot = await readLocalSnapshot<SessionItem[]>(binding, 'sessions')
+            if (!accountCurrent(binding, epoch)) return
+            if (Array.isArray(snapshot)) {
+              sessionList.value = snapshot.filter((item) => item.hide !== true)
+              rebuildSessionMap()
+            }
+          } catch {
+            if (accountCurrent(binding, epoch)) thinkingCacheErrors.value.sessions = '本地会话快照读取失败'
+          }
+        }
         const prevSessions =
           sessionList.value.length > 0
             ? sessionList.value.reduce(
@@ -906,15 +1461,21 @@ export const useChatStore = defineStore(
             : undefined
         // #229：断网静默（manager 裁决）——ISS-009 领域 UX 是兜底卡片+重试（isError 不动），
         // 裸 toast 与之并存属冗余噪声，只收 toast；catch 路径已置 isError 并留日志
-        const data: any = await invokeWithErrorHandler(TauriCommand.LIST_CONTACTS, undefined, {
-          customErrorMessage: '获取会话列表失败',
-          errorType: ErrorType.Network,
-          showError: false
-        }).catch(() => {
+        const data: any = await invokeWithErrorHandler(
+          TauriCommand.LIST_CONTACTS,
+          { binding },
+          {
+            customErrorMessage: '获取会话列表失败',
+            errorType: ErrorType.Network,
+            showError: false
+          }
+        ).catch(() => {
+          if (!accountCurrent(binding, epoch)) return null
           sessionOptions.value.isLoading = false
           sessionOptions.value.isError = true
           return null
         })
+        if (!accountCurrent(binding, epoch)) return
         if (!data) {
           // 拉取失败也要恢复未读角标的展示，避免 unreadReady 卡在 false
           globalStore.unreadReady = true
@@ -942,6 +1503,14 @@ export const useChatStore = defineStore(
         rebuildSessionMap()
 
         sortAndUniqueSessionList()
+        if (binding) {
+          try {
+            await cacheLocalSnapshot(binding, 'sessions', sessionList.value)
+          } catch {
+            if (accountCurrent(binding, epoch)) thinkingCacheErrors.value.sessions = '本地会话快照保存失败'
+          }
+          if (!accountCurrent(binding, epoch)) return
+        }
 
         // 补偿陈旧未读在后台执行，不阻塞主流程，避免 syncLoading 卡住
         reconcileStaleUnread(prevSessions)
@@ -961,6 +1530,7 @@ export const useChatStore = defineStore(
         globalStore.unreadReady = true
         unreadCountManager.refreshBadge(globalStore.unReadMark, feedStore.unreadCount)
       } catch (e) {
+        if (!accountCurrent(binding, epoch)) return
         console.error('获取会话列表失败11:', e)
         sessionOptions.value.isLoading = false
         sessionOptions.value.isError = true
@@ -968,7 +1538,7 @@ export const useChatStore = defineStore(
         globalStore.unreadReady = true
         unreadCountManager.refreshBadge(globalStore.unReadMark, feedStore.unreadCount)
       } finally {
-        sessionOptions.value.isLoading = false
+        if (accountCurrent(binding, epoch)) sessionOptions.value.isLoading = false
       }
     }
 
@@ -1075,6 +1645,10 @@ export const useChatStore = defineStore(
 
     // 推送消息
     const pushMsg = async (msg: MessageType, options: { isActiveChatView?: boolean; activeRoomId?: string } = {}) => {
+      const origin = eventSession(msg) ?? sessionBinding.value ?? undefined
+      if (origin) Object.assign(msg, { _sessionBinding: origin })
+      const epoch = accountEpoch
+      if (origin && !isSessionCurrent(origin)) return
       normalizeMsgSendTime(msg)
       if (msg.message.roomId) bumpRoomMsgSeq(msg.message.roomId)
       if (!msg.message.id) {
@@ -1151,6 +1725,7 @@ export const useChatStore = defineStore(
       } else {
         // 会话不存在，添加新会话
         await addSession(msg.message.roomId)
+        if (accountEpoch !== epoch || (origin && !isSessionCurrent(origin))) return
         // 新会话添加后，如果不是自己发的消息且不在当前活跃视图，需要设置未读数
         const isSelfMessage = msg.fromUser.uid === userStore.userInfo!.uid
         const shouldIncreaseUnread = !isSelfMessage && (!isActiveChatView || msg.message.roomId !== targetRoomId)
@@ -1339,13 +1914,17 @@ export const useChatStore = defineStore(
 
     // 更新所有标记类型的数量
     const updateMarkCount = async (markList: MarkItemType[]) => {
+      const binding = eventSession(markList[0]) ?? (await captureAccount())
+      const epoch = accountEpoch
       info('保存消息标记到本地数据库')
       for (const mark of markList) {
+        if (!accountCurrent(binding, epoch)) return
         const { msgId, markType, markCount, actType, uid } = mark
 
         await invokeWithErrorHandler(
           TauriCommand.SAVE_MESSAGE_MARK,
           {
+            binding,
             data: {
               msgId: msgId.toString(),
               markType,
@@ -1360,6 +1939,7 @@ export const useChatStore = defineStore(
           }
         )
 
+        if (!accountCurrent(binding, epoch)) return
         const msgItem = currentMessageMap.value?.[String(msgId)]
         if (msgItem && msgItem.message.messageMarks) {
           // 获取当前的标记状态，如果不存在则初始化
@@ -1425,6 +2005,9 @@ export const useChatStore = defineStore(
 
     // 更新消息撤回状态
     const updateRecallMsg = async (data: RevokedMsgType) => {
+      const binding = eventSession(data) ?? (await captureAccount())
+      const epoch = accountEpoch
+      if (!accountCurrent(binding, epoch)) return
       const { msgId } = data
       const roomIdFromPayload = data.roomId || currentMessageMap.value?.[msgId]?.message?.roomId
       const resolvedRoomId = roomIdFromPayload || findRoomIdByMsgId(msgId)
@@ -1487,6 +2070,7 @@ export const useChatStore = defineStore(
           await invokeWithErrorHandler(
             TauriCommand.UPDATE_MESSAGE_RECALL_STATUS,
             {
+              binding,
               messageId: message.message.id,
               messageType: MsgEnum.RECALL,
               messageBody: recallMessageBody
@@ -1502,6 +2086,7 @@ export const useChatStore = defineStore(
         }
       }
 
+      if (!accountCurrent(binding, epoch)) return
       if (resolvedRoomId) {
         const session = resolveSessionByRoomId(resolvedRoomId)
         if (session && recallMessageBody) {
@@ -1528,14 +2113,25 @@ export const useChatStore = defineStore(
     }
 
     // 删除消息
-    const deleteMsg = (msgId: string) => {
-      if (currentMessageMap.value && msgId in currentMessageMap.value) {
-        delete currentMessageMap.value[msgId]
-      }
+    const deleteMsg = (msgId: string, roomId = globalStore.currentSessionRoomId) => {
+      const deleted = deletedThinkingTriggers.get(roomId) ?? new Set<string>()
+      deleted.add(msgId)
+      deletedThinkingTriggers.set(roomId, deleted)
+      browseSeq[roomId] = (browseSeq[roomId] ?? 0) + 1
+      thinkingByTrigger.get(roomId)?.delete(msgId)
+      for (const [key, state] of thinkingStreams)
+        if (state.roomId === roomId && state.triggerMsgId === msgId) thinkingStreams.delete(key)
+      if (messageMap[roomId]) delete messageMap[roomId][msgId]
     }
 
     const clearRoomMessages = (roomId: string) => {
       if (!roomId) return
+      browseSeq[roomId] = (browseSeq[roomId] ?? 0) + 1
+      const deleted = deletedThinkingTriggers.get(roomId) ?? new Set<string>()
+      for (const id of Object.keys(messageMap[roomId] ?? {})) deleted.add(id)
+      for (const id of thinkingByTrigger.get(roomId)?.keys() ?? []) deleted.add(id)
+      deletedThinkingTriggers.set(roomId, deleted)
+      clearThinking(roomId)
 
       if (messageMap[roomId]) {
         messageMap[roomId] = {}
@@ -1631,9 +2227,19 @@ export const useChatStore = defineStore(
 
     // 创建请求队列限制器，确保 markMsgRead 请求串行执行，避免触发服务器限流
     const markMsgReadQueue = pLimit(1)
+    const enqueueMarkMsgRead = (roomId: string) => {
+      // Capture before waiting in FIFO; dequeue must never select a newly logged-in identity.
+      const binding = sessionBinding.value
+      const epoch = accountEpoch
+      return markMsgReadQueue(() => {
+        if (!accountCurrent(binding, epoch) || (!isWeb() && !binding)) throw new SessionExpiredError()
+        return binding ? markMsgRead(roomId, binding) : markMsgRead(roomId)
+      })
+    }
 
     // 标记已读数为 0
     const markSessionRead = (roomId: string) => {
+      const epoch = accountEpoch
       // 避免短时间内重复调用
       if (markSessionReadLock.has(roomId)) {
         return
@@ -1651,7 +2257,7 @@ export const useChatStore = defineStore(
       // 1. 记录已读时的活跃时间，用于重登时识别陈旧未读
       const activeTime = session.activeTime || Date.now()
       lastReadActiveTime.value[roomId] = activeTime
-      sessionUnreadStore.setLastRead(userStore.userInfo?.uid, roomId, activeTime)
+      sessionUnreadStore.setLastRead(unreadOwner(), roomId, activeTime)
 
       // 2. 强制清除缓存（必须在 updateSession 之前，确保缓存先清零）
       persistUnreadCount(roomId, 0)
@@ -1660,8 +2266,8 @@ export const useChatStore = defineStore(
       updateSession(roomId, { unreadCount: 0 })
 
       // 4. 上报服务器已读（通过队列串行执行，避免并发请求触发限流）
-      markMsgReadQueue(() => markMsgRead(roomId)).catch((err) => {
-        console.error('[markSessionRead] 已读上报失败:', err)
+      const read = enqueueMarkMsgRead(roomId).catch((err) => {
+        if (!(err instanceof SessionExpiredError)) console.error('[markSessionRead] 已读上报失败:', err)
       })
 
       // 5. 立即刷新全局未读，避免等待防抖
@@ -1669,8 +2275,9 @@ export const useChatStore = defineStore(
 
       // 延迟解锁，避免快速重复点击
       setTimeout(() => {
-        markSessionReadLock.delete(roomId)
+        if (epoch === accountEpoch) markSessionReadLock.delete(roomId)
       }, 500)
+      return read
     }
 
     // 清理当前会话的未读（用于重连/重登后仍停留在该会话时的兜底）
@@ -1700,7 +2307,7 @@ export const useChatStore = defineStore(
         // 从 map 中删除
         delete sessionMap.value[roomId]
         delete lastReadActiveTime.value[roomId]
-        sessionUnreadStore.setLastRead(userStore.userInfo?.uid, roomId, 0)
+        sessionUnreadStore.setLastRead(unreadOwner(), roomId, 0)
 
         // 删除会话后更新未读计数
         requestUnreadCountUpdate()
@@ -2406,6 +3013,12 @@ export const useChatStore = defineStore(
       if (!payload.thinkingId || !validThinkingId(payload.fromUid) || !validThinkingId(payload.roomId)) return
       const roomId = String(payload.roomId)
       const aiclawId = String(payload.fromUid)
+      const origin = eventSession(payload)
+      if (
+        (origin && !isSessionCurrent(origin)) ||
+        (payload.triggerMsgId && deletedThinkingTriggers.get(roomId)?.has(payload.triggerMsgId))
+      )
+        return
       const key = `${roomId}:${aiclawId}`
       const prior = findThinking(payload.thinkingId)
       if (prior) {
@@ -2417,6 +3030,7 @@ export const useChatStore = defineStore(
           (prior.clientRunId && payload.clientRunId && prior.clientRunId !== payload.clientRunId)
         )
           return
+        if (prior.status === 'pending') prior.status = 'thinking'
         if (prior.status === 'thinking' && !thinkingStreams.has(key)) {
           prior.clientRunId ||= payload.clientRunId
           thinkingStreams.set(key, prior)
@@ -2469,114 +3083,150 @@ export const useChatStore = defineStore(
       const roomId = String(incoming.roomId)
       const actor = String(incoming.fromUid)
       const key = `${roomId}:${actor}`
-      const incomingDetail = await loadThinkingDetail(incoming.thinkingId)
-      if (pendingThinkingStarts.get(id) !== pending) return
-      const verified =
-        incomingDetail &&
-        validThinkingId(incomingDetail.thinkingId) &&
-        validThinkingId(incomingDetail.roomId) &&
-        validThinkingId(incomingDetail.aiclawUid) &&
-        (incomingDetail.triggerMsgId == null || validThinkingId(incomingDetail.triggerMsgId)) &&
-        String(incomingDetail.thinkingId) === incoming.thinkingId &&
-        String(incomingDetail.roomId) === roomId &&
-        String(incomingDetail.aiclawUid) === actor &&
-        String(incomingDetail.triggerMsgId ?? '') === (incoming.triggerMsgId ?? '') &&
-        (!incoming.clientRunId || incomingDetail.clientRunId === incoming.clientRunId)
-      if (verified && mapServerThinkingStatus(incomingDetail.status) !== 'thinking') {
-        restoreTerminalThinking(incomingDetail)
-        forgetPendingStart(id)
-        return
-      }
-      if (verified) {
-        const current = thinkingStreams.get(key)
-        if (!current) {
+      const binding = eventSession(incoming) ?? sessionBinding.value
+      const epoch = accountEpoch
+      if ((!isWeb() && !binding) || !accountCurrent(binding, epoch) || pendingThinkingStarts.get(id) !== pending) return
+      try {
+        const incomingDetail = await loadThinkingDetail(incoming.thinkingId, binding ?? undefined)
+        if (!accountCurrent(binding, epoch) || pendingThinkingStarts.get(id) !== pending) return
+        const verified =
+          incomingDetail &&
+          validThinkingId(incomingDetail.thinkingId) &&
+          validThinkingId(incomingDetail.roomId) &&
+          validThinkingId(incomingDetail.aiclawUid) &&
+          (incomingDetail.triggerMsgId == null || validThinkingId(incomingDetail.triggerMsgId)) &&
+          String(incomingDetail.thinkingId) === incoming.thinkingId &&
+          String(incomingDetail.roomId) === roomId &&
+          String(incomingDetail.aiclawUid) === actor &&
+          String(incomingDetail.triggerMsgId ?? '') === (incoming.triggerMsgId ?? '') &&
+          (!incoming.clientRunId || incomingDetail.clientRunId === incoming.clientRunId)
+        if (verified && mapServerThinkingStatus(incomingDetail.status) !== 'thinking') {
+          restoreTerminalThinking(incomingDetail)
           forgetPendingStart(id)
-          startThinking(incoming)
           return
         }
-        const currentDetail = await loadThinkingDetail(current.thinkingId)
-        if (pendingThinkingStarts.get(id) !== pending) return
-        const currentStatus = currentDetail && mapServerThinkingStatus(currentDetail.status)
-        if (
-          thinkingStreams.get(key)?.thinkingId === current.thinkingId &&
-          currentDetail &&
-          matchesDetail(current, currentDetail) &&
-          currentStatus &&
-          currentStatus !== 'thinking'
-        ) {
-          finalizeThinking(current.thinkingId, {
-            roomId: current.roomId,
-            fromUid: current.aiclawId,
-            clientRunId: current.clientRunId,
-            status: currentStatus,
-            durationMs: currentDetail.durationMs ?? undefined
-          })
-          forgetPendingStart(id)
-          startThinking(incoming)
-          return
+        if (verified) {
+          const current = thinkingStreams.get(key)
+          if (!current) {
+            forgetPendingStart(id)
+            startThinking(incoming)
+            return
+          }
+          const currentDetail = await loadThinkingDetail(current.thinkingId, binding ?? undefined)
+          if (!accountCurrent(binding, epoch) || pendingThinkingStarts.get(id) !== pending) return
+          const currentStatus = currentDetail && mapServerThinkingStatus(currentDetail.status)
+          if (
+            thinkingStreams.get(key)?.thinkingId === current.thinkingId &&
+            currentDetail &&
+            matchesDetail(current, currentDetail) &&
+            currentStatus &&
+            currentStatus !== 'thinking'
+          ) {
+            finalizeThinking(current.thinkingId, {
+              roomId: current.roomId,
+              fromUid: current.aiclawId,
+              clientRunId: current.clientRunId,
+              status: currentStatus,
+              durationMs: currentDetail.durationMs ?? undefined
+            })
+            forgetPendingStart(id)
+            startThinking(incoming)
+            return
+          }
         }
+        if (!retried) pending.retry = setTimeout(() => void resolveCollidingStart(id, true), 1000)
+      } catch {
+        if (accountCurrent(binding, epoch) && pendingThinkingStarts.get(id) === pending)
+          thinkingCacheErrors.value[roomId] = '思考状态确认失败，可重试'
       }
-      if (!retried) pending.retry = setTimeout(() => void resolveCollidingStart(id, true), 1000)
     }
 
     const recoverMissingThinkingStart = async (end: ThinkingEndPayload, key: string, retried = false) => {
-      const detail = await loadThinkingDetail(end.thinkingId)
-      const pending = pendingThinkingEnds.get(key)
-      if (!pending || (pending.payload !== end && pending.alternate !== end)) return
-      if (!detail && !retried) {
-        pending.retry = setTimeout(() => void recoverMissingThinkingStart(end, key, true), 1000)
-        return
+      const binding = eventSession(end) ?? sessionBinding.value
+      const epoch = accountEpoch
+      if ((!isWeb() && !binding) || !accountCurrent(binding, epoch)) return
+      try {
+        const detail = await loadThinkingDetail(end.thinkingId, binding ?? undefined)
+        const pending = pendingThinkingEnds.get(key)
+        if (!accountCurrent(binding, epoch) || !pending || (pending.payload !== end && pending.alternate !== end))
+          return
+        if (!detail && !retried) {
+          pending.retry = setTimeout(() => void recoverMissingThinkingStart(end, key, true), 1000)
+          return
+        }
+        if (
+          !detail ||
+          !validThinkingId(detail.thinkingId) ||
+          !validThinkingId(detail.roomId) ||
+          !validThinkingId(detail.aiclawUid) ||
+          (detail.triggerMsgId != null && !validThinkingId(detail.triggerMsgId)) ||
+          String(detail.thinkingId) !== end.thinkingId ||
+          String(detail.roomId) !== String(end.roomId)
+        )
+          return
+        const matchingEnd = [pending.payload, pending.alternate].find(
+          (candidate) =>
+            candidate &&
+            mapServerThinkingStatus(detail.status) === candidate.status &&
+            (candidate.fromUid == null || String(detail.aiclawUid) === String(candidate.fromUid)) &&
+            (candidate.clientRunId == null || detail.clientRunId === candidate.clientRunId)
+        )
+        if (!matchingEnd) return
+        if (binding && detail.triggerMsgId != null) {
+          const window = await readThinkingCache(binding, String(detail.roomId), [String(detail.triggerMsgId)])
+          if (
+            !accountCurrent(binding, epoch) ||
+            pendingThinkingEnds.get(key) !== pending ||
+            !window.visibleTriggerIds.includes(String(detail.triggerMsgId))
+          )
+            return
+        }
+        const roomId = String(detail.roomId)
+        const aiclawId = String(detail.aiclawUid)
+        const restored = findThinking(end.thinkingId)
+        if (restored && ['pending', 'thinking'].includes(restored.status) && matchesDetail(restored, detail)) {
+          restored.clientRunId ||= detail.clientRunId || undefined
+          finalizeThinking(end.thinkingId, matchingEnd, true)
+          return
+        }
+        const active = thinkingStreams.get(`${roomId}:${aiclawId}`)
+        if (active && active.thinkingId !== end.thinkingId) {
+          // A's delayed END must not supersede the newer active run B.
+          if (findThinking(end.thinkingId)) finalizeThinking(end.thinkingId, matchingEnd)
+          else restoreTerminalThinking(detail)
+          forgetPendingEnd(key)
+          return
+        }
+        startThinking({
+          thinkingId: end.thinkingId,
+          roomId: detail.roomId!,
+          fromUid: detail.aiclawUid!,
+          triggerMsgId: detail.triggerMsgId == null ? undefined : String(detail.triggerMsgId),
+          clientRunId: detail.clientRunId || undefined
+        })
+      } catch {
+        if (accountCurrent(binding, epoch) && pendingThinkingEnds.has(key))
+          thinkingCacheErrors.value[String(end.roomId)] = '思考状态确认失败，可重试'
       }
-      if (
-        !detail ||
-        !validThinkingId(detail.thinkingId) ||
-        !validThinkingId(detail.roomId) ||
-        !validThinkingId(detail.aiclawUid) ||
-        (detail.triggerMsgId != null && !validThinkingId(detail.triggerMsgId)) ||
-        String(detail.thinkingId) !== end.thinkingId ||
-        String(detail.roomId) !== String(end.roomId)
-      )
-        return
-      const matchingEnd = [pending.payload, pending.alternate].find(
-        (candidate) =>
-          candidate &&
-          mapServerThinkingStatus(detail.status) === candidate.status &&
-          (candidate.fromUid == null || String(detail.aiclawUid) === String(candidate.fromUid)) &&
-          (candidate.clientRunId == null || detail.clientRunId === candidate.clientRunId)
-      )
-      if (!matchingEnd) return
-      const roomId = String(detail.roomId)
-      const aiclawId = String(detail.aiclawUid)
-      const active = thinkingStreams.get(`${roomId}:${aiclawId}`)
-      if (active && active.thinkingId !== end.thinkingId) {
-        // A's delayed END must not supersede the newer active run B.
-        if (findThinking(end.thinkingId)) finalizeThinking(end.thinkingId, matchingEnd)
-        else restoreTerminalThinking(detail)
-        forgetPendingEnd(key)
-        return
-      }
-      startThinking({
-        thinkingId: end.thinkingId,
-        roomId: detail.roomId!,
-        fromUid: detail.aiclawUid!,
-        triggerMsgId: detail.triggerMsgId == null ? undefined : String(detail.triggerMsgId),
-        clientRunId: detail.clientRunId || undefined
-      })
     }
 
     /** 只对精确 ID、房间、可用的执行者/run 关联完成；未知 END 有界等待/查询。 */
     const finalizeThinking = (
       thinkingId: string,
       payload: Pick<ThinkingEndPayload, 'status' | 'durationMs' | 'errorMsg'> &
-        Partial<Pick<ThinkingEndPayload, 'roomId' | 'fromUid' | 'clientRunId'>>
+        Partial<Pick<ThinkingEndPayload, 'roomId' | 'fromUid' | 'clientRunId'>>,
+      verified = false
     ) => {
       if (!thinkingId) return
+      const origin = eventSession(payload)
+      if (origin && !isSessionCurrent(origin)) return
       const state = findThinking(thinkingId)
-      if (state) {
+      if (state && ((state.status !== 'pending' && (!payload.clientRunId || !!state.clientRunId)) || verified)) {
         if (payload.roomId != null && !matchesEnd(state, { ...payload, thinkingId, roomId: payload.roomId })) return
         if (payload.fromUid != null && String(payload.fromUid) !== String(state.aiclawId)) return
         if (payload.clientRunId != null && payload.clientRunId !== state.clientRunId) return
-        if (state.status !== 'thinking') return
+        if (state.status !== 'thinking' && !(verified && state.status === 'pending')) return
+        if (state.triggerMsgId && deletedThinkingTriggers.get(state.roomId)?.has(state.triggerMsgId)) return
         state.status = payload.status
         state.endTime = Date.now()
         state.durationMs = payload.durationMs
@@ -2618,10 +3268,18 @@ export const useChatStore = defineStore(
     /** Reconnect: repair a dropped END from authenticated exact-ID server state, never from latest room/run. */
     const reconcileThinkingAfterReconnect = async () => {
       // ponytail: at most 64 sequential GETs per reconnect; paginate only if >64 concurrent AI turns become real.
-      const active = [...thinkingStreams.values()].slice(0, 64)
+      const binding = await captureAccount()
+      const epoch = accountEpoch
+      const pending = [...thinkingByTrigger.values()]
+        .flatMap((room) => [...room.values()].flat())
+        .filter((state) => state.status === 'pending')
+      const active = uniqBy([...thinkingStreams.values(), ...pending], (state) => state.thinkingId).slice(0, 64)
       for (const state of active) {
-        const detail = await loadThinkingDetail(state.thinkingId)
+        if (!accountCurrent(binding, epoch)) return
+        const detail = await loadThinkingDetail(state.thinkingId, binding ?? undefined)
+        if (!accountCurrent(binding, epoch)) return
         if (
+          findThinking(state.thinkingId) !== state ||
           !detail ||
           String(detail.thinkingId) !== state.thinkingId ||
           String(detail.roomId) !== state.roomId ||
@@ -2631,20 +3289,30 @@ export const useChatStore = defineStore(
         )
           continue
         const status = mapServerThinkingStatus(detail.status)
-        if (status !== 'thinking')
-          finalizeThinking(state.thinkingId, {
-            roomId: state.roomId,
-            fromUid: state.aiclawId,
-            clientRunId: state.clientRunId,
-            status,
-            durationMs: detail.durationMs ?? undefined
-          })
+        state.clientRunId ||= detail.clientRunId || undefined
+        if (status === 'thinking' && state.status === 'pending') {
+          state.status = 'thinking'
+          thinkingStreams.set(`${state.roomId}:${state.aiclawId}`, state)
+        } else if (status !== 'thinking') {
+          finalizeThinking(
+            state.thinkingId,
+            {
+              roomId: state.roomId,
+              fromUid: state.aiclawId,
+              clientRunId: state.clientRunId,
+              status,
+              durationMs: detail.durationMs ?? undefined
+            },
+            true
+          )
+        }
       }
       for (const id of [...pendingThinkingStarts.keys()]) await resolveCollidingStart(id, true)
     }
 
     /** 把 ThinkingState 归位到 thinkingByTrigger 的对应 triggerMsgId 桶 */
     const upsertThinkingToTrigger = (state: ThinkingState) => {
+      if (state.triggerMsgId && deletedThinkingTriggers.get(state.roomId)?.has(state.triggerMsgId)) return
       let roomMap = thinkingByTrigger.get(state.roomId)
       if (!roomMap) {
         roomMap = reactive(new Map<string, ThinkingState[]>())
@@ -2668,65 +3336,156 @@ export const useChatStore = defineStore(
     /**
      * 按已加载消息的 msgId 批量反查 thinking 元数据（REQ-014 / ADR-0007）
      */
-    const loadThinkingByTriggerForMessages = async (roomId: string, messages: MessageType[]) => {
-      if (!roomId || !messages?.length) return
-
-      let loadedSet = thinkingMetadataLoaded.get(roomId)
-      if (!loadedSet) {
-        loadedSet = reactive(new Set<string>())
-        thinkingMetadataLoaded.set(roomId, loadedSet)
+    const metadataSet = (roomId: string) => {
+      let set = thinkingMetadataLoaded.get(roomId)
+      if (!set) {
+        set = reactive(new Set<string>())
+        thinkingMetadataLoaded.set(roomId, set)
       }
+      return set
+    }
 
-      const msgIds = messages.map((msg) => msg.message?.id).filter((id): id is string => !!id && !loadedSet!.has(id))
-
-      if (!msgIds.length) return
-
-      const items = await loadThinkingByTrigger({
-        roomId,
-        triggerMsgIds: msgIds
-      })
-
-      for (const id of msgIds) {
-        loadedSet.add(id)
-      }
-
-      if (!items?.length) return
-
+    const mergeThinkingMetadata = (
+      roomId: string,
+      items: ThinkingMetadataItem[],
+      disk?: Map<string, CachedThinking>
+    ) => {
       for (const item of items) {
         const thinkingId = String(item.id)
-
-        // 与已有状态去重（可能 WS 已先到达）
-        let exists = false
-        outer: for (const roomMap of thinkingByTrigger.values()) {
-          for (const list of roomMap.values()) {
-            if (list.some((s) => s.thinkingId === thinkingId)) {
-              exists = true
-              break outer
-            }
-          }
-        }
-        if (exists) continue
-
+        const triggerMsgId = item.triggerMsgId == null ? '' : String(item.triggerMsgId)
+        if (!triggerMsgId || deletedThinkingTriggers.get(roomId)?.has(triggerMsgId)) continue
+        const prior = findThinking(thinkingId)
+        if (
+          prior &&
+          (prior.roomId !== roomId ||
+            String(prior.aiclawId) !== String(item.aiclawUid) ||
+            prior.triggerMsgId !== triggerMsgId)
+        )
+          continue
+        if (prior && disk && prior.status !== 'pending') continue
+        if (prior && !['thinking', 'pending'].includes(prior.status) && item.status === 0) continue
         const aiclawId = String(item.aiclawUid)
         const userInfo = groupStore.getUserInfo(aiclawId)
         const endTime = parseThinkingCreateTime(item.createTime)
-        const durationMs = item.durationMs ?? 0
-        const startTime = durationMs > 0 ? endTime - durationMs : endTime
-
-        upsertThinkingToTrigger({
+        const cached = disk?.get(thinkingId)
+        const state: ThinkingState = {
+          ...prior,
           thinkingId,
           aiclawId,
-          // #222：历史元数据路径同 startThinking——groupStore 落空时回退管理面板名
           aiclawName: userInfo?.name || aiclawStore.getName(aiclawId) || 'AI',
           aiclawAvatar: userInfo?.avatar || '',
           roomId,
-          status: mapServerThinkingStatus(item.status),
-          startTime,
+          triggerMsgId,
+          status: disk && item.status === 0 ? 'pending' : mapServerThinkingStatus(item.status),
+          serverStatus: item.status,
+          hasResponse: item.hasResponse,
+          startTime: prior?.startTime ?? endTime - (item.durationMs ?? 0),
           endTime,
           durationMs: item.durationMs,
-          triggerMsgId: item.triggerMsgId ? String(item.triggerMsgId) : undefined,
-          collapsed: true
-        })
+          collapsed: prior?.collapsed ?? true,
+          bodyLoaded: cached?.bodyLoaded ?? prior?.bodyLoaded,
+          cachedBody: cached?.bodyLoaded && typeof cached.content === 'string' ? cached.content : prior?.cachedBody,
+          bodyETag: cached?.bodyETag ?? prior?.bodyETag
+        }
+        upsertThinkingToTrigger(state)
+        const key = roomId + ':' + aiclawId
+        if (state.status !== 'thinking' && thinkingStreams.get(key)?.thinkingId === thinkingId)
+          thinkingStreams.delete(key)
+      }
+    }
+
+    const loadLocalThinkingForMessages = async (
+      roomId: string,
+      messages: MessageType[],
+      binding: SessionIdentity | null
+    ) => {
+      if (!binding || !messages.length) return
+      const epoch = accountEpoch
+      const seq = browseSeq[roomId] ?? 0
+      try {
+        const ids = messages
+          .map((message) => String(message.message.id))
+          .filter((id) => !deletedThinkingTriggers.get(roomId)?.has(id))
+        const window = await readThinkingCache(binding, roomId, ids)
+        if (!accountCurrent(binding, epoch) || (browseSeq[roomId] ?? 0) !== seq) return
+        const disk = new Map(window.items.map((item) => [String(item.metadata.id), item]))
+        mergeThinkingMetadata(
+          roomId,
+          window.items.map((item) => item.metadata),
+          disk
+        )
+        // A successful historical receipt is not a freshness proof. Render cache immediately;
+        // the separate bounded metadata refresh also confirms disk status0 and discovers new assistants.
+      } catch {
+        if (accountCurrent(binding, epoch)) thinkingCacheErrors.value[roomId] = '本地思考缓存读取失败，可重试'
+      }
+    }
+
+    const loadThinkingByTriggerForMessages = async (
+      roomId: string,
+      messages: MessageType[],
+      captured?: SessionIdentity | null
+    ) => {
+      if (!roomId || !messages?.length || (!isWeb() && !isChatHomeWindow())) return
+      const binding = captured === undefined ? await captureAccount() : captured
+      const epoch = accountEpoch
+      const seq = browseSeq[roomId] ?? 0
+      const loaded = metadataSet(roomId)
+      const ids = messages
+        .map((message) => message.message?.id)
+        .filter(
+          (id): id is string =>
+            typeof id === 'string' &&
+            !!id &&
+            (isWeb() || /^\d{1,32}$/.test(id)) &&
+            !loaded.has(id) &&
+            !deletedThinkingTriggers.get(roomId)?.has(id)
+        )
+      if (!ids.length) return
+      const key = JSON.stringify([binding, roomId, ids])
+      const existing = metadataRequests.get(key)
+      if (existing) return existing
+      const current = () =>
+        accountCurrent(binding, epoch) &&
+        (browseSeq[roomId] ?? 0) === seq &&
+        thinkingMetadataLoaded.get(roomId) === loaded
+      const task = (async () => {
+        const items = await loadThinkingByTrigger({ roomId, triggerMsgIds: ids, binding: binding ?? undefined })
+        if (!current()) return
+        if (!items) {
+          thinkingCacheErrors.value[roomId] = '思考元数据加载失败，可重试'
+          return
+        }
+        if (
+          items.some(
+            (item) =>
+              !validThinkingId(item.id) ||
+              !validThinkingId(item.aiclawUid) ||
+              !validThinkingId(item.triggerMsgId) ||
+              !ids.includes(String(item.triggerMsgId)) ||
+              !Number.isInteger(item.status) ||
+              item.status < 0 ||
+              item.status > 4
+          )
+        ) {
+          thinkingCacheErrors.value[roomId] = '思考元数据归属或协议无效'
+          return
+        }
+        mergeThinkingMetadata(roomId, items)
+        try {
+          const saved = binding ? await cacheThinkingMetadata(binding, roomId, ids, items) : ids
+          if (!current()) return
+          for (const id of saved) loaded.add(id)
+          delete thinkingCacheErrors.value[roomId]
+        } catch {
+          if (current()) thinkingCacheErrors.value[roomId] = '本地思考缓存保存失败，可重试'
+        }
+      })()
+      metadataRequests.set(key, task)
+      try {
+        await task
+      } finally {
+        if (metadataRequests.get(key) === task) metadataRequests.delete(key)
       }
     }
 
@@ -2768,7 +3527,35 @@ export const useChatStore = defineStore(
       }
     }
 
+    watch(
+      sessionBinding,
+      () => {
+        accountEpoch++
+        markSessionReadLock.clear()
+        sessionList.value = []
+        sessionMap.value = {}
+        sessionOptions.value = { isLast: false, isLoading: false, isError: false, cursor: '' }
+        syncLoading.value = false
+        for (const key of Object.keys(messageMap)) delete messageMap[key]
+        for (const key of Object.keys(replyMapping)) delete replyMapping[key]
+        clearHistoryProgress()
+        clearThinking()
+        deletedThinkingTriggers.clear()
+        metadataRequests.clear()
+        streamingMessages.clear()
+        pendingStreamReplace.clear()
+        autoReplyMessages.clear()
+        aiclawGroupConfigs.clear()
+        clearAllExpirationTimers()
+        thinkingCacheErrors.value = {}
+        lastReadActiveTime.value = {}
+        currentMsgReply.value = {}
+      },
+      { flush: 'sync' }
+    )
+
     return {
+      thinkingCacheErrors,
       getMsgIndex,
       chatMessageList,
       pushMsg,
@@ -2786,6 +3573,19 @@ export const useChatStore = defineStore(
       currentReplyMap,
       currentNewMsgCount,
       loadMore,
+      calibrateWindow,
+      retryWindowCalibration,
+      windowCalib,
+      reportReadingAnchor,
+      getSavedReadPosition,
+      clearPendingRestore,
+      flushReadingPositions,
+      loadReadingSnapshot,
+      restoreLastReading,
+      ensureAnchorLoaded,
+      pendingScrollRestore,
+      readingPositions,
+      readingSnapshotLoaded,
       currentMsgReply,
       sessionList,
       sessionMap,
@@ -2880,6 +3680,6 @@ export const useChatStore = defineStore(
       ]
     },
     // #239：只主窗持久化，辅窗 noop——防多窗 last-writer-wins 快照倒退（#237 终裁第 4 条）
-    persist: { storage: homeWindowOnlyStorage() }
+    persist: { storage: scopedChatStorage(), pick: ['sessionList', 'sessionMap', 'messageMap', 'lastReadActiveTime'] }
   }
 )

@@ -120,6 +120,8 @@ import { useChatStore } from '@/stores/chat'
 import { formatBytes, getFileSuffix } from '@/utils/Formatting'
 import { getFilesMeta } from '@/utils/PathUtil'
 import { invokeSilently } from '@/utils/TauriInvokeHandler'
+import { sessionBinding, eventSession, isSessionCurrent, sameSession } from '@/services/sessionBinding'
+import { isWeb } from '@/utils/PlatformConstants'
 import { useI18n } from 'vue-i18n'
 
 const userStore = useUserStore()
@@ -170,17 +172,20 @@ const downloadProgress = computed(() => {
   return fileStatus.value?.progress || 0
 })
 
+// A completion belongs to this mounted message, not whichever account has the same ID later.
+const originBinding = sessionBinding.value
 const persistFileLocalPath = async (absolutePath: string) => {
+  if (!isWeb() && (!originBinding || !isSessionCurrent(originBinding))) return
   const id = messageId.value
   if (!id || !absolutePath) return
   const target = chatStore.getMessage(id)
-  if (!target) return
+  if (!target || (!isWeb() && !sameSession(eventSession(target) ?? null, originBinding))) return
   if (target.message.body?.localPath === absolutePath) return
 
   const nextBody = { ...(target.message.body || {}), localPath: absolutePath }
   chatStore.updateMsg({ msgId: id, status: target.message.status, body: nextBody })
   const updated = { ...target, message: { ...target.message, body: nextBody } }
-  await invokeSilently(TauriCommand.SAVE_MSG, { data: updated as any })
+  await invokeSilently(TauriCommand.SAVE_MSG, { binding: originBinding, data: updated })
 }
 
 const revealInDirSafely = async (targetPath?: string | null) => {

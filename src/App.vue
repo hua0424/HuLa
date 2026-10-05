@@ -50,6 +50,7 @@ import { useFeedNotificationStore } from '@/stores/feedNotification'
 import type { MarkItemType, RevokedMsgType, UserItem } from '@/services/types.ts'
 import * as ImRequestUtils from '@/utils/ImRequestUtils'
 import { listen } from '@tauri-apps/api/event'
+import { listenBound } from '@/services/sessionBinding'
 import { useTauriListener } from '@/hooks/useTauriListener'
 import { updateSettings } from '@/services/tauriCommand.ts'
 import { useI18n } from 'vue-i18n'
@@ -706,7 +707,7 @@ onMounted(() => {
   window.addEventListener('dragstart', preventDrag)
 
   if (!isWeb()) {
-    addListener(listen('websocket-event', handleWebsocketEvent), 'websocket-event')
+    addListener(listenBound('websocket-event', handleWebsocketEvent), 'websocket-event')
   }
 
   // 只在桌面端的主窗口中初始化全局快捷键
@@ -820,8 +821,11 @@ watch(
   { immediate: true }
 )
 
-/** 监听会话变化 */
+/** 监听会话变化（#349：MSG_INIT 多次触发只注册一次，避免 watchEffect 泄漏重复）。 */
+let msgInitWatcherArmed = false
 useMitt.on(MittEnum.MSG_INIT, async () => {
+  if (msgInitWatcherArmed) return
+  msgInitWatcherArmed = true
   watchEffect(async () => {
     // 在同步阶段明确提取需要监听的属性
     const sessionRoomId = globalStore.currentSessionRoomId

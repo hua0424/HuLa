@@ -108,6 +108,7 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   markMsg: { method: 'PUT', path: 'im/chat/msg/mark' },
   getMsgPage: { method: 'GET', path: 'im/chat/msg/page' },
   getMsgList: { method: 'POST', path: 'im/chat/msg/list' },
+  getMsgWindow: { method: 'POST', path: 'im/chat/msg/window' },
   getMemberStatistic: { method: 'GET', path: 'im/chat/member/statistic' },
   mergeMsg: { method: 'POST', path: 'im/room/mergeMessage' },
 

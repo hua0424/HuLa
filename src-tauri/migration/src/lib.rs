@@ -6,6 +6,7 @@ mod m20241220_000003_add_refresh_token_field;
 mod m20250917_000001_update_msg_table;
 mod m20250917_000002_add_thumbnail_path;
 mod m20250702_000003_add_user_type_to_message;
+mod m20261002_000001_local_cache;
 
 pub struct Migrator;
 
@@ -19,6 +20,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250917_000001_update_msg_table::Migration),
             Box::new(m20250917_000002_add_thumbnail_path::Migration),
             Box::new(m20250702_000003_add_user_type_to_message::Migration),
+            Box::new(m20261002_000001_local_cache::Migration),
         ]
     }
 }

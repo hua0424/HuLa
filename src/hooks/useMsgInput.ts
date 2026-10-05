@@ -14,6 +14,9 @@ import { useGlobalStore } from '@/stores/global.ts'
 import { useGroupStore } from '@/stores/group.ts'
 import { useSettingStore } from '@/stores/setting.ts'
 import { useMessageSender } from '@/hooks/useMessageSender'
+import { getSendBlockReason } from '@/utils/MessageSender'
+import { createRequestId, getCurrentBootAttempt, logBoot } from '@/utils/bootAttempt'
+import { SessionExpiredError } from '@/services/sessionBinding'
 import { messageStrategyMap } from '@/strategy/MessageStrategy.ts'
 import { processClipboardImage } from '@/utils/ImageUtils.ts'
 import { getReplyContent } from '@/utils/MessageReply.ts'
@@ -441,6 +444,24 @@ export const useMsgInput = (messageInputDom: Ref) => {
 
   const send = async () => {
     const targetRoomId = globalStore.currentSessionRoomId
+    // aichatoverview#349：发送仅要求身份/目标有效即可提交 pending，
+    // 不要求 WS-connected 或思考/群资料完成；缺身份/目标时明确提示而非静默。
+    let currentUid = ''
+    try {
+      currentUid = userUid.value
+    } catch {
+      currentUid = ''
+    }
+    const blockReason = getSendBlockReason(targetRoomId, currentUid)
+    if (blockReason) {
+      window.$message.warning(blockReason === 'no-session' ? '请先选择会话再发送' : '登录身份未就绪，请稍后重试')
+      return
+    }
+    const sendAttempt = getCurrentBootAttempt()
+    const sendReadyReq = sendAttempt ? createRequestId(sendAttempt, 'send_ready') : ''
+    if (sendAttempt) {
+      logBoot(sendAttempt, sendReadyReq, 'send_ready', `room=${targetRoomId}`)
+    }
     // 判断输入框中的图片或者文件数量是否超过限制
     if (messageInputDom.value.querySelectorAll('img').length > LimitEnum.COM_COUNT) {
       window.$message.warning(`一次性只能上传${LimitEnum.COM_COUNT}个文件或图片`)
@@ -478,6 +499,14 @@ export const useMsgInput = (messageInputDom: Ref) => {
     tempMsg.message.status = MessageStatusEnum.SENDING
     // 先添加到消息列表
     chatStore.pushMsg(tempMsg)
+    if (sendAttempt) {
+      logBoot(
+        sendAttempt,
+        createRequestId(sendAttempt, 'send_pending'),
+        'send_pending',
+        `room=${targetRoomId} temp=${tempMsgId}`
+      )
+    }
 
     // 设置发送状态的定时器
     chatStore.updateMsg({
@@ -591,6 +620,21 @@ export const useMsgInput = (messageInputDom: Ref) => {
         msgId: tempMsgId,
         status: MessageStatusEnum.FAILED
       })
+      // #349：权限/身份失败按明确状态反馈，不再只有静默 FAILED 气泡。
+      const errText = error instanceof Error ? error.message : String(error)
+      if (error instanceof SessionExpiredError) {
+        window.$message.error('登录身份已失效，请重新登录后再发送')
+      } else if (/403|forbidden|no.?permission|权限|禁言|mute/i.test(errText)) {
+        window.$message.error(`发送失败：${errText}`)
+      }
+      if (sendAttempt) {
+        logBoot(
+          sendAttempt,
+          createRequestId(sendAttempt, 'send_failed'),
+          'send_failed',
+          `room=${targetRoomId} temp=${tempMsgId} error=${errText}`
+        )
+      }
 
       // 释放预览URL
       if ((msg.type === MsgEnum.IMAGE || msg.type === MsgEnum.EMOJI) && msg.url.startsWith('blob:')) {

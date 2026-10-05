@@ -99,13 +99,32 @@ const p2 = (n: number) => Array.from({ length: n }, (_, i) => `p2-${i}`)
 function armImRequest() {
   const resolvers: Array<(v: any) => void> = []
   const cursors: Array<string | undefined> = []
+  const windowCalls: Array<any> = []
   imRequestMock.mockImplementation(async (opts: any) => {
+    // aichatoverview#350：窗口校准与首屏解耦（fire-and-forget），本文件只关心历史分页流量；
+    // 校准调用即时以 unsupported 应答（保持可读、不占历史分页排队槽位）。
+    if (opts?.url === 'getMsgWindow') {
+      windowCalls.push(opts?.body)
+      return {
+        schemaVersion: 'none',
+        capabilities: [],
+        items: [],
+        complete: false,
+        knownReceipts: [],
+        knownComplete: false
+      }
+    }
     cursors.push(opts?.params?.cursor)
     return new Promise((resolve) => {
       resolvers.push(resolve)
     })
   })
-  return { resolvers, cursors }
+  return { resolvers, cursors, windowCalls }
+}
+
+/** 历史分页流量（排除 #350 窗口校准的 fire-and-forget 调用） */
+function historyCalls() {
+  return imRequestMock.mock.calls.filter((c) => c[0]?.url !== 'getMsgWindow')
 }
 
 /** 加载 UI 在请求在途时求值（旧实现在此孤立进度对象） */
@@ -123,17 +142,17 @@ describe('aichatoverview#285 进度对象身份稳定（回填后可翻页）', 
   })
 
   it('单流程进房：回填在途 UI 反复求值后 loading 释放且 loadMore 带游标推进', async () => {
-    const { resolvers, cursors } = armImRequest()
+    const { resolvers, cursors, windowCalls } = armImRequest()
     const globalStore = useGlobalStore()
     const store = useChatStore()
 
     // 生产进房路径：切房 watcher → changeRoom → 首屏本地页 + 空首屏远端回填
     globalStore.currentSessionRoomId = 'room-285-single'
-    await vi.waitFor(() => expect(imRequestMock).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(historyCalls()).toHaveLength(1))
     pokeLoadingUi(store)
     resolvers.shift()!({ list: [], cursor: '', isLast: true, total: 0 })
 
-    await vi.waitFor(() => expect(imRequestMock).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(historyCalls()).toHaveLength(2))
     pokeLoadingUi(store)
     resolvers.shift()!(page(p1(20), 'cursor-p1', false))
     await vi.waitFor(() => expect(store.currentMessageOptions.remoteStatus).toBe('more'))
@@ -146,7 +165,7 @@ describe('aichatoverview#285 进度对象身份稳定（回填后可翻页）', 
     // 触顶翻页：必须发出第二页请求且游标推进，落盘后行数递增
     // （loadMore 等待请求完成：先起调再 resolve，避免测试侧死锁）
     const moreP = store.loadMore()
-    await vi.waitFor(() => expect(imRequestMock).toHaveBeenCalledTimes(3))
+    await vi.waitFor(() => expect(historyCalls()).toHaveLength(3))
     pokeLoadingUi(store)
     expect(cursors[2]).toBe('cursor-p1')
     resolvers.shift()!(page(p2(20), 'cursor-p2', false, 500))
@@ -155,6 +174,9 @@ describe('aichatoverview#285 进度对象身份稳定（回填后可翻页）', 
 
     expect(store.currentMessageOptions.isLoading).toBe(false)
     expect(store.currentMessageOptions.remoteStatus).toBe('more')
+    // aichatoverview#350：首屏成功后窗口校准被触发（fire-and-forget，不阻塞首屏）
+    await vi.waitFor(() => expect(windowCalls.length).toBeGreaterThan(0))
+    expect(windowCalls[0]?.roomId ?? windowCalls[0]?.room_id).toBeTruthy()
   })
 
   it('并发进房（切房+手动刷新共享去重任务）：永不卡死，loadMore 门禁能打开', async () => {
@@ -176,9 +198,9 @@ describe('aichatoverview#285 进度对象身份稳定（回填后可翻页）', 
     await vi.waitFor(() => expect(store.currentMessageOptions.isLoading).toBe(false))
 
     // 门禁打开：loadMore 必须能发出请求（而不是静默吞掉）
-    const callsBefore = imRequestMock.mock.calls.length
+    const callsBefore = historyCalls().length
     void store.loadMore()
-    await vi.waitFor(() => expect(imRequestMock.mock.calls.length).toBeGreaterThan(callsBefore))
+    await vi.waitFor(() => expect(historyCalls().length).toBeGreaterThan(callsBefore))
     // 收尾：让最后的在途请求落定，避免悬挂影响后测
     while (resolvers.length) resolvers.shift()!(page(p1(5), 'cursor-r', true))
   })

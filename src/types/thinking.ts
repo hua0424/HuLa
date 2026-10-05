@@ -4,7 +4,7 @@
  */
 
 /** 思考过程状态 */
-export type ThinkingStatus = 'thinking' | 'complete' | 'error'
+export type ThinkingStatus = 'thinking' | 'complete' | 'error' | 'pending'
 
 /** 单个思考会话的完整状态 */
 export interface ThinkingState {
@@ -22,6 +22,13 @@ export interface ThinkingState {
   roomId: string
   /** 思考状态 */
   status: ThinkingStatus
+  /** 原始0..4保留；磁盘0只显示pending，不能冒充实时执行。 */
+  serverStatus?: number
+  hasResponse?: number
+  bodyLoaded?: boolean
+  cachedBody?: string
+  /** 预留，不表示本轮已校准。 */
+  bodyETag?: string | null
   /** 开始时间戳 */
   startTime: number
   /** 结束时间戳（THINKING_END 时设置） */
@@ -56,12 +63,17 @@ export interface ThinkingMetadataItem {
   durationMs?: number
   /** 是否产生了回复消息：0=否，1=是 */
   hasResponse?: number
-  /** 创建时间（服务端 LocalDateTime 字符串） */
-  createTime: string
+  /** 创建时间（服务端毫秒时间戳或 LocalDateTime 字符串） */
+  createTime: string | number
+  /**
+   * 正文 bodyETag（服务端 SHA-256，UTF-8 字节）；null/缺失表示无从校验，
+   * 不作无思考证据（aichatoverview#351）。
+   */
+  bodyETag?: string | null
 }
 
 /** 将服务端 thinking 状态码映射为前端 ThinkingStatus */
-export const mapServerThinkingStatus = (status: number): ThinkingStatus => {
+export const mapServerThinkingStatus = (status: number): Exclude<ThinkingStatus, 'pending'> => {
   switch (status) {
     case 1:
     case 4:
@@ -75,10 +87,10 @@ export const mapServerThinkingStatus = (status: number): ThinkingStatus => {
 }
 
 /**
- * 将服务端创建时间字符串解析为时间戳。
+ * 将服务端创建时间字符串或毫秒数解析为时间戳。
  * 非法/空值返回当前时间戳，避免后续排序出现 NaN。
  */
-export const parseThinkingCreateTime = (createTime: string | undefined): number => {
+export const parseThinkingCreateTime = (createTime: string | number | undefined): number => {
   if (!createTime) return Date.now()
   const ts = new Date(createTime).getTime()
   return Number.isNaN(ts) ? Date.now() : ts

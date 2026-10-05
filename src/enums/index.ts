@@ -548,8 +548,16 @@ export enum TauriCommand {
   CURSOR_PAGE_ROOM_MEMBERS = 'cursor_page_room_members',
   /** 列出所有会话列表 */
   LIST_CONTACTS = 'list_contacts_command',
+  GET_SESSION_BINDING = 'get_session_binding',
+  READ_THINKING_CACHE = 'read_thinking_cache',
+  CACHE_THINKING_METADATA = 'cache_thinking_metadata',
+  CACHE_THINKING_BODY = 'cache_thinking_body',
+  READ_LOCAL_SNAPSHOT = 'read_local_snapshot',
+  CACHE_LOCAL_SNAPSHOT = 'cache_local_snapshot',
   /** 分页查询会话消息 */
   PAGE_MSG = 'page_msg',
+  /** 当前阅读窗口校准（aichatoverview#350） */
+  CALIBRATE_WINDOW = 'calibrate_window',
   /** 保存用户信息 */
   SAVE_USER_INFO = 'save_user_info',
   /** 更新用户最后操作时间 */
@@ -773,6 +781,8 @@ export enum ImUrlEnum {
   GET_MSG_LIST = 'getMsgList',
   /** aichatoverview#285：按房间查历史分页（Web 历史入口用此枚举，/list 仅按 msgIds 合并消息） */
   GET_MSG_PAGE = 'getMsgPage',
+  /** aichatoverview#350：当前阅读窗口校准 */
+  GET_MSG_WINDOW = 'getMsgWindow',
   /** 获取成员统计 */
   GET_MEMBER_STATISTIC = 'getMemberStatistic',
 
@@ -876,7 +886,8 @@ export enum ScrollIntentEnum {
   NONE = 'none',
   INITIAL = 'initial', // 初始化或切换房间
   NEW_MESSAGE = 'new_message', // 新消息到达
-  LOAD_MORE = 'load_more' // 加载更多历史消息
+  LOAD_MORE = 'load_more', // 加载更多历史消息
+  RESTORE = 'restore' // aichatoverview#352：恢复上次阅读位置（锚点+偏移）
 }
 
 export enum MergeMessageType {

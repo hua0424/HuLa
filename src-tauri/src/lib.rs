@@ -32,6 +32,7 @@ pub mod error;
 mod im_request_client;
 pub mod pojo;
 pub mod repository;
+pub mod session;
 pub mod timeout_config;
 pub mod utils;
 mod vo;
@@ -48,7 +49,6 @@ use crate::command::setting_command::{get_settings, update_settings};
 use crate::command::user_command::remove_tokens;
 use crate::configuration::{Settings, get_configuration};
 use crate::error::CommonError;
-use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 
 // 移动端依赖
@@ -61,14 +61,13 @@ use mobiles::splash;
 
 #[derive(Debug)]
 pub struct AppData {
-    db_conn: Arc<RwLock<DatabaseConnection>>,
     user_info: Arc<Mutex<UserInfo>>,
     pub rc: Arc<Mutex<im_request_client::ImRequestClient>>,
     pub config: Arc<Mutex<Settings>>,
     frontend_task: Mutex<bool>,
     backend_task: Mutex<bool>,
     /// 限制对 SQLite 的写入并发，避免 database is locked
-    pub write_lock: Arc<Mutex<()>>,
+    pub session: Arc<session::SessionStore>,
 }
 
 pub(crate) static APP_STATE_READY: AtomicBool = AtomicBool::new(false);
@@ -80,8 +79,8 @@ use crate::command::file_manager_command::{
     debug_message_stats, get_navigation_items, query_files,
 };
 use crate::command::message_command::{
-    delete_message, delete_room_messages, page_msg, save_msg, send_msg, sync_messages,
-    update_message_recall_status,
+    calibrate_window, delete_message, delete_room_messages, page_msg, save_msg, send_msg,
+    sync_messages, update_message_recall_status,
 };
 use crate::command::message_mark_command::save_message_mark;
 use crate::command::oauth_command::OauthServerState;
@@ -90,7 +89,7 @@ use crate::command::oauth_command::start_oauth_server;
 #[cfg(desktop)]
 use tauri::Listener;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 
 pub fn run() {
     #[cfg(desktop)]
@@ -143,41 +142,19 @@ async fn initialize_app_data(
     app_handle: tauri::AppHandle,
 ) -> Result<
     (
-        Arc<RwLock<DatabaseConnection>>,
         Arc<Mutex<UserInfo>>,
         Arc<Mutex<im_request_client::ImRequestClient>>,
         Arc<Mutex<Settings>>,
     ),
     CommonError,
 > {
-    use migration::{Migrator, MigratorTrait};
-    use tracing::info;
-
     // 加载配置
     let configuration =
         Arc::new(Mutex::new(get_configuration(&app_handle).map_err(|e| {
             anyhow::anyhow!("Failed to load configuration: {}", e)
         })?));
 
-    // 初始化数据库连接
-    let db: Arc<RwLock<DatabaseConnection>> = Arc::new(RwLock::new(
-        configuration
-            .lock()
-            .await
-            .database
-            .connection_string(&app_handle, None)
-            .await?,
-    ));
-
-    // 数据库迁移
-    match Migrator::up(&*db.read().await, None).await {
-        Ok(_) => {
-            info!("Database migration completed");
-        }
-        Err(e) => {
-            eprintln!("Warning: Database migration failed: {}", e);
-        }
-    }
+    // No unauthenticated operation needs a database: do not open or migrate legacy default/UID files.
 
     // 初始化 network.log 的写入目录（与 tauri-plugin-log 的 LogDir 同目录），
     // 供 im_request_client 记录后端 HTTP 调用，便于测试断言。失败时不阻断启动。
@@ -209,7 +186,7 @@ async fn initialize_app_data(
     };
     let user_info = Arc::new(Mutex::new(user_info));
 
-    Ok((db, user_info, Arc::new(Mutex::new(rc)), configuration))
+    Ok((user_info, Arc::new(Mutex::new(rc)), configuration))
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -367,17 +344,26 @@ fn common_setup(app_handle: AppHandle) -> Result<(), Box<dyn std::error::Error>>
 
     // 异步初始化应用数据，避免阻塞主线程
     match tauri::async_runtime::block_on(initialize_app_data(app_handle.clone())) {
-        Ok((db, user_info, rc, settings)) => {
+        Ok((user_info, rc, settings)) => {
+            let write_lock = Arc::new(Mutex::new(()));
+            let session = Arc::new(session::SessionStore::new(write_lock.clone()));
+            let mut session_changes = session.subscribe();
+            let event_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                while session_changes.changed().await.is_ok() {
+                    let identity = session_changes.borrow_and_update().clone();
+                    let _ = event_handle.emit("session-binding-changed", identity);
+                }
+            });
             // 使用 manage 方法在运行时添加状态
             app_handle.manage(AppData {
-                db_conn: db.clone(),
                 user_info: user_info.clone(),
                 rc: rc,
                 config: settings,
                 frontend_task: Mutex::new(false),
                 // 后端任务默认完成
                 backend_task: Mutex::new(true),
-                write_lock: Arc::new(Mutex::new(())),
+                session,
             });
             app_handle.manage(OauthServerState::default());
             APP_STATE_READY.store(true, Ordering::SeqCst);
@@ -463,6 +449,7 @@ fn get_invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         hide_contact_command,
         page_msg,
         sync_messages,
+        calibrate_window,
         send_msg,
         save_msg,
         delete_message,
@@ -509,5 +496,11 @@ fn get_invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         set_webview_keyboard_adjustment,
         is_app_state_ready,
         switch_user_database,
+        command::database_command::get_session_binding,
+        command::local_cache_command::read_thinking_cache,
+        command::local_cache_command::cache_thinking_metadata,
+        command::local_cache_command::cache_thinking_body,
+        command::local_cache_command::read_local_snapshot,
+        command::local_cache_command::cache_local_snapshot,
     ]
 }

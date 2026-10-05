@@ -1,5 +1,6 @@
 use crate::AppData;
 use crate::repository::im_user_repository;
+use crate::session::SessionIdentity;
 use chrono::Local;
 use entity::im_user;
 use entity::prelude::ImUserEntity;
@@ -46,8 +47,14 @@ pub struct UpdateUserTokenRequest {
 pub async fn save_user_info(
     user_info: SaveUserInfoRequest,
     state: State<'_, AppData>,
+    binding: SessionIdentity,
 ) -> Result<(), String> {
-    let db = state.db_conn.read().await;
+    let binding = state.session.capture_identity(&binding)?;
+    if user_info.uid != binding.identity.uid {
+        return Err("用户信息UID与认证归属不匹配".into());
+    }
+    let _gate = state.session.commit(&binding).await?;
+    let db = &binding.db;
 
     // 检查用户是否存在
     let exists = ImUserEntity::find()
@@ -88,11 +95,14 @@ pub async fn save_user_info(
 }
 
 #[tauri::command]
-pub async fn update_user_last_opt_time(state: State<'_, AppData>) -> Result<(), String> {
-    info!("Updating user last operation time");
-    let db = state.db_conn.read().await;
-
-    let uid = state.user_info.lock().await.uid.clone();
+pub async fn update_user_last_opt_time(
+    state: State<'_, AppData>,
+    binding: SessionIdentity,
+) -> Result<(), String> {
+    let binding = state.session.capture_identity(&binding)?;
+    let _gate = state.session.commit(&binding).await?;
+    let db = &binding.db;
+    let uid = binding.identity.uid.clone();
 
     // 检查用户是否存在
     let user = ImUserEntity::find()
@@ -116,26 +126,44 @@ pub async fn update_user_last_opt_time(state: State<'_, AppData>) -> Result<(), 
 
 /// 获取用户的 token 和 refreshToken
 #[tauri::command]
-pub async fn get_user_tokens(state: State<'_, AppData>) -> Result<TokenResponse, String> {
-    info!("Getting user token info");
-
-    let user_info = state.user_info.lock().await;
-
-    let response = TokenResponse {
-        token: user_info.token.clone().into(),
-        refresh_token: user_info.refresh_token.clone().into(),
-    };
-
-    info!("Successfully retrieved user token info: {:?}", response);
-    Ok(response)
+pub async fn get_user_tokens(
+    state: State<'_, AppData>,
+    binding: SessionIdentity,
+) -> Result<TokenResponse, String> {
+    let binding = state.session.capture_identity(&binding)?;
+    let _gate = state.session.commit(&binding).await?;
+    let tokens = im_user_repository::get_user_tokens(&binding.db, &binding.identity.uid)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(match tokens {
+        Some((token, refresh_token)) => TokenResponse {
+            token: Some(token),
+            refresh_token: Some(refresh_token),
+        },
+        None => TokenResponse {
+            token: None,
+            refresh_token: None,
+        },
+    })
 }
 
 #[tauri::command]
-pub async fn remove_tokens(state: State<'_, AppData>) -> Result<(), String> {
-    info!("Removing user token info");
-
+pub async fn remove_tokens(
+    state: State<'_, AppData>,
+    binding: SessionIdentity,
+) -> Result<(), String> {
+    let epoch = state.session.invalidate_identity(&binding).await?;
     let mut rc = state.rc.lock().await;
-
+    if !state.session.is_epoch(epoch) {
+        return Err("退出任务已被新登录取代".into());
+    }
+    info!("Removing user token info");
+    {
+        let mut user = state.user_info.lock().await;
+        user.uid.clear();
+        user.token.clear();
+        user.refresh_token.clear();
+    }
     rc.token = None;
     rc.refresh_token = None;
 
@@ -147,38 +175,40 @@ pub async fn remove_tokens(state: State<'_, AppData>) -> Result<(), String> {
 pub async fn update_token(
     req: UpdateUserTokenRequest,
     state: State<'_, AppData>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    info!("Updating user token");
-    let refresh_token = if req.refresh_token.is_empty() {
-        let current_refresh = state.user_info.lock().await.refresh_token.clone();
-        if current_refresh.is_empty() {
-            "".to_string()
-        } else {
-            current_refresh
-        }
-    } else {
-        req.refresh_token.clone()
-    };
-    {
-        let mut user_info = state.user_info.lock().await;
-        user_info.uid = req.uid.clone();
-        user_info.token = req.token.clone();
-        user_info.refresh_token = refresh_token.clone();
-    }
-    {
+    use crate::command::database_command::bind_user_database;
+    let epoch = state.session.invalidate().await;
+    // OAuth without UID must resolve the identity of this token, never reuse the previous account.
+    let uid = {
         let mut rc = state.rc.lock().await;
-        rc.token = Some(req.token.clone());
-        if !refresh_token.is_empty() {
-            rc.refresh_token = Some(refresh_token.clone());
+        if !state.session.is_epoch(epoch) {
+            return Err("认证任务已被取代".into());
         }
-    }
-    im_user_repository::save_user_tokens(
-        &*state.db_conn.read().await,
-        &req.uid,
-        &req.token,
-        &refresh_token,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+        rc.token = Some(req.token.clone());
+        rc.refresh_token = if req.refresh_token.is_empty() {
+            None
+        } else {
+            Some(req.refresh_token.clone())
+        };
+        crate::command::request_command::authenticated_uid(
+            &mut rc,
+            if req.uid.is_empty() {
+                None
+            } else {
+                Some(&req.uid)
+            },
+        )
+        .await?
+    };
+    let binding = bind_user_database(&state, &app_handle, &uid, epoch).await?;
+    let _gate = state.session.commit(&binding).await?;
+    im_user_repository::save_user_tokens(&binding.db, &uid, &req.token, &req.refresh_token)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut user_info = state.user_info.lock().await;
+    user_info.uid = uid;
+    user_info.token = req.token;
+    user_info.refresh_token = req.refresh_token;
     Ok(())
 }

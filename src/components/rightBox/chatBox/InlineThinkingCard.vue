@@ -22,6 +22,12 @@
           <span class="thinking-dot size-6px rounded-50% bg-#7c5cfc animate-pulse" />
           {{ t('aiclaw.thinking.status.thinking') }}
         </span>
+        <span
+          v-else-if="thinking.status === 'pending'"
+          data-testid="thinking-pending-confirmation"
+          class="text-(11px #999)">
+          {{ t('aiclaw.thinking.pending_confirmation') }}
+        </span>
         <span v-else-if="thinking.status === 'complete'" class="text-(11px #13987f)">
           {{ t('aiclaw.thinking.status.complete', { duration: formattedDuration }) }}
         </span>
@@ -85,10 +91,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ImUrlEnum } from '@/enums'
-import { imRequest } from '@/utils/ImRequestUtils'
+import { loadThinkingBody } from '@/services/localCache'
+import { sessionBinding, isSessionCurrent } from '@/services/sessionBinding'
+import { isWeb } from '@/utils/PlatformConstants'
 import { useSettingStore } from '@/stores/setting'
 import type { ThinkingState } from '@/types/thinking'
 
@@ -98,6 +105,8 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const settingStore = useSettingStore()
+const originBinding = sessionBinding.value
+const originCurrent = () => isWeb() || (!!originBinding && isSessionCurrent(originBinding))
 
 /** REQ-015 #187：长文截断阈值（实现时可调） */
 const TRUNCATE_THRESHOLD = 4000
@@ -106,7 +115,9 @@ const TRUNCATE_THRESHOLD = 4000
 const showThinkingProcess = computed(() => settingStore.chat?.showThinking ?? true)
 
 // 开关关闭时：只渲染 thinking 状态的单行状态；其余状态隐藏
-const shouldRender = computed(() => showThinkingProcess.value || thinking.status === 'thinking')
+const shouldRender = computed(
+  () => originCurrent() && (showThinkingProcess.value || ['thinking', 'pending'].includes(thinking.value.status))
+)
 
 // REQ-015 #187：默认展开；头部点击手动折叠/展开
 const expanded = ref(true)
@@ -138,48 +149,55 @@ const displayContent = computed(() =>
   needsTruncation.value && !showFull.value ? reviewContent.value.slice(0, TRUNCATE_THRESHOLD) : reviewContent.value
 )
 
-const thinking = props.thinking
+const thinking = toRef(props, 'thinking')
 
 // 格式化耗时
 const formattedDuration = computed(() => {
-  if (!thinking.durationMs) return ''
-  const seconds = (thinking.durationMs / 1000).toFixed(1)
+  if (!thinking.value.durationMs) return ''
+  const seconds = (thinking.value.durationMs / 1000).toFixed(1)
   return `${seconds}s`
 })
 
 // 背景颜色（根据状态）
 const cardBgClass = computed(() => {
-  if (thinking.status === 'error') {
+  if (thinking.value.status === 'error') {
     return 'bg-#e74c3c08 border-#e74c3c20'
   }
   return 'bg-#7c5cfc08'
 })
 
 // 按需拉取完整思考内容（S7：思考全文不再走 WS，改为 REST 拉取）
+let requestVersion = 0
+let disposed = false
+const useCachedBody = () => {
+  if (thinking.value.bodyLoaded && typeof thinking.value.cachedBody === 'string') {
+    reviewContent.value = thinking.value.cachedBody
+    reviewTruncated.value = thinking.value.serverStatus === 4
+    reviewLoaded.value = true
+    reviewError.value = false
+  }
+}
+useCachedBody()
+
 const loadReview = async () => {
-  if (reviewLoading.value || reviewLoaded.value) return
-  if (!thinking.thinkingId) return
+  if (reviewLoading.value || reviewLoaded.value || !showContent.value || thinking.value.status !== 'complete') return
+  const state = thinking.value
+  if (!state.thinkingId) return
+  const version = ++requestVersion
   reviewLoading.value = true
   reviewError.value = false
   try {
-    // #241：断网失败不弹裸 toast（#209/#229 同噪声类）——卡片自带可点击重试的错误行，
-    // 失败只记日志；web 端 webImRequest 本就不弹 toast，此选项仅作用于桌面 invoke 路径
-    const data = await imRequest<{ content?: string; status?: number; durationMs?: number }>(
-      {
-        url: ImUrlEnum.AICLAW_THINKING_DETAIL,
-        params: { thinkingId: thinking.thinkingId }
-      },
-      { showError: false }
-    )
-    reviewContent.value = data?.content ?? ''
-    // status === 4 表示内容过长被截断
-    reviewTruncated.value = data?.status === 4
+    if (!originCurrent()) return
+    const data = await loadThinkingBody(state, originBinding)
+    if (!originCurrent() || disposed || version !== requestVersion || thinking.value.thinkingId !== state.thinkingId)
+      return
+    reviewContent.value = data.content
+    reviewTruncated.value = data.status === 4
     reviewLoaded.value = true
-  } catch (error) {
-    console.error('[InlineThinkingCard] 拉取思考内容失败:', error)
-    reviewError.value = true
+  } catch {
+    if (!disposed && version === requestVersion) reviewError.value = true
   } finally {
-    reviewLoading.value = false
+    if (version === requestVersion) reviewLoading.value = false
   }
 }
 
@@ -188,7 +206,14 @@ const cardRoot = ref<HTMLElement | null>(null)
 let visibilityObserver: IntersectionObserver | null = null
 
 const setupVisibilityFetch = () => {
-  if (reviewLoaded.value || reviewLoading.value || visibilityObserver) return
+  if (
+    !showContent.value ||
+    thinking.value.status !== 'complete' ||
+    reviewLoaded.value ||
+    reviewLoading.value ||
+    visibilityObserver
+  )
+    return
   // 环境不支持 IntersectionObserver 时降级为立即拉取
   if (typeof IntersectionObserver === 'undefined') {
     void loadReview()
@@ -207,23 +232,40 @@ const setupVisibilityFetch = () => {
 }
 
 onMounted(() => {
-  if (thinking.status === 'complete') {
+  if (thinking.value.status === 'complete') {
     setupVisibilityFetch()
   }
 })
 
-// 卡片可能以 thinking 态挂载后才完成（实时会话），完成时再注册入视野拉取
 watch(
-  () => thinking.status,
-  (status) => {
-    if (status === 'complete') {
-      setupVisibilityFetch()
-    }
+  () => thinking.value.thinkingId,
+  () => {
+    requestVersion++
+    reviewLoading.value = false
+    reviewLoaded.value = false
+    reviewError.value = false
+    reviewContent.value = ''
+    reviewTruncated.value = false
+    showFull.value = false
+    visibilityObserver?.disconnect()
+    visibilityObserver = null
+    useCachedBody()
+    setupVisibilityFetch()
+  },
+  { flush: 'post' }
+)
+watch(
+  () => [thinking.value.status, thinking.value.bodyLoaded, thinking.value.cachedBody, showContent.value],
+  () => {
+    useCachedBody()
+    setupVisibilityFetch()
   },
   { flush: 'post' }
 )
 
 onUnmounted(() => {
+  disposed = true
+  requestVersion++
   visibilityObserver?.disconnect()
   visibilityObserver = null
 })

@@ -2,7 +2,6 @@ use crate::error::CommonError;
 use crate::pojo::common::{CursorPageParam, CursorPageResp};
 use chrono::Utc;
 use entity::im_message;
-use lazy_static::lazy_static;
 use migration::ExprTrait; // #36: SeaORM 1.1.x 把 SimpleExpr 的 .lt()/.eq() 等比较方法放在 ExprTrait（keyset 过滤的 if_null(0).lt()/.eq()、cast_as().lt() 都需要它在 scope）
 use sea_orm::prelude::Expr;
 use sea_orm::sea_query::{Alias, Value};
@@ -12,21 +11,8 @@ use sea_orm::{
     TransactionTrait, TryIntoModel,
 };
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use tracing::{debug, error, info};
-
-lazy_static! {
-    static ref DELETED_TABLE_INITIALIZED: AtomicBool = AtomicBool::new(false);
-    static ref ROOM_CLEAR_TABLE_INITIALIZED: AtomicBool = AtomicBool::new(false);
-}
-
-/// 重置表初始化标志，在切换数据库时调用
-pub fn reset_table_initialization_flags() {
-    DELETED_TABLE_INITIALIZED.store(false, Ordering::SeqCst);
-    ROOM_CLEAR_TABLE_INITIALIZED.store(false, Ordering::SeqCst);
-    info!("Table initialization flags have been reset");
-}
 
 #[derive(Clone)]
 pub struct MessageWithThumbnail {
@@ -61,10 +47,6 @@ fn parse_message_id(id: &str) -> Option<i64> {
 }
 
 async fn ensure_deleted_message_table<C: ConnectionTrait>(conn: &C) -> Result<(), CommonError> {
-    if DELETED_TABLE_INITIALIZED.load(Ordering::SeqCst) {
-        return Ok(());
-    }
-
     let backend = conn.get_database_backend();
     let stmt = Statement::from_string(
         backend,
@@ -80,15 +62,10 @@ async fn ensure_deleted_message_table<C: ConnectionTrait>(conn: &C) -> Result<()
     conn.execute(stmt)
         .await
         .map_err(CommonError::DatabaseError)?;
-    DELETED_TABLE_INITIALIZED.store(true, Ordering::SeqCst);
     Ok(())
 }
 
 async fn ensure_room_clear_table<C: ConnectionTrait>(conn: &C) -> Result<(), CommonError> {
-    if ROOM_CLEAR_TABLE_INITIALIZED.load(Ordering::SeqCst) {
-        return Ok(());
-    }
-
     let backend = conn.get_database_backend();
     let stmt = Statement::from_string(
         backend,
@@ -104,11 +81,10 @@ async fn ensure_room_clear_table<C: ConnectionTrait>(conn: &C) -> Result<(), Com
     conn.execute(stmt)
         .await
         .map_err(CommonError::DatabaseError)?;
-    ROOM_CLEAR_TABLE_INITIALIZED.store(true, Ordering::SeqCst);
     Ok(())
 }
 
-async fn should_skip_message_insert<C: ConnectionTrait>(
+pub(crate) async fn should_skip_message_insert<C: ConnectionTrait>(
     conn: &C,
     message_id: &str,
     room_id: &str,
@@ -543,17 +519,40 @@ pub async fn cursor_page_messages(
         });
     }
 
+    // aichatoverview#350：隐藏标记只减可见行，不移动游标/终止状态；
+    // 游标按未过滤抓取计，避免隐藏行吞掉其后分页。
+    let fetched = messages.len();
+    let last_key = messages
+        .last()
+        .map(|msg| format!("{}:{}", msg.send_time.unwrap_or(0), msg.id));
+    let hidden = remote_hidden_ids(
+        db,
+        &messages.iter().map(|m| m.id.clone()).collect::<Vec<_>>(),
+        login_uid,
+    )
+    .await?;
+    let messages: Vec<_> = messages
+        .into_iter()
+        .filter(|m| !hidden.contains(&m.id))
+        .collect();
+
     // 生成下一页的复合游标 "<send_time>:<id>"（与 keyset 排序键对齐）
-    let next_cursor = if messages.len() < cursor_page_param.page_size as usize {
+    let next_cursor = if fetched < cursor_page_param.page_size as usize {
         String::new() // 已经是最后一页
     } else {
-        messages
-            .last()
-            .map(|msg| format!("{}:{}", msg.send_time.unwrap_or(0), msg.id))
-            .unwrap_or_default()
+        last_key.unwrap_or_default()
     };
 
-    let is_last = messages.len() < cursor_page_param.page_size as usize;
+    let is_last = fetched < cursor_page_param.page_size as usize;
+
+    if messages.is_empty() {
+        return Ok(CursorPageResp {
+            cursor: next_cursor,
+            is_last,
+            list: Some(vec![]),
+            total,
+        });
+    }
 
     let enriched = enrich_models_with_thumbnails(db, messages).await?;
 
@@ -703,7 +702,25 @@ where
         .all(db)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to query visible history messages: {}", e))?;
-    enrich_models_with_thumbnails(db, models).await
+    // aichatoverview#350：服务端权威不可用隐藏与用户墓碑/清空边界同等过滤
+    let hidden = remote_hidden_ids(
+        db,
+        &models.iter().map(|m| m.id.clone()).collect::<Vec<_>>(),
+        login_uid,
+    )
+    .await?;
+    let mut visible = Vec::with_capacity(models.len());
+    for model in models {
+        if hidden.contains(&model.id) {
+            continue;
+        }
+        if !should_skip_message_insert(db, &model.id, &model.room_id, login_uid, model.send_time)
+            .await?
+        {
+            visible.push(model);
+        }
+    }
+    enrich_models_with_thumbnails(db, visible).await
 }
 
 /// 保存单个消息到数据库
@@ -769,8 +786,8 @@ pub async fn save_message(
     Ok(record)
 }
 
-pub async fn delete_message_by_id(
-    db: &DatabaseConnection,
+pub async fn delete_message_by_id<C: ConnectionTrait>(
+    db: &C,
     message_id: &str,
     login_uid: &str,
 ) -> Result<u64, CommonError> {
@@ -783,8 +800,8 @@ pub async fn delete_message_by_id(
     Ok(result.rows_affected)
 }
 
-pub async fn delete_messages_by_room(
-    db: &DatabaseConnection,
+pub async fn delete_messages_by_room<C: ConnectionTrait>(
+    db: &C,
     room_id: &str,
     login_uid: &str,
 ) -> Result<u64, CommonError> {
@@ -830,8 +847,8 @@ where
     Ok(result.rows_affected())
 }
 
-pub async fn get_room_max_message_id(
-    db: &DatabaseConnection,
+pub async fn get_room_max_message_id<C: ConnectionTrait>(
+    db: &C,
     room_id: &str,
     login_uid: &str,
 ) -> Result<Option<String>, CommonError> {
@@ -853,8 +870,8 @@ pub async fn get_room_max_message_id(
     }
 }
 
-pub async fn get_room_id_by_message_id(
-    db: &DatabaseConnection,
+pub async fn get_room_id_by_message_id<C: ConnectionTrait>(
+    db: &C,
     message_id: &str,
     login_uid: &str,
 ) -> Result<Option<String>, CommonError> {
@@ -865,8 +882,8 @@ pub async fn get_room_id_by_message_id(
     Ok(message.map(|model| model.room_id))
 }
 
-pub async fn record_deleted_message(
-    db: &DatabaseConnection,
+pub async fn record_deleted_message<C: ConnectionTrait>(
+    db: &C,
     message_id: &str,
     room_id: &str,
     login_uid: &str,
@@ -889,8 +906,8 @@ pub async fn record_deleted_message(
     Ok(())
 }
 
-pub async fn record_room_clear(
-    db: &DatabaseConnection,
+pub async fn record_room_clear<C: ConnectionTrait>(
+    db: &C,
     room_id: &str,
     login_uid: &str,
     last_cleared_msg_id: Option<String>,
@@ -916,6 +933,157 @@ pub async fn record_room_clear(
     Ok(())
 }
 
+/// aichatoverview#350：服务端权威不可用（删除/越界/失权）的独立隐藏标记。
+///
+/// 与用户删除墓碑（im_deleted_message，永久）严格区分：本标记可由后续成功权威快照
+/// 重新确认可见时清除；用户墓碑与清空边界仍优先（should_skip_message_insert 先行）。
+async fn ensure_remote_hidden_table<C: ConnectionTrait>(conn: &C) -> Result<(), CommonError> {
+    let backend = conn.get_database_backend();
+    let stmt = Statement::from_string(
+        backend,
+        "CREATE TABLE IF NOT EXISTS im_remote_hidden (
+            id TEXT NOT NULL,
+            room_id TEXT NOT NULL,
+            login_uid TEXT NOT NULL,
+            hidden_at INTEGER NOT NULL,
+            PRIMARY KEY (id, login_uid)
+        )"
+        .to_string(),
+    );
+    conn.execute(stmt)
+        .await
+        .map_err(CommonError::DatabaseError)?;
+    Ok(())
+}
+
+pub async fn mark_remote_hidden<C: ConnectionTrait>(
+    db: &C,
+    message_id: &str,
+    room_id: &str,
+    login_uid: &str,
+) -> Result<(), CommonError> {
+    ensure_remote_hidden_table(db).await?;
+    let backend = db.get_database_backend();
+    let stmt = Statement::from_sql_and_values(
+        backend,
+        "INSERT INTO im_remote_hidden (id, room_id, login_uid, hidden_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(id, login_uid) DO UPDATE SET room_id = excluded.room_id, hidden_at = excluded.hidden_at",
+        vec![
+            Value::from(message_id.to_string()),
+            Value::from(room_id.to_string()),
+            Value::from(login_uid.to_string()),
+            Value::from(Utc::now().timestamp_millis()),
+        ],
+    );
+    db.execute(stmt).await.map_err(CommonError::DatabaseError)?;
+    Ok(())
+}
+
+/// aichatoverview#350：权威快照重新确认可见时清除隐藏标记（幂等）。
+pub async fn clear_remote_hidden<C: ConnectionTrait>(
+    db: &C,
+    message_ids: &[String],
+    login_uid: &str,
+) -> Result<(), CommonError> {
+    if message_ids.is_empty() {
+        return Ok(());
+    }
+    ensure_remote_hidden_table(db).await?;
+    let backend = db.get_database_backend();
+    let placeholders = message_ids
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "DELETE FROM im_remote_hidden WHERE login_uid = ? AND id IN ({})",
+        placeholders
+    );
+    let mut values: Vec<Value> = vec![Value::from(login_uid.to_string())];
+    values.extend(message_ids.iter().map(|id| Value::from(id.clone())));
+    let stmt = Statement::from_sql_and_values(backend, &sql, values);
+    db.execute(stmt).await.map_err(CommonError::DatabaseError)?;
+    Ok(())
+}
+
+pub async fn remote_hidden_ids<C: ConnectionTrait>(
+    db: &C,
+    message_ids: &[String],
+    login_uid: &str,
+) -> Result<std::collections::HashSet<String>, CommonError> {
+    let mut hidden = std::collections::HashSet::new();
+    if message_ids.is_empty() {
+        return Ok(hidden);
+    }
+    ensure_remote_hidden_table(db).await?;
+    let backend = db.get_database_backend();
+    let placeholders = message_ids
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT id FROM im_remote_hidden WHERE login_uid = ? AND id IN ({})",
+        placeholders
+    );
+    let mut values: Vec<Value> = vec![Value::from(login_uid.to_string())];
+    values.extend(message_ids.iter().map(|id| Value::from(id.clone())));
+    let stmt = Statement::from_sql_and_values(backend, &sql, values);
+    for row in db.query_all(stmt).await? {
+        let id: String = row.try_get("", "id")?;
+        hidden.insert(id);
+    }
+    Ok(hidden)
+}
+
+/// aichatoverview#350：校准 touch 指纹（消息类型，消息体原文，发送状态）。
+///
+/// 快照存请求发起前的本地事实，提交时重读比对：不一致说明请求在途期间被
+/// WS/本地动作触及，保留较新本地事实并计为未确认（不假称已校准）。
+/// ponytail：内容级指纹比对，无全局 touch 计数器；逐记录比较已覆盖全部竞争写点，
+/// 计数器只会复制同一信息。identical-content touch 不可见但无语义差异，无需处理。
+pub type MessageFingerprint = (Option<u8>, Option<String>, String);
+
+pub async fn find_fingerprints<C: ConnectionTrait>(
+    db: &C,
+    ids: &[String],
+    room_id: &str,
+    login_uid: &str,
+) -> Result<HashMap<String, MessageFingerprint>, CommonError>
+where
+    C: ConnectionTrait,
+{
+    let mut out = HashMap::new();
+    if ids.is_empty() {
+        return Ok(out);
+    }
+    let mut condition = sea_orm::Condition::any();
+    for id in ids {
+        condition = condition.add(
+            sea_orm::Condition::all()
+                .add(im_message::Column::Id.eq(id.clone()))
+                .add(im_message::Column::LoginUid.eq(login_uid.to_string()))
+                .add(im_message::Column::RoomId.eq(room_id.to_string())),
+        );
+    }
+    let models = im_message::Entity::find()
+        .filter(condition)
+        .all(db)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to query calibration fingerprints: {}", e))?;
+    for model in models {
+        out.insert(
+            model.id.clone(),
+            (
+                model.message_type,
+                model.body.clone(),
+                model.send_status.clone(),
+            ),
+        );
+    }
+    Ok(out)
+}
 /// 计算消息的 time_block
 /// 判断当前消息与前一条消息的时间间隔，如果超过10分钟则返回间隔值
 /// 如果是房间的第一条消息，返回 Some(1) 表示始终显示时间
@@ -995,6 +1163,28 @@ pub async fn update_message_status(
         // 三步包进单事务：避免「删后插前崩溃→本地行临时消失」这一自引入的非原子缺口
         // （原 update_many 是单语句隐式原子；拆成三步后必须显式事务复原原子性）。
         let txn = db.begin().await.map_err(CommonError::DatabaseError)?;
+        // A user deletion/room clear wins over both HTTP acknowledgement and WS reconciliation.
+        // Reconciliation itself deletes the temp row without creating a user tombstone.
+        for candidate in [&original_id, &message_id] {
+            if should_skip_message_insert(
+                &txn,
+                candidate,
+                &record.message.room_id,
+                &login_uid,
+                record.message.send_time,
+            )
+            .await?
+            {
+                // Transfer a user's temp-ID deletion to its newly learned official ID.
+                record_deleted_message(&txn, &message_id, &record.message.room_id, &login_uid)
+                    .await?;
+                delete_message_by_id(&txn, &message_id, &login_uid).await?;
+                txn.commit().await.map_err(CommonError::DatabaseError)?;
+                return Err(CommonError::RequestError(
+                    "Message was deleted locally".to_string(),
+                ));
+            }
+        }
         im_message::Entity::delete_by_id((original_id.clone(), login_uid.clone()))
             .exec(&txn)
             .await
@@ -1066,13 +1256,16 @@ pub async fn update_message_status(
 }
 
 /// 更新消息撤回状态
-pub async fn update_message_recall_status(
-    db: &DatabaseConnection,
+pub async fn update_message_recall_status<C: ConnectionTrait>(
+    db: &C,
     message_id: &str,
     message_type: u8,
     message_body: &str,
     login_uid: &str,
-) -> Result<(), CommonError> {
+) -> Result<(), CommonError>
+where
+    C: ConnectionTrait,
+{
     info!(
         "[RECALL] Updating message recall status in database, message_id: {}",
         message_id

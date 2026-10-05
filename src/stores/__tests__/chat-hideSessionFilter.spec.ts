@@ -70,6 +70,10 @@ vi.mock('@/utils/PlatformConstants', () => ({
   isMac: () => false
 }))
 
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: async () => ({ sessionEpoch: 1, binding: { backendKey: 'http://fixture/api', uid: '260', sessionEpoch: 1 } })
+}))
+import { initializeSessionBinding } from '@/services/sessionBinding'
 import { useChatStore } from '@/stores/chat'
 import { RoomTypeEnum } from '@/enums'
 import type { SessionItem } from '@/services/types'
@@ -87,7 +91,8 @@ const makeSession = (roomId: string, overrides: Partial<SessionItem> = {}): Sess
   }) as SessionItem
 
 describe('useChatStore 会话列表 hide 过滤（#260）', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await initializeSessionBinding()
     setActivePinia(createPinia())
     platformState.isWeb = false
   })

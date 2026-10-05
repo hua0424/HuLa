@@ -64,7 +64,8 @@ import { useFileStore } from '@/stores/file'
 import { useUserStore } from '@/stores/user'
 import { useSettingStore } from '@/stores/setting.ts'
 import { useInitialSyncStore } from '@/stores/initialSync.ts'
-import { invokeSilently, invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
+import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
+import { eventSession, isSessionCurrent, sessionBinding, type SessionIdentity } from '@/services/sessionBinding'
 import { useRoute } from 'vue-router'
 import { audioManager } from '@/utils/AudioManager'
 import { useOverlayController } from '@/hooks/useOverlayController'
@@ -100,13 +101,6 @@ const { overlayVisible, markAsyncLoaded } = useOverlayController({
 })
 
 let initPromise: Promise<void> | null = null
-// 只有首次登录需要延迟异步组件的加载，后续重新登录直接渲染
-const maybeDelayForInitialRender = async () => {
-  if (!shouldBlockInitialRender.value) {
-    return
-  }
-  await new Promise((resolve) => setTimeout(resolve, 600))
-}
 
 // 根据当前 uid 判断是否需要阻塞首屏并重新同步（依赖持久化的初始化完成名单）
 const syncInitialSyncState = () => {
@@ -169,7 +163,6 @@ const AsyncLeft = defineAsyncComponent({
   loader: async () => {
     const blockInit = shouldBlockInitialRender.value
     const initTask = ensureInitStarted(blockInit)
-    await maybeDelayForInitialRender()
     loadingText.value = t('home.loading.left_panel')
     const comp = await import('./left/index.vue')
     loadingPercentage.value = 33
@@ -201,7 +194,6 @@ const AsyncRight = defineAsyncComponent({
   loader: async () => {
     const blockInit = shouldBlockInitialRender.value
     const initTask = ensureInitStarted(blockInit)
-    await maybeDelayForInitialRender()
     await import('./center/index.vue')
     loadingText.value = t('home.loading.right_panel')
     const comp = await import('./right/index.vue')
@@ -336,8 +328,24 @@ const addFileToStore = (data: MessageType) => {
 }
 
 useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
+  const binding = eventSession(data)
+  const current = () => isWeb() || (!!binding && isSessionCurrent(binding))
+  if (!current()) return
   if (chatStore.checkMsgExist(String(data.message.roomId), String(data.message.id))) {
     return
+  }
+  // Check persisted deletion boundaries before a WS echo can mutate memory or notify.
+  if (!isWeb()) {
+    try {
+      const visible = await invokeWithErrorHandler<boolean>(
+        TauriCommand.SAVE_MSG,
+        { binding, data },
+        { customErrorMessage: t('home.chat_header.toast.local_cache_failed') }
+      )
+      if (!current() || !visible) return
+    } catch {
+      return
+    }
   }
   // ISS-015: 统一把 sendTime 规范化成 number 时间戳，防止后端/API/SQLite 返回 string 导致 sort NaN
   const rawSendTime = data.message.sendTime ?? data.sendTime
@@ -347,6 +355,7 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
     data.sendTime = data.message.sendTime
   }
   if (chatStore.tryReplaceStreamPlaceholder(data)) {
+    if (current()) chatStore.updateSessionLastActiveTime(data.message.roomId)
     return
   }
 
@@ -358,16 +367,17 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
       try {
         // Web 端无本地 SQLite，跳过 Tauri 清理。
         if (!isWeb()) {
-          // 删除本地 SQLite 里那条孤儿 temp 行，否则下次重载历史时 temp 行复活导致重复气泡回归
-          await invokeWithErrorHandler(
-            TauriCommand.DELETE_MESSAGE,
-            {
-              messageId: reconciledTempId,
-              roomId: data.message.roomId
-            },
+          // Collapse temp/server IDs atomically; cleanup is not a user deletion tombstone.
+          const visible = await invokeWithErrorHandler<boolean>(
+            TauriCommand.SAVE_MSG,
+            { binding, data, reconciledTempId },
             { showError: false }
           )
-          await invokeWithErrorHandler(TauriCommand.SAVE_MSG, { data }, { showError: false })
+          if (!current()) return
+          if (!visible) {
+            chatStore.deleteMsg(String(data.message.id), String(data.message.roomId))
+            return
+          }
         }
         // 跳过了 pushMsg 的 updateSession，需手动刷新会话最近活跃时间，与正常成功路径语义对齐
         chatStore.updateSessionLastActiveTime(data.message.roomId)
@@ -395,9 +405,7 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
     chatStore.markMessageAsAutoReply(String(data.message.id))
   }
 
-  await invokeSilently(TauriCommand.SAVE_MSG, {
-    data
-  })
+  if (!current()) return
 
   // 如果是图片或视频消息，添加到 file store（仅移动端需要）
   if (isMobile()) {
@@ -421,6 +429,7 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
           const isVisible = await home.isVisible()
           const isMinimized = await home.isMinimized()
           const isFocused = await home.isFocused()
+          if (!current()) return
 
           // 如果窗口不可见、被最小化或未聚焦，则播放音效
           shouldPlaySound = !isVisible || isMinimized || !isFocused
@@ -439,6 +448,7 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
         shouldPlaySound = true
       }
 
+      if (!current()) return
       // 播放消息音效
       if (shouldPlaySound) {
         await playMessageSound()
@@ -459,7 +469,7 @@ useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
 })
 
 // ==================== AIclaw 流式消息处理 ====================
-const streamDeltaBuffers = new Map<string, { roomId: string; content: string }>()
+const streamDeltaBuffers = new Map<string, { roomId: string; content: string; binding?: SessionIdentity }>()
 let streamRafId: number | null = null
 
 useMitt.on(WsResponseMessageType.STREAM_START, (data: StreamStartPayload) => {
@@ -468,6 +478,8 @@ useMitt.on(WsResponseMessageType.STREAM_START, (data: StreamStartPayload) => {
 
 useMitt.on(WsResponseMessageType.STREAM_DELTA, (data: StreamDeltaPayload) => {
   // rAF 节流：将 delta 累积到 buffer，每帧批量刷新一次
+  const binding = eventSession(data)
+  if (!isWeb() && (!binding || !isSessionCurrent(binding))) return
   const key = data.msgId
   const existing = streamDeltaBuffers.get(key)
   if (existing) {
@@ -482,13 +494,13 @@ useMitt.on(WsResponseMessageType.STREAM_DELTA, (data: StreamDeltaPayload) => {
         break
       }
     }
-    streamDeltaBuffers.set(key, { roomId, content: data.chunk })
+    streamDeltaBuffers.set(key, { roomId, content: data.chunk, binding })
   }
 
   if (!streamRafId) {
     streamRafId = requestAnimationFrame(() => {
       for (const [msgId, buf] of streamDeltaBuffers) {
-        if (buf.roomId) {
+        if (buf.roomId && (isWeb() || (!!buf.binding && isSessionCurrent(buf.binding)))) {
           chatStore.appendStreamContent(buf.roomId, msgId, buf.content)
         }
       }
@@ -499,6 +511,8 @@ useMitt.on(WsResponseMessageType.STREAM_DELTA, (data: StreamDeltaPayload) => {
 })
 
 useMitt.on(WsResponseMessageType.STREAM_END, (data: StreamEndPayload) => {
+  const binding = eventSession(data)
+  if (!isWeb() && (!binding || !isSessionCurrent(binding))) return
   // 刷新剩余 buffer
   const buf = streamDeltaBuffers.get(data.msgId)
   if (buf?.roomId) {
@@ -507,6 +521,16 @@ useMitt.on(WsResponseMessageType.STREAM_END, (data: StreamEndPayload) => {
   }
   chatStore.finalizeStream(data)
 })
+
+watch(
+  sessionBinding,
+  () => {
+    if (streamRafId !== null) cancelAnimationFrame(streamRafId)
+    streamRafId = null
+    streamDeltaBuffers.clear()
+  },
+  { flush: 'sync' }
+)
 
 // ==================== REQ-004 AIclaw Thinking 事件处理 ====================
 // S4 起思考条改为状态版：客户端不再接收 thinkingDelta，全文按需经 REST 拉取。

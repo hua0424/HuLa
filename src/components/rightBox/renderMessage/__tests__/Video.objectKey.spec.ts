@@ -54,7 +54,8 @@ vi.mock('@/utils/fileSign', () => ({
 import { isMobile } from '@/utils/PlatformConstants'
 
 vi.mock('@/utils/PlatformConstants', () => ({
-  isMobile: vi.fn().mockReturnValue(false)
+  isMobile: vi.fn().mockReturnValue(false),
+  isWeb: () => false
 }))
 
 vi.mock('vue', async (importOriginal) => {

@@ -2,7 +2,8 @@
  * 网络状态监测钩子
  */
 import { createSharedComposable, tryOnScopeDispose } from '@vueuse/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import type { UnlistenFn } from '@tauri-apps/api/event'
+import { listenBound as listen } from '@/services/sessionBinding'
 import rustWebSocketClient, { ConnectionState } from '@/services/webSocketRust'
 
 const useSharedNetworkStatus = createSharedComposable(() => {

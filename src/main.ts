@@ -11,6 +11,8 @@ import { initializePlatform, isIOS, isMobile, isWeb } from '@/utils/PlatformCons
 import { startWebVitalObserver } from '@/utils/WebVitalsObserver'
 import { invoke } from '@tauri-apps/api/core'
 import App from '@/App.vue'
+import { initializeSessionBinding } from '@/services/sessionBinding'
+import { ensureAppStateReady } from '@/utils/AppStateReady'
 
 initializePlatform()
 startWebVitalObserver()
@@ -61,19 +63,27 @@ async function setup() {
   }
 }
 
-const app = createApp(App)
-app
-  .use(router)
-  .use(pinia)
-  .use(TlbsMap)
-  .use(setupI18n)
-  .directive('resize', vResize)
-  .directive('slide', vSlide)
-  .mount('#app')
-app.config.errorHandler = (err) => {
-  if (err instanceof AppException) {
-    window.$message.error(err.message)
-    return
+const mountApp = async () => {
+  // Establish the native namespace before Tier3 hydrate or auxiliary components capture identity.
+  if (!isWeb()) {
+    await ensureAppStateReady()
+    await initializeSessionBinding()
   }
-  throw err
+  const app = createApp(App)
+  app
+    .use(router)
+    .use(pinia)
+    .use(TlbsMap)
+    .use(setupI18n)
+    .directive('resize', vResize)
+    .directive('slide', vSlide)
+    .mount('#app')
+  app.config.errorHandler = (err) => {
+    if (err instanceof AppException) {
+      window.$message.error(err.message)
+      return
+    }
+    throw err
+  }
 }
+void mountApp().catch((error) => console.error('[session] application bootstrap failed', error))
