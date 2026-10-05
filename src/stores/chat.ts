@@ -1008,6 +1008,7 @@ export const useChatStore = defineStore(
             url: ImUrlEnum.GET_MSG_WINDOW,
             body: { roomId, ...range }
           })) as {
+            requestId?: unknown
             schemaVersion?: string
             capabilities?: string[]
             items?: unknown[]
@@ -1020,6 +1021,17 @@ export const useChatStore = defineStore(
             thinkingComplete?: unknown
             thinkingKnownReceipts?: unknown
             thinkingKnownComplete?: unknown
+          }
+          // aichatoverview#351 N2：迟到/乱序旧包整包丢弃——应答 requestId 回显与本轮
+          // 发送不一致即重放旧授权，不写消息、不碰思考缓存（已清零不得复活）。
+          // 缺回显按旧服务端形状放行（下方 strict 校验走 unsupported，不写缓存）。
+          if (envelope?.requestId != null && String(envelope.requestId) !== reqId) {
+            return finish({
+              roomId,
+              ok: false,
+              status: 'error',
+              error: 'window_error: 窗口校准应答已过期'
+            })
           }
           if (
             !envelope ||
