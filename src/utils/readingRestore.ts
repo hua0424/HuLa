@@ -105,3 +105,26 @@ export const resolveRestoreAnchor = (
 /** 历史阅读中新消息只提示；确在底部（状态或实测距离）才跟随到底。 */
 export const shouldFollowNewMessage = (isAtBottom: boolean, distancePx: number, thresholdPx = 150): boolean =>
   isAtBottom || finiteNumber(distancePx, Number.MAX_SAFE_INTEGER) <= thresholdPx
+
+/**
+ * aichatoverview#352（恢复后抢底修复）：
+ * RESTORE 定位成功后，同房间的程序化到底在窗口期内一律让位。
+ * verify-issue 实证：changeRoom 置 pending → ChatMain 先 RESTORE pin 住并消费 pending，
+ * 随后 global  watcher 才 emit SESSION_CHANGED，handleSessionChanged 见 pending 已空而
+ * scrollToBottom，把刚 pin 住的锚点拍回底部（切房 ×3 + warm 重登 ×1，4/4 复现）。
+ * 房间作用域：切到别的房间不受上一个房间恢复窗口的影响。
+ */
+export const RESTORE_SETTLE_MS = 3000
+
+export const isRestoreSettling = (
+  lastRestoreAt: number,
+  restoreRoomId: string | null | undefined,
+  currentRoomId: string | null | undefined,
+  now: number = Date.now(),
+  windowMs: number = RESTORE_SETTLE_MS
+): boolean => {
+  if (!lastRestoreAt || !restoreRoomId || !currentRoomId) return false
+  if (restoreRoomId !== currentRoomId) return false
+  const elapsed = now - lastRestoreAt
+  return elapsed >= 0 && elapsed < windowMs
+}

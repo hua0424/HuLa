@@ -6,8 +6,10 @@ import { describe, expect, it } from 'vitest'
 
 import {
   blankReadingSnapshot,
+  isRestoreSettling,
   normalizeReadingSnapshot,
   pickRestoreRoom,
+  RESTORE_SETTLE_MS,
   resolveRestoreAnchor,
   shouldFollowNewMessage
 } from '@/utils/readingRestore'
@@ -116,5 +118,30 @@ describe('shouldFollowNewMessage (#352)', () => {
     expect(shouldFollowNewMessage(false, 150)).toBe(true)
     expect(shouldFollowNewMessage(false, 151)).toBe(false)
     expect(shouldFollowNewMessage(false, 5000)).toBe(false)
+  })
+})
+
+describe('isRestoreSettling (#352 恢复后抢底修复)', () => {
+  const now = 1_000_000
+
+  it('同房间窗口期内让位（SESSION_CHANGED 滞后到底被抑制）', () => {
+    expect(isRestoreSettling(now - 50, 'r1', 'r1', now)).toBe(true)
+    expect(isRestoreSettling(now - (RESTORE_SETTLE_MS - 1), 'r1', 'r1', now)).toBe(true)
+  })
+
+  it('窗口过期后恢复正常跟随', () => {
+    expect(isRestoreSettling(now - RESTORE_SETTLE_MS, 'r1', 'r1', now)).toBe(false)
+    expect(isRestoreSettling(now - 60_000, 'r1', 'r1', now)).toBe(false)
+  })
+
+  it('别的房间不受上一个房间恢复窗口影响（快速切房不被 stranded）', () => {
+    expect(isRestoreSettling(now - 50, 'r1', 'r2', now)).toBe(false)
+  })
+
+  it('无记录/时钟异常不抑制（不误伤普通到底）', () => {
+    expect(isRestoreSettling(0, 'r1', 'r1', now)).toBe(false)
+    expect(isRestoreSettling(now - 50, null, 'r1', now)).toBe(false)
+    expect(isRestoreSettling(now - 50, 'r1', null, now)).toBe(false)
+    expect(isRestoreSettling(now + 1000, 'r1', 'r1', now)).toBe(false)
   })
 })
