@@ -318,7 +318,7 @@ import { audioManager } from '@/utils/AudioManager'
 import { timeToStr } from '@/utils/ComputedTime'
 import { useCachedStore } from '@/stores/cached'
 import { isMessageMultiSelectEnabled } from '@/utils/MessageSelect'
-import { isRestoreSettling } from '@/utils/readingRestore'
+import { decideMountRestore, isRestoreSettling } from '@/utils/readingRestore'
 import { isMac, isMobile, isWeb, isWindows } from '@/utils/PlatformConstants'
 import { buildDefaultWorkspaceDir } from '@/utils/aiclawGroupConfig'
 import FileUploadProgress from '@/components/rightBox/FileUploadProgress.vue'
@@ -596,6 +596,29 @@ watch(
   { immediate: true }
 )
 
+// aichatoverview#352：该房间遗留非底部阅读位置时改为恢复意图——
+// 先不抢底，等 store 回填锚点后 RESTORE 一次 pin 住；超时未等到则回底部。
+// 切房 watcher 与 warm 重登挂载共用（后者无房间过渡，watcher 看不到变化）。
+const armRestoreForRoom = (): boolean => {
+  const roomId = currentRoomId.value
+  const saved = roomId ? chatStore.getSavedReadPosition(roomId) : null
+  disarmRestore()
+  if (roomId && saved && !saved.wasAtBottom && saved.anchorMsgId) {
+    restoreArmedRef.value = true
+    scrollIntent.value = ScrollIntentEnum.NONE
+    restoreFallbackTimer = setTimeout(() => {
+      restoreFallbackTimer = null
+      if (restoreArmedRef.value && !chatStore.pendingScrollRestore) {
+        disarmRestore()
+        // 恢复未兑现（锚点回填超时）：这是本房间自己的兜底，强制到底，不受旧恢复窗口影响。
+        scrollToBottom({ force: true })
+      }
+    }, 3000)
+    return true
+  }
+  return false
+}
+
 // 1. 监听房间切换，触发初始化滚动意图
 watch(
   () => [currentRoomId.value] as const,
@@ -607,23 +630,8 @@ watch(
       isAtBottom.value = true
       enableAutoScroll(1200)
 
-      // aichatoverview#352：该房间遗留非底部阅读位置时改为恢复意图——
-      // 先不抢底，等 store 回填锚点后 RESTORE 一次 pin 住；超时未等到则回底部。
-      const saved = chatStore.getSavedReadPosition(newRoomId)
-      disarmRestore()
       chatStore.clearPendingRestore()
-      if (saved && !saved.wasAtBottom && saved.anchorMsgId) {
-        restoreArmedRef.value = true
-        scrollIntent.value = ScrollIntentEnum.NONE
-        restoreFallbackTimer = setTimeout(() => {
-          restoreFallbackTimer = null
-          if (restoreArmedRef.value && !chatStore.pendingScrollRestore) {
-            disarmRestore()
-            // 恢复未兑现（锚点回填超时）：这是本房间自己的兜底，强制到底，不受旧恢复窗口影响。
-            scrollToBottom({ force: true })
-          }
-        }, 3000)
-      } else {
+      if (!armRestoreForRoom()) {
         scrollIntent.value = ScrollIntentEnum.INITIAL
       }
     }
@@ -818,10 +826,13 @@ const repinReadingAnchor = (): void => {
 
 // aichatoverview#352：上报首条可见消息锚点（持久化与回 pin 共用）。
 // 程序化滚动期间（自动跟随/恢复执行/历史加载）不上报，避免存下中间位置。
+// aichatoverview#352 warm 重登：恢复未决（armed/pending）时不上报——
+// 此时首条可见只是最新页顶部/底部闪现，上报会覆盖尚未恢复的有效锚点。
 const reportVisibleAnchor = (container: HTMLElement): void => {
   if (restoringRef.value || isLoadingMore.value || isAutoScrolling.value) return
   const roomId = currentRoomId.value
   if (!roomId) return
+  if (restoreArmedRef.value || chatStore.pendingScrollRestore?.roomId === roomId) return
   const containerRect = container.getBoundingClientRect()
   const nodes = container.querySelectorAll('[data-message-id]')
   let anchorId = ''
@@ -849,11 +860,13 @@ const reportVisibleAnchor = (container: HTMLElement): void => {
 }
 
 // 滚动到底部（aichatoverview#352：恢复稳定窗口内同房间的程序化到底一律让位，
-// 等 RESTORE 定位稳定；用户显式到底与恢复自身的兜底传 force:true 不受限）。
+// 等 RESTORE 定位稳定；恢复未决（armed/pending）时非强制到底同样让位，
+// 等 RESTORE 或超时兜底；用户显式到底与恢复自身的兜底传 force:true 不受限）。
 const scrollToBottom = (opts?: { force?: boolean }): void => {
   const container = scrollContainerRef.value
   if (!container) return
   if (!opts?.force && isRestoreSettling(lastRestoreAt, restoreRoomId, currentRoomId.value)) return
+  if (!opts?.force && (restoreArmedRef.value || chatStore.pendingScrollRestore?.roomId === currentRoomId.value)) return
   temporarilySuppressTopLoadMore()
   // 立即清除新消息计数
   chatStore.clearNewMsgCount()
@@ -885,8 +898,10 @@ useResizeObserver(messageListRef, () => {
     // 使用 nextTick 确保 DOM 状态稳定
     const userBottom = isAtBottom.value
     nextTick(() => {
-      // 用户自己在底部才强制跟随；恢复稳定窗口内的程序化跟随让位给锚点。
-      scrollToBottom(userBottom ? { force: true } : undefined)
+      // 用户自己在底部才强制跟随；恢复稳定窗口内与恢复未决（armed/pending）的程序化跟随
+      // 让位给锚点，等 RESTORE 定位（否则挂载/首屏时的尺寸变化会把未恢复的位置拍回底部）。
+      const restoreHold = restoreArmedRef.value || chatStore.pendingScrollRestore?.roomId === currentRoomId.value
+      scrollToBottom(userBottom && !restoreHold ? { force: true } : undefined)
     })
     return
   }
@@ -1003,7 +1018,10 @@ watch(
         // aichatoverview#352：历史阅读中新消息只提示不强制到底（计数进悬浮提示）；
         // 确在底部（或恢复待命中不抢位）才跟随。自己消息沿用跟随。
         const distance = container.scrollHeight - container.scrollTop - container.clientHeight
-        const following = (isAtBottom.value || distance <= 150) && !restoreArmedRef.value
+        // 恢复未决（armed/pending）时不跟随不计数，等 RESTORE 一次 pin 住。
+        const restoreHold =
+          restoreArmedRef.value || chatStore.pendingScrollRestore?.roomId === globalStore.currentSessionRoomId
+        const following = (isAtBottom.value || distance <= 150) && !restoreHold
         // 只有当不在底部且是他人消息时才增加计数
         if (isOtherUserMessage && !following) {
           const roomId = globalStore.currentSessionRoomId
@@ -1016,7 +1034,7 @@ watch(
           } else {
             current.count++
           }
-        } else if (!restoreArmedRef.value) {
+        } else if (!restoreHold) {
           // 恢复待命中不抢位，等 RESTORE 一次 pin 住；自己消息/底部跟随沿用到底。
           // 自己刚发出的消息与用户已在底部时的跟随是用户意图，强制执行，不受恢复窗口影响。
           const force = !isOtherUserMessage || isAtBottom.value
@@ -1154,9 +1172,21 @@ onMounted(() => {
   // 异步初始化监听器（不等待结果）
   initListeners().catch(console.error)
 
-  // aichatoverview#352：恢复待命中不抢底，等 RESTORE 定位。
-  if (chatStore.pendingScrollRestore?.roomId === currentRoomId.value) return
-  scrollToBottom()
+  // aichatoverview#352 warm 重登：挂载时房间可能已就位（无切房过渡，
+  // 房间 watcher 不触发），按同一决策补恢复 armed；pending 已就绪则直接 RESTORE。
+  const mountDecision = decideMountRestore(
+    chatStore.pendingScrollRestore?.roomId,
+    currentRoomId.value,
+    currentRoomId.value ? chatStore.getSavedReadPosition(currentRoomId.value) : null
+  )
+  if (mountDecision === 'restore') {
+    restoreArmedRef.value = true
+    scrollIntent.value = ScrollIntentEnum.RESTORE
+  } else if (mountDecision === 'arm' && armRestoreForRoom()) {
+    suppressTopLoadMore.value = true
+  } else {
+    scrollToBottom()
+  }
 })
 
 onUnmounted(() => {
