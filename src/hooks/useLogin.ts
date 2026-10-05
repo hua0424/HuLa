@@ -139,6 +139,8 @@ export const useLogin = () => {
    * 登出账号
    */
   const logout = async () => {
+    // aichatoverview#352：登出前落盘阅读位置（同账号下次登录可恢复；失败不挡登出）。
+    await chatStore.flushReadingPositions().catch(() => {})
     globalStore.updateCurrentSessionRoomId('')
     // aichatoverview#285：退出即清理历史浏览进度与进行中请求，旧请求结果不再写入
     chatStore.clearHistoryProgress()
@@ -282,6 +284,20 @@ export const useLogin = () => {
       await chatStore.getSessionList(true)
       logBoot(bootAttempt, requestIdFor('local_readable'), 'local_readable', `sessions=${chatStore.sessionList.length}`)
       restoreSessionSelection(previousSessionRoomId)
+
+      // aichatoverview#352：重登恢复上次房间与阅读位置（reading 快照；目标明确不存在
+      // 回列表，网络失败保留本地目标与位置）。失败只记日志，不挡本地可读。
+      try {
+        const reading = await chatStore.restoreLastReading(previousSessionRoomId)
+        logBoot(bootAttempt, requestIdFor('reading_restore'), 'reading_restore', reading)
+      } catch (error) {
+        logBoot(
+          bootAttempt,
+          requestIdFor('reading_restore'),
+          'reading_restore_failed',
+          error instanceof Error ? error.message : String(error)
+        )
+      }
 
       // 用户相关数据初始化（在线状态独立分区：失败只记日志，不挡本地可读与发送）
       try {

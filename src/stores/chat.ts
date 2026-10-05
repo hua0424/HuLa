@@ -64,6 +64,15 @@ import {
   type WindowCalibOutcome as WindowOutcome,
   type WindowMergeMsg
 } from '@/utils/windowCalibrate'
+import {
+  normalizeReadingSnapshot,
+  pickRestoreRoom,
+  READING_SNAPSHOT_VERSION,
+  resolveRestoreAnchor,
+  RESTORE_BACKFILL_PAGES,
+  type ReadingSnapshot,
+  type ReadPosition
+} from '@/utils/readingRestore'
 
 type RecalledMessage = {
   messageId: string
@@ -518,6 +527,10 @@ export const useChatStore = defineStore(
       const epoch = accountEpoch
       if (!isWeb() && !origin) return
 
+      // aichatoverview#352：先落盘上次阅读位置，再记录本次进入房间（登出/重登可恢复）。
+      readingLastRoomId = roomId
+      void flushReadingPositions()
+
       // 清理其他房间的消息缓存，释放内存
       clearOtherRoomsMessages(roomId)
 
@@ -569,6 +582,28 @@ export const useChatStore = defineStore(
         browseSeq[roomId] !== requestBrowse
       )
         return
+
+      // aichatoverview#352：非底部遗留位置做锚点恢复（锚点缺失有界回填，
+      // 仍缺失选时间邻近可读位置，空列表回底部；pending 由 ChatMain DOM 就绪后消费）。
+      const saved = getSavedReadPosition(roomId)
+      if (saved && !saved.wasAtBottom && saved.anchorMsgId) {
+        await ensureAnchorLoaded(roomId, saved.anchorMsgId)
+        if (
+          accountCurrent(origin, epoch) &&
+          globalStore.currentSessionRoomId === roomId &&
+          browseSeq[roomId] === requestBrowse
+        ) {
+          const list = chatMessageListByRoomId
+            .value(roomId)
+            .map((m) => ({ id: String(m.message.id), sendTime: m.message.sendTime ?? 0 }))
+          const resolution = resolveRestoreAnchor(list, saved)
+          if (resolution.kind !== 'bottom') {
+            pendingScrollRestore.value = { roomId, anchorMsgId: resolution.anchorMsgId, offsetPx: saved.offsetPx }
+          }
+        } else {
+          return
+        }
+      }
       markSessionRead(roomId)
 
       // 重置当前回复的消息
@@ -946,6 +981,144 @@ export const useChatStore = defineStore(
     const retryWindowCalibration = async (roomId: string = globalStore.currentSessionRoomId) =>
       calibrateWindow(roomId, { force: true })
 
+    // aichatoverview#352：房间阅读位置。持久化走 backend+UID 隔离的 `reading`
+    // 快照（SQLite 按 backend+UID 分库；Web 回退到 uid 作用域 localStorage），
+    // 只存轻量锚点（房间/首条可见消息/偏移/是否在底），不存整个消息 Map。
+    const readingPositions = reactive<Record<string, ReadPosition>>({})
+    let readingLastRoomId = ''
+    // 组件侧待执行的滚动恢复（DOM 就绪后消费一次；用户滚动可取消）。
+    const pendingScrollRestore = ref<{ roomId: string; anchorMsgId: string; offsetPx: number } | null>(null)
+    let readingPersistTimer: ReturnType<typeof setTimeout> | null = null
+    const READING_PERSIST_DEBOUNCE_MS = 1500
+
+    const readingWebKey = () => `aichat-reading:${userStore.userInfo?.uid || 'anon'}`
+
+    // 组件滚动上报：只更新运行时并防抖落盘，不阻塞滚动。
+    const reportReadingAnchor = (
+      roomId: string,
+      anchor: { anchorMsgId: string; anchorSendTime: number; offsetPx: number; wasAtBottom: boolean }
+    ) => {
+      if (!roomId || !anchor.anchorMsgId) return
+      readingPositions[roomId] = {
+        anchorMsgId: anchor.anchorMsgId,
+        anchorSendTime: Number.isFinite(anchor.anchorSendTime) ? anchor.anchorSendTime : 0,
+        offsetPx: Math.max(0, anchor.offsetPx || 0),
+        wasAtBottom: anchor.wasAtBottom === true,
+        updatedAt: Date.now()
+      }
+      if (readingPersistTimer) clearTimeout(readingPersistTimer)
+      readingPersistTimer = setTimeout(() => {
+        readingPersistTimer = null
+        void flushReadingPositions()
+      }, READING_PERSIST_DEBOUNCE_MS)
+    }
+
+    const getSavedReadPosition = (roomId: string): ReadPosition | null =>
+      roomId ? (readingPositions[roomId] ?? null) : null
+
+    const clearPendingRestore = () => {
+      pendingScrollRestore.value = null
+    }
+
+    // 立即落盘（切房/登出前调用；失败只记日志，永不打断阅读）。
+    const flushReadingPositions = async () => {
+      if (readingPersistTimer) {
+        clearTimeout(readingPersistTimer)
+        readingPersistTimer = null
+      }
+      const epoch = accountEpoch
+      const payload: ReadingSnapshot = {
+        version: READING_SNAPSHOT_VERSION,
+        lastRoomId: readingLastRoomId || globalStore.currentSessionRoomId || '',
+        positions: { ...readingPositions }
+      }
+      try {
+        if (isWeb()) {
+          localStorage.setItem(readingWebKey(), JSON.stringify(payload))
+          return
+        }
+        const binding = await captureAccount().catch(() => null)
+        if (!accountCurrent(binding, epoch)) return
+        if (!binding) return
+        await cacheLocalSnapshot(binding, 'reading', payload)
+        if (!accountCurrent(binding, epoch)) return
+      } catch {
+        // 持久化失败保留内存位置，不假称已缓存、不打断阅读。
+      }
+    }
+
+    // 读回快照（按 updatedAt 合并，避免覆盖本轮更新鲜的上报）。
+    const loadReadingSnapshot = async (): Promise<ReadingSnapshot | null> => {
+      const epoch = accountEpoch
+      try {
+        let raw: unknown = null
+        if (isWeb()) {
+          const text = localStorage.getItem(readingWebKey())
+          raw = text ? JSON.parse(text) : null
+        } else {
+          const binding = await captureAccount().catch(() => null)
+          if (!accountCurrent(binding, epoch) || !binding) return null
+          raw = await readLocalSnapshot(binding, 'reading')
+          if (!accountCurrent(binding, epoch)) return null
+        }
+        const snapshot = normalizeReadingSnapshot(raw)
+        if (!snapshot) return null
+        if (snapshot.lastRoomId) readingLastRoomId = snapshot.lastRoomId
+        for (const [roomId, pos] of Object.entries(snapshot.positions)) {
+          const current = readingPositions[roomId]
+          if (!current || pos.updatedAt >= current.updatedAt) readingPositions[roomId] = pos
+        }
+        return snapshot
+      } catch {
+        return null
+      }
+    }
+
+    // 锚点不在首屏时有界向前回填（复用 loadMore，不从第一页循环下载到该位置）。
+    const ensureAnchorLoaded = async (roomId: string, anchorMsgId: string): Promise<boolean> => {
+      const requestBrowse = browseSeq[roomId] ?? 0
+      for (let page = 0; page < RESTORE_BACKFILL_PAGES; page++) {
+        if ((browseSeq[roomId] ?? 0) !== requestBrowse) return false
+        if (messageMap[roomId]?.[anchorMsgId]) return true
+        const progress = ensureProgress(roomId)
+        if (progress.isLast || progress.error) return !!messageMap[roomId]?.[anchorMsgId]
+        await loadMore()
+      }
+      return !!messageMap[roomId]?.[anchorMsgId]
+    }
+
+    // 重登/重进房间恢复上次房间与阅读位置。返回简短结论供 boot 日志与验收记录。
+    // 目标明确不存在（权威列表成功且本地无缓存）才回列表；网络失败保留本地目标。
+    const restoreLastReading = async (previousRoomId = ''): Promise<string> => {
+      const snapshot = await loadReadingSnapshot()
+      const ids = sessionList.value.map((s) => s.roomId)
+      // 同轮已有选中优先（切号重进），否则用持久化上次房间（仍在列表才恢复）。
+      const snapshotTarget = pickRestoreRoom(snapshot, ids)
+      const preferred = (previousRoomId && ids.includes(previousRoomId) ? previousRoomId : '') || snapshotTarget || ''
+      if (preferred) {
+        if (globalStore.currentSessionRoomId !== preferred) {
+          globalStore.updateCurrentSessionRoomId(preferred)
+        } else {
+          // 选中未变化 watcher 不触发，显式重进以执行恢复。
+          await changeRoom()
+        }
+        return `restored:${preferred}`
+      }
+      const missing = previousRoomId || snapshot?.lastRoomId || ''
+      if (!missing) return 'empty'
+      const hasLocal = !!messageMap[missing] && Object.keys(messageMap[missing]).length > 0
+      if (!sessionOptions.value.isError && !hasLocal) {
+        if (globalStore.currentSessionRoomId) globalStore.updateCurrentSessionRoomId('')
+        return `gone:${missing}`
+      }
+      if (globalStore.currentSessionRoomId !== missing) {
+        globalStore.updateCurrentSessionRoomId(missing)
+      } else {
+        await changeRoom()
+      }
+      return `local-only:${missing}`
+    }
+
     const runWindowCalibration = async (roomId: string, reqId: string): Promise<WindowOutcome> => {
       const state = windowCalibOf(roomId)
       state.status = 'calibrating'
@@ -1156,6 +1329,16 @@ export const useChatStore = defineStore(
     const clearHistoryProgress = () => {
       for (const roomId of Object.keys(messageOptions)) {
         delete messageOptions[roomId]
+      }
+      // aichatoverview#352：阅读位置运行态同账号代次失效（持久化快照保留，下次登录重读）。
+      for (const roomId of Object.keys(readingPositions)) {
+        delete readingPositions[roomId]
+      }
+      readingLastRoomId = ''
+      pendingScrollRestore.value = null
+      if (readingPersistTimer) {
+        clearTimeout(readingPersistTimer)
+        readingPersistTimer = null
       }
       for (const roomId of Object.keys(browseSeq)) {
         delete browseSeq[roomId]
@@ -3362,6 +3545,15 @@ export const useChatStore = defineStore(
       calibrateWindow,
       retryWindowCalibration,
       windowCalib,
+      reportReadingAnchor,
+      getSavedReadPosition,
+      clearPendingRestore,
+      flushReadingPositions,
+      loadReadingSnapshot,
+      restoreLastReading,
+      ensureAnchorLoaded,
+      pendingScrollRestore,
+      readingPositions,
       currentMsgReply,
       sessionList,
       sessionMap,
