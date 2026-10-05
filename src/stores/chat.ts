@@ -585,9 +585,15 @@ export const useChatStore = defineStore(
 
       // aichatoverview#352：非底部遗留位置做锚点恢复（锚点缺失有界回填，
       // 仍缺失选时间邻近可读位置，空列表回底部；pending 由 ChatMain DOM 就绪后消费）。
-      const saved = getSavedReadPosition(roomId)
+      // warm 重登时 changeRoom 可能先于快照读回到达：内存无记录时重读一次再判定。
+      let saved = getSavedReadPosition(roomId)
+      if (!saved) {
+        await loadReadingSnapshot().catch(() => null)
+        if (!accountCurrent(origin, epoch) || globalStore.currentSessionRoomId !== roomId) return
+        saved = getSavedReadPosition(roomId)
+      }
       if (saved && !saved.wasAtBottom && saved.anchorMsgId) {
-        await ensureAnchorLoaded(roomId, saved.anchorMsgId)
+        const backfilled = await ensureAnchorLoaded(roomId, saved.anchorMsgId)
         if (
           accountCurrent(origin, epoch) &&
           globalStore.currentSessionRoomId === roomId &&
@@ -600,9 +606,20 @@ export const useChatStore = defineStore(
           if (resolution.kind !== 'bottom') {
             pendingScrollRestore.value = { roomId, anchorMsgId: resolution.anchorMsgId, offsetPx: saved.offsetPx }
           }
+          !isWeb() &&
+            (await info(
+              `[restore] roomId=${roomId} backfilled=${backfilled} kind=${resolution.kind} ` +
+                `pending=${resolution.kind !== 'bottom'} list=${list.length}`
+            ))
         } else {
           return
         }
+      } else {
+        !isWeb() &&
+          (await info(
+            `[restore] roomId=${roomId} skip anchor=${saved?.anchorMsgId ?? '-'} ` +
+              `wasAtBottom=${saved?.wasAtBottom ?? '-'}`
+          ))
       }
       markSessionRead(roomId)
 
@@ -1075,14 +1092,21 @@ export const useChatStore = defineStore(
     }
 
     // 锚点不在首屏时有界向前回填（复用 loadMore，不从第一页循环下载到该位置）。
+    // warm 重登首屏本地页瞬时失败会留下 error：直接返回等于零回填；
+    // 错误清零后由本轮 loadMore 重试（单页失败捕获继续，本轮最多 5 页，有界）。
     const ensureAnchorLoaded = async (roomId: string, anchorMsgId: string): Promise<boolean> => {
       const requestBrowse = browseSeq[roomId] ?? 0
       for (let page = 0; page < RESTORE_BACKFILL_PAGES; page++) {
         if ((browseSeq[roomId] ?? 0) !== requestBrowse) return false
         if (messageMap[roomId]?.[anchorMsgId]) return true
         const progress = ensureProgress(roomId)
-        if (progress.isLast || progress.error) return !!messageMap[roomId]?.[anchorMsgId]
-        await loadMore()
+        if (progress.isLast) return !!messageMap[roomId]?.[anchorMsgId]
+        if (progress.error) progress.error = ''
+        try {
+          await loadMore()
+        } catch {
+          // 瞬时失败（绑定/DB 竞态）不中断回填，下一页继续重试。
+        }
       }
       return !!messageMap[roomId]?.[anchorMsgId]
     }

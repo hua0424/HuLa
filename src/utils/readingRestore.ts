@@ -128,3 +128,21 @@ export const isRestoreSettling = (
   const elapsed = now - lastRestoreAt
   return elapsed >= 0 && elapsed < windowMs
 }
+
+export type MountRestoreDecision = 'restore' | 'arm' | 'bottom'
+
+/**
+ * aichatoverview#352（warm 重登挂载恢复）：
+ * 挂载时房间已就位、无切房过渡，房间 watcher 看不到变化。
+ * pending 已就绪直接 RESTORE；有未恢复的非底部锚点则先 armed 等回填；
+ * 否则回底部（新房间/已在底部/无记录）。
+ */
+export const decideMountRestore = (
+  pendingRoomId: string | null | undefined,
+  currentRoomId: string | null | undefined,
+  saved: { wasAtBottom: boolean; anchorMsgId: string } | null
+): MountRestoreDecision => {
+  if (currentRoomId && pendingRoomId === currentRoomId) return 'restore'
+  if (currentRoomId && saved && !saved.wasAtBottom && saved.anchorMsgId) return 'arm'
+  return 'bottom'
+}
