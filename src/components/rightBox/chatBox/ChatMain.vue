@@ -371,6 +371,21 @@ provide('popoverControls', { enableScroll })
 
 // 滚动意图状态
 const scrollIntent = ref<ScrollIntentEnum>(ScrollIntentEnum.NONE)
+// aichatoverview#352：恢复执行中标记（执行期的程序化滚动不视为用户滚动，
+// 不取消恢复本身）；恢复待命中标记（锚点定位前抑制跟随到底，避免底部闪现）。
+const restoringRef = ref(false)
+const restoreArmedRef = ref(false)
+let restoreFallbackTimer: ReturnType<typeof setTimeout> | null = null
+// 当前阅读锚点（首条可见消息+相对偏移）：持久化上报与尺寸变化回 pin 共用。
+const lastAnchorRef = ref<{ id: string; offsetPx: number } | null>(null)
+
+const disarmRestore = () => {
+  restoreArmedRef.value = false
+  if (restoreFallbackTimer) {
+    clearTimeout(restoreFallbackTimer)
+    restoreFallbackTimer = null
+  }
+}
 
 // 计算属性
 const isGroup = computed<boolean>(() => chatStore.isGroup)
@@ -585,10 +600,38 @@ watch(
       isAtBottom.value = true
       enableAutoScroll(1200)
 
-      scrollIntent.value = ScrollIntentEnum.INITIAL
+      // aichatoverview#352：该房间遗留非底部阅读位置时改为恢复意图——
+      // 先不抢底，等 store 回填锚点后 RESTORE 一次 pin 住；超时未等到则回底部。
+      const saved = chatStore.getSavedReadPosition(newRoomId)
+      disarmRestore()
+      chatStore.clearPendingRestore()
+      if (saved && !saved.wasAtBottom && saved.anchorMsgId) {
+        restoreArmedRef.value = true
+        scrollIntent.value = ScrollIntentEnum.NONE
+        restoreFallbackTimer = setTimeout(() => {
+          restoreFallbackTimer = null
+          if (restoreArmedRef.value && !chatStore.pendingScrollRestore) {
+            disarmRestore()
+            scrollIntent.value = ScrollIntentEnum.INITIAL
+          }
+        }, 3000)
+      } else {
+        scrollIntent.value = ScrollIntentEnum.INITIAL
+      }
     }
   },
   { flush: 'post' } // 确保DOM更新后执行
+)
+
+// aichatoverview#352：store 锚点就绪（DOM 已渲染）后执行一次恢复定位。
+watch(
+  () => chatStore.pendingScrollRestore,
+  (pending) => {
+    if (!pending || pending.roomId !== currentRoomId.value) return
+    disarmRestore()
+    scrollIntent.value = ScrollIntentEnum.RESTORE
+  },
+  { flush: 'post' }
 )
 
 // 3. 执行具体的滚动操作 - 使用watchPostEffect确保DOM更新完成
@@ -690,9 +733,103 @@ const handleScrollByIntent = (intent: ScrollIntentEnum): void => {
       // 加载更多：不执行任何滚动，由handleLoadMore管理
       break
 
+    case ScrollIntentEnum.RESTORE: {
+      // aichatoverview#352：恢复上次阅读位置——锚点消息 pin 到记录的相对偏移。
+      const pending = chatStore.pendingScrollRestore
+      chatStore.clearPendingRestore()
+      disarmRestore()
+      if (pending) {
+        restoringRef.value = true
+        try {
+          scrollToAnchor(pending.anchorMsgId, pending.offsetPx)
+        } finally {
+          restoringRef.value = false
+        }
+      }
+      break
+    }
+
     default:
       break
   }
+}
+
+// aichatoverview#352：把锚点消息顶部 pin 到相对容器顶部的记录偏移；
+// 锚点元素已不在 DOM（虚拟化/删除竞态）时回底部，不停留在半空。
+const scrollToAnchor = (anchorMsgId: string, offsetPx: number): void => {
+  const container = scrollContainerRef.value
+  if (!container) return
+  temporarilySuppressTopLoadMore()
+  let target: HTMLElement | null = null
+  try {
+    target = container.querySelector(`[data-message-id="${CSS.escape(anchorMsgId)}"]`)
+  } catch {
+    target = null
+  }
+  if (!(target instanceof HTMLElement)) {
+    scrollToBottom()
+    return
+  }
+  const containerRect = container.getBoundingClientRect()
+  const elRect = target.getBoundingClientRect()
+  const absoluteTop = elRect.top - containerRect.top + container.scrollTop
+  container.scrollTop = Math.max(0, absoluteTop - Math.max(0, offsetPx))
+  lastAnchorRef.value = { id: anchorMsgId, offsetPx: Math.max(0, offsetPx) }
+  isAtBottom.value = false
+}
+
+// aichatoverview#352：内容变高（思考展开/图片加载/后台补齐）后按锚点回 pin，
+// 保持阅读位置；底部跟随不受影响（距离底部阈值内沿用原逻辑）。
+const repinReadingAnchor = (): void => {
+  const container = scrollContainerRef.value
+  const anchor = lastAnchorRef.value
+  if (!container || !anchor) return
+  if (restoringRef.value || isLoadingMore.value || isAutoScrolling.value) return
+  const { scrollHeight, scrollTop, clientHeight } = container
+  if (scrollHeight - scrollTop - clientHeight <= 150) return
+  let el: unknown = null
+  try {
+    el = container.querySelector(`[data-message-id="${CSS.escape(anchor.id)}"]`)
+  } catch {
+    return
+  }
+  if (!(el instanceof HTMLElement)) return
+  const drift = el.getBoundingClientRect().top - container.getBoundingClientRect().top - anchor.offsetPx
+  if (Math.abs(drift) > 2) {
+    container.scrollTop = Math.max(0, scrollTop + drift)
+  }
+}
+
+// aichatoverview#352：上报首条可见消息锚点（持久化与回 pin 共用）。
+// 程序化滚动期间（自动跟随/恢复执行/历史加载）不上报，避免存下中间位置。
+const reportVisibleAnchor = (container: HTMLElement): void => {
+  if (restoringRef.value || isLoadingMore.value || isAutoScrolling.value) return
+  const roomId = currentRoomId.value
+  if (!roomId) return
+  const containerRect = container.getBoundingClientRect()
+  const nodes = container.querySelectorAll('[data-message-id]')
+  let anchorId = ''
+  let offsetPx = 0
+  for (const node of nodes) {
+    if (!(node instanceof HTMLElement)) continue
+    const top = node.getBoundingClientRect().top - containerRect.top
+    if (top >= -4) {
+      anchorId = node.dataset.messageId ?? ''
+      offsetPx = Math.max(0, top)
+      break
+    }
+  }
+  if (!anchorId) return
+  const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+  const raw = chatStore.messageMap[roomId]?.[anchorId]
+  const sendTime = Number(raw?.message?.sendTime ?? raw?.sendTime ?? 0) || 0
+  chatStore.reportReadingAnchor(roomId, {
+    anchorMsgId: anchorId,
+    anchorSendTime: sendTime,
+    offsetPx,
+    wasAtBottom: distanceFromBottom <= 20
+  })
+  lastAnchorRef.value = { id: anchorId, offsetPx }
 }
 
 // 滚动到底部
@@ -727,7 +864,10 @@ useResizeObserver(messageListRef, () => {
     nextTick(() => {
       scrollToBottom()
     })
+    return
   }
+  // aichatoverview#352：历史阅读中内容变高后按锚点回 pin，保持阅读位置不漂移。
+  repinReadingAnchor()
 })
 
 // 处理悬浮按钮点击 - 重置消息列表并滚动到底部
@@ -750,6 +890,14 @@ const handleScroll = (event: Event) => {
 
   const container = event.target as HTMLElement
   if (!container) return
+
+  // aichatoverview#352：新的用户滚动取消未执行的恢复——保留手动阅读位置。
+  // 程序化滚动（自动跟随保护期/恢复执行中/历史加载）不视为用户意图。
+  if (chatStore.pendingScrollRestore && !isAutoScrolling.value && !restoringRef.value && !isLoadingMore.value) {
+    chatStore.clearPendingRestore()
+    disarmRestore()
+    if (scrollIntent.value === ScrollIntentEnum.RESTORE) scrollIntent.value = ScrollIntentEnum.NONE
+  }
 
   const currentScrollTop = container.scrollTop
   scrollTop.value = currentScrollTop
@@ -785,6 +933,9 @@ const debouncedScrollOperations = useDebounceFn(async (container: HTMLElement) =
   if (distanceFromBottom <= 20) {
     chatStore.clearNewMsgCount()
   }
+
+  // aichatoverview#352：记录首条可见消息锚点（持久化与尺寸回 pin 共用）。
+  reportVisibleAnchor(container)
 }, 16)
 
 // 监听会话切换
@@ -800,6 +951,8 @@ const handleSessionChanged = async ({ roomId, oldRoomId }: SessionChangedPayload
   }
 
   await nextTick()
+  // aichatoverview#352：恢复待命中不抢底，等 RESTORE 定位。
+  if (chatStore.pendingScrollRestore?.roomId === roomId) return
   scrollToBottom()
 }
 
@@ -822,8 +975,12 @@ watch(
       if (container) {
         const isOtherUserMessage =
           latestMessage?.fromUser?.uid && String(latestMessage.fromUser.uid) !== String(userUid.value)
+        // aichatoverview#352：历史阅读中新消息只提示不强制到底（计数进悬浮提示）；
+        // 确在底部（或恢复待命中不抢位）才跟随。自己消息沿用跟随。
+        const distance = container.scrollHeight - container.scrollTop - container.clientHeight
+        const following = (isAtBottom.value || distance <= 150) && !restoreArmedRef.value
         // 只有当不在底部且是他人消息时才增加计数
-        if (shouldShowFloatFooter.value && isOtherUserMessage) {
+        if (isOtherUserMessage && !following) {
           const roomId = globalStore.currentSessionRoomId
           const current = chatStore.newMsgCount[roomId]
           if (!current) {
@@ -834,7 +991,8 @@ watch(
           } else {
             current.count++
           }
-        } else {
+        } else if (!restoreArmedRef.value) {
+          // 恢复待命中不抢位，等 RESTORE 一次 pin 住；自己消息/底部跟随沿用到底。
           await nextTick()
           scrollToBottom()
         }
@@ -969,6 +1127,8 @@ onMounted(() => {
   // 异步初始化监听器（不等待结果）
   initListeners().catch(console.error)
 
+  // aichatoverview#352：恢复待命中不抢底，等 RESTORE 定位。
+  if (chatStore.pendingScrollRestore?.roomId === currentRoomId.value) return
   scrollToBottom()
 })
 
@@ -980,6 +1140,7 @@ onUnmounted(() => {
   if (announcementClearListener) {
     announcementClearListener()
   }
+  disarmRestore()
   stopAutoScrollGuard()
   stopWheelListener()
 })

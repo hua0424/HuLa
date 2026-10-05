@@ -886,7 +886,8 @@ export enum ScrollIntentEnum {
   NONE = 'none',
   INITIAL = 'initial', // 初始化或切换房间
   NEW_MESSAGE = 'new_message', // 新消息到达
-  LOAD_MORE = 'load_more' // 加载更多历史消息
+  LOAD_MORE = 'load_more', // 加载更多历史消息
+  RESTORE = 'restore' // aichatoverview#352：恢复上次阅读位置（锚点+偏移）
 }
 
 export enum MergeMessageType {
