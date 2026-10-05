@@ -527,10 +527,6 @@ export const useChatStore = defineStore(
       const epoch = accountEpoch
       if (!isWeb() && !origin) return
 
-      // aichatoverview#352：先落盘上次阅读位置，再记录本次进入房间（登出/重登可恢复）。
-      readingLastRoomId = roomId
-      void flushReadingPositions()
-
       // 清理其他房间的消息缓存，释放内存
       clearOtherRoomsMessages(roomId)
 
@@ -621,6 +617,9 @@ export const useChatStore = defineStore(
               `wasAtBottom=${saved?.wasAtBottom ?? '-'}`
           ))
       }
+      // aichatoverview#352 R4：先读后写——快照判定完成后再记录本次房间并落盘，空内存不再覆盖有效快照。
+      readingLastRoomId = roomId
+      void flushReadingPositions()
       markSessionRead(roomId)
 
       // 重置当前回复的消息
@@ -1003,6 +1002,8 @@ export const useChatStore = defineStore(
     // 只存轻量锚点（房间/首条可见消息/偏移/是否在底），不存整个消息 Map。
     const readingPositions = reactive<Record<string, ReadPosition>>({})
     let readingLastRoomId = ''
+    // aichatoverview#352 R4：快照是否已从盘读回（warm 重登挂载/上报/落盘先等它，避免空内存覆盖有效快照）。
+    const readingSnapshotLoaded = ref(false)
     // 组件侧待执行的滚动恢复（DOM 就绪后消费一次；用户滚动可取消）。
     const pendingScrollRestore = ref<{ roomId: string; anchorMsgId: string; offsetPx: number } | null>(null)
     let readingPersistTimer: ReturnType<typeof setTimeout> | null = null
@@ -1038,11 +1039,13 @@ export const useChatStore = defineStore(
     }
 
     // 立即落盘（切房/登出前调用；失败只记日志，永不打断阅读）。
+    // aichatoverview#352 R4：快照未从盘读回时不写盘——空内存会覆盖有效快照（warm 重登确定性零恢复）。
     const flushReadingPositions = async () => {
       if (readingPersistTimer) {
         clearTimeout(readingPersistTimer)
         readingPersistTimer = null
       }
+      if (!readingSnapshotLoaded.value) return
       const epoch = accountEpoch
       const payload: ReadingSnapshot = {
         version: READING_SNAPSHOT_VERSION,
@@ -1065,6 +1068,7 @@ export const useChatStore = defineStore(
     }
 
     // 读回快照（按 updatedAt 合并，避免覆盖本轮更新鲜的上报）。
+    // 成功触盘即标 loaded（含盘空），绑定缺失/异常不标——调用方继续 hold，不写盘。
     const loadReadingSnapshot = async (): Promise<ReadingSnapshot | null> => {
       const epoch = accountEpoch
       try {
@@ -1072,11 +1076,13 @@ export const useChatStore = defineStore(
         if (isWeb()) {
           const text = localStorage.getItem(readingWebKey())
           raw = text ? JSON.parse(text) : null
+          readingSnapshotLoaded.value = true
         } else {
           const binding = await captureAccount().catch(() => null)
           if (!accountCurrent(binding, epoch) || !binding) return null
           raw = await readLocalSnapshot(binding, 'reading')
           if (!accountCurrent(binding, epoch)) return null
+          readingSnapshotLoaded.value = true
         }
         const snapshot = normalizeReadingSnapshot(raw)
         if (!snapshot) return null
@@ -1359,6 +1365,7 @@ export const useChatStore = defineStore(
         delete readingPositions[roomId]
       }
       readingLastRoomId = ''
+      readingSnapshotLoaded.value = false
       pendingScrollRestore.value = null
       if (readingPersistTimer) {
         clearTimeout(readingPersistTimer)
@@ -3578,6 +3585,7 @@ export const useChatStore = defineStore(
       ensureAnchorLoaded,
       pendingScrollRestore,
       readingPositions,
+      readingSnapshotLoaded,
       currentMsgReply,
       sessionList,
       sessionMap,

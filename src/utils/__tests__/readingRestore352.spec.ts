@@ -167,4 +167,12 @@ describe('decideMountRestore (#352 warm 重登挂载恢复)', () => {
     expect(decideMountRestore(null, null, saved)).toBe('bottom')
     expect(decideMountRestore(null, '', saved)).toBe('bottom')
   })
+
+  it('R4：快照未读回不判 bottom，持 arm 等回填（无房间仍回底部）', () => {
+    expect(decideMountRestore(null, 'r1', null, false)).toBe('arm')
+    expect(decideMountRestore(null, 'r1', saved, false)).toBe('arm')
+    expect(decideMountRestore('r1', 'r1', null, false)).toBe('restore')
+    expect(decideMountRestore(null, null, null, false)).toBe('bottom')
+    expect(decideMountRestore(null, '', saved, false)).toBe('bottom')
+  })
 })
