@@ -166,6 +166,39 @@ describe('阅读位置持久化与重登恢复 (#352)', () => {
     expect(store.messageMap['r1']?.['m5']).toBeTruthy()
   })
 
+  it('首屏后回填页瞬时失败不清零重来：错误清零重试后仍 pin 住', async () => {
+    const newer = Array.from({ length: 20 }, (_, i) => msg(`m${11 + i}`, 110 + i * 10))
+    const older = Array.from({ length: 10 }, (_, i) => msg(`m${1 + i}`, 10 + i * 10))
+    let calls = 0
+    armDefaultIpc((args: any) => {
+      if (args?.param?.source === 'remote') return { list: [], cursor: '', isLast: true, total: 0 }
+      calls++
+      // 首屏正常；回填第一页瞬时失败（warm 重登 DB/绑定竞态）；重试成功。
+      if (calls === 1) return { list: newer, cursor: 'c1', isLast: false, total: newer.length }
+      if (calls === 2) throw new Error('transient page failure')
+      return { list: older, cursor: '', isLast: true, total: older.length }
+    })
+    const snapshot = {
+      version: 1,
+      lastRoomId: 'r1',
+      positions: { r1: { anchorMsgId: 'm5', anchorSendTime: 50, offsetPx: 12, wasAtBottom: false, updatedAt: 1 } }
+    }
+    const store = useChatStore()
+    const globalStore = useGlobalStore()
+    store.sessionList = [makeSession('r1')]
+    const prevHandler = ipc.handler
+    ipc.handler = async (command: string, args: any) => {
+      if (command === 'read_local_snapshot' && args?.name === 'reading') return snapshot
+      return prevHandler!(command, args)
+    }
+    expect(await store.restoreLastReading('')).toBe('restored:r1')
+    expect(globalStore.currentSessionRoomId).toBe('r1')
+    await vi.waitFor(() =>
+      expect(store.pendingScrollRestore).toEqual({ roomId: 'r1', anchorMsgId: 'm5', offsetPx: 12 })
+    )
+    expect(store.messageMap['r1']?.['m5']).toBeTruthy()
+  })
+
   it('锚点真删选时间邻近可读位置（撤回占位保留 id 则直接命中）', async () => {
     armDefaultIpc(() => ({ list: [msg('m1', 10), msg('m3', 30)], cursor: '', isLast: true, total: 2 }))
     const snapshot = {

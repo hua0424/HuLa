@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   blankReadingSnapshot,
+  decideMountRestore,
   isRestoreSettling,
   normalizeReadingSnapshot,
   pickRestoreRoom,
@@ -143,5 +144,27 @@ describe('isRestoreSettling (#352 恢复后抢底修复)', () => {
     expect(isRestoreSettling(now - 50, null, 'r1', now)).toBe(false)
     expect(isRestoreSettling(now - 50, 'r1', null, now)).toBe(false)
     expect(isRestoreSettling(now + 1000, 'r1', 'r1', now)).toBe(false)
+  })
+})
+
+describe('decideMountRestore (#352 warm 重登挂载恢复)', () => {
+  const saved = { wasAtBottom: false, anchorMsgId: 'm5' }
+
+  it('pending 已就绪直接 RESTORE（组件后挂载不错过）', () => {
+    expect(decideMountRestore('r1', 'r1', saved)).toBe('restore')
+    expect(decideMountRestore('r1', 'r1', null)).toBe('restore')
+  })
+
+  it('有未恢复的非底部锚点则 armed 等回填，不抢底', () => {
+    expect(decideMountRestore(null, 'r1', saved)).toBe('arm')
+    expect(decideMountRestore('r2', 'r1', saved)).toBe('arm')
+  })
+
+  it('无记录/已在底部/锚点缺失回底部', () => {
+    expect(decideMountRestore(null, 'r1', null)).toBe('bottom')
+    expect(decideMountRestore(null, 'r1', { wasAtBottom: true, anchorMsgId: 'm5' })).toBe('bottom')
+    expect(decideMountRestore(null, 'r1', { wasAtBottom: false, anchorMsgId: '' })).toBe('bottom')
+    expect(decideMountRestore(null, null, saved)).toBe('bottom')
+    expect(decideMountRestore(null, '', saved)).toBe('bottom')
   })
 })
