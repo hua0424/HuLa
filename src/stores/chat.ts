@@ -1312,11 +1312,13 @@ export const useChatStore = defineStore(
       if (isWeb() && webEnvelope) {
         const thinking = validateThinkingEnvelope(webEnvelope, knownThinkingIds)
         if (thinking?.access) {
+          deniedThinkingRooms.delete(denyKeyOf(binding, roomId))
           mergeThinkingMetadata(roomId, thinking.items)
           const loaded = metadataSet(roomId)
           for (const t of thinking.triggers) loaded.add(t)
           if (thinkingCacheErrors.value[roomId]) delete thinkingCacheErrors.value[roomId]
         } else if (thinking && !thinking.access) {
+          deniedThinkingRooms.add(denyKeyOf(binding, roomId))
           clearThinking(roomId)
         }
       } else if (!isWeb()) {
@@ -1325,8 +1327,10 @@ export const useChatStore = defineStore(
         // 重进房不复活）；缺字段/失败（undefined）保持既有缓存。
         const tauriThinkingAccess = (data as { thinkingAccess?: unknown }).thinkingAccess
         if (tauriThinkingAccess === false) {
+          deniedThinkingRooms.add(denyKeyOf(binding, roomId))
           clearThinking(roomId)
         } else {
+          if (tauriThinkingAccess === true) deniedThinkingRooms.delete(denyKeyOf(binding, roomId))
           try {
             const cached = Object.values(messageMap[roomId] ?? {}) as MessageType[]
             await loadLocalThinkingForMessages(roomId, cached, binding)
@@ -2917,6 +2921,22 @@ export const useChatStore = defineStore(
       return result
     }
 
+    // aichatoverview#374：明确拒绝的思考房间门禁（作用域=账号绑定+房间）。
+    // calibrateWindow 收到明确 thinkingAccess=false 时记录；WS START/END（含旧协议
+    // 无 clientRunId）在建卡、排 pending 或查 detail 前先查门禁并丢弃。
+    // 仅当前有效上下文的明确 thinkingAccess=true 可解除；网络失败/缺字段与
+    // unsupported 保持既有保留语义，不碰门禁；账号切换时随 epoch 清空。
+    const deniedThinkingRooms = new Set<string>()
+    const denyScopeOf = (binding: SessionIdentity | null) =>
+      binding
+        ? `${binding.backendKey}\n${binding.uid}\n${binding.sessionEpoch}`
+        : `web\n${userStore.userInfo?.uid ?? ''}\n${accountEpoch}`
+    const denyKeyOf = (binding: SessionIdentity | null, roomId: string) => `${denyScopeOf(binding)}\n${roomId}`
+    const thinkingEventBinding = (payload: unknown): SessionIdentity | null =>
+      eventSession(payload) ?? (isWeb() ? null : sessionBinding.value)
+    const isThinkingDenied = (binding: SessionIdentity | null, roomId: string) =>
+      deniedThinkingRooms.has(denyKeyOf(binding, roomId))
+
     // Unmatched ENDs are never displayed. A short bounded window tolerates reordered frames;
     // an authorized detail lookup can recover a dropped START only when its anchor is verified.
     const pendingThinkingEnds = new Map<
@@ -3019,6 +3039,8 @@ export const useChatStore = defineStore(
         (payload.triggerMsgId && deletedThinkingTriggers.get(roomId)?.has(payload.triggerMsgId))
       )
         return
+      // aichatoverview#374：明确拒绝后旧 WS START（含无 clientRunId）不得重建卡片。
+      if (isThinkingDenied(thinkingEventBinding(payload), roomId)) return
       const key = `${roomId}:${aiclawId}`
       const prior = findThinking(payload.thinkingId)
       if (prior) {
@@ -3220,6 +3242,8 @@ export const useChatStore = defineStore(
       if (!thinkingId) return
       const origin = eventSession(payload)
       if (origin && !isSessionCurrent(origin)) return
+      // aichatoverview#374：拒绝态 END（含旧协议/重复帧）不终结、不排 pending、不查 detail。
+      if (payload.roomId != null && isThinkingDenied(thinkingEventBinding(payload), String(payload.roomId))) return
       const state = findThinking(thinkingId)
       if (state && ((state.status !== 'pending' && (!payload.clientRunId || !!state.clientRunId)) || verified)) {
         if (payload.roomId != null && !matchesEnd(state, { ...payload, thinkingId, roomId: payload.roomId })) return
@@ -3540,6 +3564,7 @@ export const useChatStore = defineStore(
         for (const key of Object.keys(replyMapping)) delete replyMapping[key]
         clearHistoryProgress()
         clearThinking()
+        deniedThinkingRooms.clear()
         deletedThinkingTriggers.clear()
         metadataRequests.clear()
         streamingMessages.clear()
