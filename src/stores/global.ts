@@ -36,6 +36,8 @@ export const useGlobalStore = defineStore(
     })
 
     const currentSessionRoomId = ref('')
+    /** 好友进入聊天的在途目标：置位期间右栏只呈现目标加载/失败态，不呈现旧房间 */
+    const sessionOpening = ref<{ uid: string; type: number; error: string } | null>(null)
     const lastKnownSession = ref<SessionItem | null>(null)
     type CurrentSessionView = Omit<SessionItem, 'roomId'>
     const stripRoomId = (session?: SessionItem | null): CurrentSessionView | null => {
@@ -169,6 +171,18 @@ export const useGlobalStore = defineStore(
       currentSessionRoomId.value = id
     }
 
+    const beginSessionOpening = (uid: string, type: number) => {
+      sessionOpening.value = { uid, type, error: '' }
+    }
+
+    const failSessionOpening = (message: string) => {
+      if (sessionOpening.value) sessionOpening.value.error = message
+    }
+
+    const endSessionOpening = () => {
+      sessionOpening.value = null
+    }
+
     return {
       unReadMark,
       currentSession,
@@ -183,6 +197,10 @@ export const useGlobalStore = defineStore(
       setTipVisible,
       updateGlobalUnreadCount,
       updateCurrentSessionRoomId,
+      sessionOpening,
+      beginSessionOpening,
+      failSessionOpening,
+      endSessionOpening,
       currentSessionRoomId
     }
   },

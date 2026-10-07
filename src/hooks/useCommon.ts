@@ -18,6 +18,7 @@ import { getImageCache } from '@/utils/PathUtil.ts'
 import { isPathUploadFile, type UploadFile } from '@/utils/FileType'
 import { isMobile, isWeb } from '@/utils/PlatformConstants'
 import { invokeWithErrorHandler } from '../utils/TauriInvokeHandler'
+import { useI18n } from 'vue-i18n'
 
 export interface SelectionRange {
   range: Range
@@ -26,6 +27,9 @@ export interface SelectionRange {
 const domParser = new DOMParser()
 
 const REPLY_NODE_ID = 'replyDiv'
+
+/** openMsgSession 代次：连选时只有最后一次调用能落地，过期请求不覆盖后续选择 */
+let openMsgSessionSeq = 0
 
 /**
  * 返回dom指定id的文本
@@ -42,6 +46,7 @@ export const useCommon = () => {
   const globalStore = useGlobalStore()
   const chatStore = useChatStore()
   const userStore = useUserStore()
+  const { t } = useI18n()
   const { handleMsgClick } = useMessage()
   /** 当前登录用户的uid */
   const userUid = computed(() => userStore.userInfo!.uid)
@@ -820,39 +825,63 @@ export const useCommon = () => {
 
   /**
    * 打开消息会话(右键发送消息功能)
+   * #339：点击即脱离旧房间并置位在途目标——目标就绪前右栏只呈现目标加载/失败态；
+   * 代次守卫保证连选归末，失败保留重试入口且不把旧房间误认成目标。
    * @param uid 用户id
    * @param type
    */
   const openMsgSession = async (uid: string, type: number = 2) => {
     // 获取home窗口实例
     const label = isWeb() ? 'home' : WebviewWindow.getCurrent().label
+    const mySeq = ++openMsgSessionSeq
+    const isStale = () => mySeq !== openMsgSessionSeq
+    // 先脱离旧房间再导航：选中清空后 ChatBox 卸载，加载期无法误发到旧房间
+    globalStore.beginSessionOpening(uid, type)
+    globalStore.updateCurrentSessionRoomId('')
     if (router.currentRoute.value.name !== '/message' && label === 'home') {
       router.push('/message')
     }
 
-    info('打开消息会话')
-    const res = await getSessionDetailWithFriends({ id: uid, roomType: type })
-    // 把隐藏的会话先显示
     try {
-      await invokeWithErrorHandler('hide_contact_command', { data: { roomId: res.roomId, hide: false } })
-    } catch (_error) {
-      window.$message.error('显示会话失败')
-    }
+      info('打开消息会话')
+      const res = await getSessionDetailWithFriends({ id: uid, roomType: type })
+      if (isStale()) return
+      // 把隐藏的会话先显示
+      try {
+        await invokeWithErrorHandler('hide_contact_command', { data: { roomId: res.roomId, hide: false } })
+      } catch (_error) {
+        window.$message.error('显示会话失败')
+      }
+      if (isStale()) return
 
-    // 先检查会话是否已存在
-    const existingSession = chatStore.getSession(res.roomId)
-    if (!existingSession) {
-      // 只有当会话不存在时才更新会话列表顺序
-      chatStore.updateSessionLastActiveTime(res.roomId)
-      // 如果会话不存在，需要重新获取会话列表，但保持当前选中的会话
-      await chatStore.getSessionList(true)
-    }
-    globalStore.updateCurrentSessionRoomId(res.roomId)
+      // 先检查会话是否已存在
+      const existingSession = chatStore.getSession(res.roomId)
+      if (!existingSession) {
+        // 只有当会话不存在时才更新会话列表顺序
+        chatStore.updateSessionLastActiveTime(res.roomId)
+        // 如果会话不存在，需要重新获取会话列表，但保持当前选中的会话
+        await chatStore.getSessionList(true)
+      }
+      if (isStale()) return
+      // 在途期间用户已手动选中其他会话：不覆盖，以用户显式选择为准
+      if (globalStore.currentSessionRoomId && globalStore.currentSessionRoomId !== res.roomId) {
+        globalStore.endSessionOpening()
+        return
+      }
+      globalStore.updateCurrentSessionRoomId(res.roomId)
+      globalStore.endSessionOpening()
 
-    // 发送消息定位
-    useMitt.emit(MittEnum.LOCATE_SESSION, { roomId: res.roomId })
-    handleMsgClick(res as any)
-    useMitt.emit(MittEnum.TO_SEND_MSG, { url: 'message' })
+      // 发送消息定位
+      useMitt.emit(MittEnum.LOCATE_SESSION, { roomId: res.roomId })
+      handleMsgClick(res as any)
+      useMitt.emit(MittEnum.TO_SEND_MSG, { url: 'message' })
+    } catch (error) {
+      if (isStale()) return
+      const message = error instanceof Error ? error.message : String(error)
+      globalStore.failSessionOpening(message)
+      window.$message.error(t('home.chat_main.opening_failed'))
+      throw error
+    }
   }
 
   /**

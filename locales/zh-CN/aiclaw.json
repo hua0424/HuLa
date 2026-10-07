@@ -103,6 +103,8 @@
   "conversations": {
     "title": "对话记录",
     "empty": "暂无对话记录",
+    "load_failed": "对话记录加载失败",
+    "retry": "重试",
     "no_more": "没有更多了",
     "yesterday": "昨天"
   },

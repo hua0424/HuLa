@@ -290,7 +290,7 @@ describe('#210 群设置 tab 成员签名收敛', () => {
     expect(chatStoreMocks.loadAiclawGroupConfigs).toHaveBeenCalledTimes(1)
 
     // 返回详情页
-    await wrapper.find('use[href="#left"]').trigger('click')
+    await wrapper.find('[data-testid="aiclaw-back-group-settings"]').trigger('click')
     await flushPromises()
 
     roomIdsRef.value = ['room-1', 'room-2', 'room-3']
@@ -419,7 +419,7 @@ describe('#210 二期 桌面端 Tauri 事件直驱收敛', () => {
     const wrapper = mountWindow()
     await flushPromises()
 
-    await wrapper.find('use[href="#left"]').trigger('click')
+    await wrapper.find('[data-testid="aiclaw-back-group-settings"]').trigger('click')
     await flushPromises()
 
     await fireMemberChange({ roomId: 'room-1', changeType: ChangeTypeEnum.REMOVE, uidList: ['1001'] })

@@ -212,8 +212,9 @@
         <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
           <svg
             class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors"
+            data-testid="aiclaw-back-conversations"
             @click="handleBackToDetail">
-            <use href="#left"></use>
+            <use href="#left-arrow"></use>
           </svg>
           <span class="text-15px font-500 text-[--text-color]">{{ t('aiclaw.detail.conversations') }}</span>
         </div>
@@ -237,6 +238,20 @@
             </div>
           </template>
           <div
+            v-else-if="conversationError && !conversationLoading"
+            class="flex flex-col items-center justify-center h-full text-13px text-#999"
+            data-testid="aiclaw-conversations-error">
+            <span>{{ t('aiclaw.conversations.load_failed') }}</span>
+            <n-button
+              size="small"
+              secondary
+              class="mt-12px"
+              data-testid="aiclaw-conversations-retry"
+              @click="fetchConversations">
+              {{ t('aiclaw.conversations.retry') }}
+            </n-button>
+          </div>
+          <div
             v-else-if="!conversationLoading"
             class="flex flex-col items-center justify-center h-full text-13px text-#999">
             <svg class="size-48px mb-12px opacity-20"><use href="#robot"></use></svg>
@@ -256,8 +271,9 @@
         <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
           <svg
             class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors"
+            data-testid="aiclaw-back-conversation-messages"
             @click="handleBackToConversations">
-            <use href="#left"></use>
+            <use href="#left-arrow"></use>
           </svg>
           <span class="text-15px font-500 text-[--text-color]">{{ viewingFriendName }}</span>
         </div>
@@ -293,7 +309,21 @@
             <n-spin size="medium" />
           </div>
           <div
-            v-if="!messagesLoading && conversationMessages.length === 0"
+            v-else-if="messagesError && conversationMessages.length === 0"
+            class="flex flex-col items-center justify-center h-full text-13px text-#999"
+            data-testid="aiclaw-messages-error">
+            <span>{{ t('aiclaw.conversations.load_failed') }}</span>
+            <n-button
+              size="small"
+              secondary
+              class="mt-12px"
+              data-testid="aiclaw-messages-retry"
+              @click="fetchConversationMessages()">
+              {{ t('aiclaw.conversations.retry') }}
+            </n-button>
+          </div>
+          <div
+            v-else-if="!messagesLoading && conversationMessages.length === 0"
             class="flex flex-col items-center justify-center h-full text-13px text-#999">
             <span>{{ t('aiclaw.conversations.empty') }}</span>
           </div>
@@ -305,8 +335,9 @@
         <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
           <svg
             class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors"
+            data-testid="aiclaw-back-friends"
             @click="handleBackToDetail">
-            <use href="#left"></use>
+            <use href="#left-arrow"></use>
           </svg>
           <span class="text-15px font-500 text-[--text-color]">{{ t('aiclaw.detail.friends') }}</span>
         </div>
@@ -358,8 +389,9 @@
           <div class="flex items-center gap-8px min-w-0">
             <svg
               class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors flex-shrink-0"
+              data-testid="aiclaw-back-group-settings"
               @click="handleBackToDetail">
-              <use href="#left"></use>
+              <use href="#left-arrow"></use>
             </svg>
             <span class="text-15px font-500 text-[--text-color] truncate">{{ t('aiclaw.group_settings.title') }}</span>
           </div>
@@ -608,8 +640,12 @@ const rightView = ref<RightView>('detail')
 // F17 对话记录状态
 const conversationList = ref<ConversationItem[]>([])
 const conversationLoading = ref(false)
+// #344：列表加载失败与成功空结果分开呈现，失败可重试
+const conversationError = ref(false)
 const conversationMessages = ref<ConversationMessageItem[]>([])
 const messagesLoading = ref(false)
+// #344：消息加载失败与成功空结果分开呈现，失败可重试
+const messagesError = ref(false)
 const messagesLoadingMore = ref(false)
 const messagesIsLast = ref(false)
 const messagesCursor = ref('')
@@ -714,28 +750,39 @@ const formatConversationTime = (timestamp?: number | string) =>
 // F17: 获取对话列表
 const fetchConversations = async () => {
   if (!selectedUid.value) return
+  // #344：迟到响应不串位——仅接受当前所选助理的结果
+  const reqUid = selectedUid.value
   conversationLoading.value = true
+  conversationError.value = false
   try {
     // REQ-015 #186 F3：后端返回数组形响应（不再按 {list: []} 解析）
     const result = await imRequest<ConversationItem[]>({
       url: ImUrlEnum.AICLAW_CONVERSATIONS,
       params: { uid: selectedUid.value }
     })
+    if (selectedUid.value !== reqUid) return
     conversationList.value = result || []
   } catch (error) {
+    if (selectedUid.value !== reqUid) return
     console.error('[AiAssistant] Failed to fetch conversations:', error)
+    conversationError.value = true
   } finally {
-    conversationLoading.value = false
+    if (selectedUid.value === reqUid) conversationLoading.value = false
   }
 }
 
 // F17: 获取聊天记录
 const fetchConversationMessages = async (isLoadMore = false) => {
   if (!selectedUid.value || !viewingFriendUid.value) return
+  // #344：迟到响应不串房间——仅接受当前所选房间的结果
+  const reqUid = selectedUid.value
+  const reqFriend = viewingFriendUid.value
+  const stillCurrent = () => selectedUid.value === reqUid && viewingFriendUid.value === reqFriend
   if (isLoadMore) {
     messagesLoadingMore.value = true
   } else {
     messagesLoading.value = true
+    messagesError.value = false
   }
   try {
     const result = await imRequest<{ list: ConversationMessageItem[]; cursor: string; isLast: boolean }>({
@@ -747,6 +794,7 @@ const fetchConversationMessages = async (isLoadMore = false) => {
         cursor: messagesCursor.value || undefined
       }
     })
+    if (!stillCurrent()) return
     const newMessages = result?.list || []
     if (isLoadMore) {
       conversationMessages.value = [...newMessages.reverse(), ...conversationMessages.value]
@@ -756,10 +804,15 @@ const fetchConversationMessages = async (isLoadMore = false) => {
     messagesCursor.value = result?.cursor || ''
     messagesIsLast.value = result?.isLast ?? true
   } catch (error) {
+    if (!stillCurrent()) return
     console.error('[AiAssistant] Failed to fetch messages:', error)
+    // #344：仅首屏失败进入错误态（可重试）；上拉加载更多失败保留已有消息
+    if (!isLoadMore) messagesError.value = true
   } finally {
-    messagesLoading.value = false
-    messagesLoadingMore.value = false
+    if (stillCurrent()) {
+      messagesLoading.value = false
+      messagesLoadingMore.value = false
+    }
   }
 }
 
