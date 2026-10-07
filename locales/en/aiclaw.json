@@ -103,6 +103,8 @@
   "conversations": {
     "title": "Conversation History",
     "empty": "No conversations yet",
+    "load_failed": "Failed to load conversations",
+    "retry": "Retry",
     "no_more": "No more messages",
     "yesterday": "Yesterday"
   },
