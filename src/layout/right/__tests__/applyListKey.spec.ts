@@ -60,6 +60,24 @@ vi.mock('@/stores/global', async () => {
   }
 })
 
+// #339 起 layout/right 使用 t(...) 呈现在途目标态：此处沿用模块 mock 提供 t
+vi.mock('vue-i18n', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue-i18n')>()
+  return {
+    ...actual,
+    useI18n: () => ({
+      t: (key: string) => key
+    })
+  }
+})
+
+vi.mock('@/stores/group.ts', () => ({
+  useGroupStore: () => ({ getUserInfo: () => undefined })
+}))
+vi.mock('@/hooks/useCommon.ts', () => ({
+  useCommon: () => ({ openMsgSession: () => Promise.resolve() })
+}))
+
 const mountLog = vi.hoisted(() => [] as string[])
 const ApplyListStub = {
   name: 'ApplyList',
