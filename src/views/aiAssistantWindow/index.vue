@@ -212,8 +212,9 @@
         <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
           <svg
             class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors"
+            data-testid="aiclaw-back-conversations"
             @click="handleBackToDetail">
-            <use href="#left"></use>
+            <use href="#left-arrow"></use>
           </svg>
           <span class="text-15px font-500 text-[--text-color]">{{ t('aiclaw.detail.conversations') }}</span>
         </div>
@@ -256,8 +257,9 @@
         <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
           <svg
             class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors"
+            data-testid="aiclaw-back-conversation-messages"
             @click="handleBackToConversations">
-            <use href="#left"></use>
+            <use href="#left-arrow"></use>
           </svg>
           <span class="text-15px font-500 text-[--text-color]">{{ viewingFriendName }}</span>
         </div>
@@ -305,8 +307,9 @@
         <div class="flex items-center gap-8px px-24px py-12px border-b border-[--line-color]">
           <svg
             class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors"
+            data-testid="aiclaw-back-friends"
             @click="handleBackToDetail">
-            <use href="#left"></use>
+            <use href="#left-arrow"></use>
           </svg>
           <span class="text-15px font-500 text-[--text-color]">{{ t('aiclaw.detail.friends') }}</span>
         </div>
@@ -358,8 +361,9 @@
           <div class="flex items-center gap-8px min-w-0">
             <svg
               class="size-18px cursor-pointer text-[--text-color] hover:text-#13987f transition-colors flex-shrink-0"
+              data-testid="aiclaw-back-group-settings"
               @click="handleBackToDetail">
-              <use href="#left"></use>
+              <use href="#left-arrow"></use>
             </svg>
             <span class="text-15px font-500 text-[--text-color] truncate">{{ t('aiclaw.group_settings.title') }}</span>
           </div>
