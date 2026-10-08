@@ -22,6 +22,7 @@ vi.mock('vue-router', () => ({
 
 const mittEmitMock = vi.hoisted(() => vi.fn())
 vi.mock('@/hooks/useMitt', () => ({ useMitt: { emit: mittEmitMock, on: vi.fn(), off: vi.fn() } }))
+vi.mock('@/hooks/useCommon', () => ({ useCommon: () => ({ openMsgSession: vi.fn() }) }))
 
 const getApplyPageMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const contactStoreMocks = vi.hoisted(() => ({

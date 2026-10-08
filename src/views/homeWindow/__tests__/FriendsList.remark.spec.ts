@@ -46,6 +46,7 @@ vi.mock('@/stores/global', () => ({
 vi.mock('@/stores/setting', () => ({ useSettingStore: () => ({ themes: { content: 'LIGHT' } }) }))
 vi.mock('@/stores/userStatus', () => ({ useUserStatusStore: () => ({ stateList: [] }) }))
 vi.mock('@/hooks/useMitt', () => ({ useMitt: { emit: vi.fn(), on: vi.fn(), off: vi.fn() } }))
+vi.mock('@/hooks/useCommon', () => ({ useCommon: () => ({ openMsgSession: vi.fn() }) }))
 vi.mock('@/utils/ImRequestUtils', () => ({ getUserByIds: vi.fn().mockResolvedValue([]) }))
 vi.mock('@/utils/UnreadCountManager', () => ({
   unreadCountManager: {

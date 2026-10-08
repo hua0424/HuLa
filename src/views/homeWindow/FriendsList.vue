@@ -134,6 +134,7 @@ import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MittEnum, OnlineEnum, RoomTypeEnum, ThemeEnum, UserType } from '@/enums'
+import { useCommon } from '@/hooks/useCommon.ts'
 import { useMitt } from '@/hooks/useMitt.ts'
 import type { DetailsContent } from '@/services/types'
 import { useContactStore } from '@/stores/contacts.ts'
@@ -164,6 +165,7 @@ const groupStore = useGroupStore()
 const globalStore = useGlobalStore()
 const userStatusStore = useUserStatusStore()
 const settingStore = useSettingStore()
+const { openMsgSession } = useCommon()
 const { themes } = storeToRefs(settingStore)
 const { stateList } = storeToRefs(userStatusStore)
 
@@ -197,7 +199,16 @@ const sortedContacts = computed(() => {
   })
 })
 
+const isBotUser = (uid: string) => groupStore.getUserInfo(uid)?.account === UserType.BOT
+
 const handleClick = (index: string, type: number) => {
+  // #341：好友 SINGLE 非 bot 主点击直进私聊，复用已有 openMsgSession 链路
+  //（含 #339 在途目标/连选归末/失败重试语义）；群与系统 bot 保留既有资料态。
+  if (type === RoomTypeEnum.SINGLE && !isBotUser(index)) {
+    activeItem.value = index
+    openMsgSession(index, RoomTypeEnum.SINGLE).catch(() => {})
+    return
+  }
   detailsShow.value = true
   activeItem.value = index
   const data = {
@@ -265,7 +276,6 @@ const fetchContactData = async () => {
   }
 }
 
-const isBotUser = (uid: string) => groupStore.getUserInfo(uid)?.account === UserType.BOT
 /** 获取用户状态 */
 const getUserState = (uid: string) => {
   const userInfo = groupStore.getUserInfo(uid)
