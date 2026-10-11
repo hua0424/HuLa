@@ -26,7 +26,7 @@ pub async fn cache_thinking_metadata(
     window: tauri::Window,
     state: State<'_, AppData>,
 ) -> Result<Vec<String>, String> {
-    require_home(&window)?;
+    require_chat_owner(&window)?;
     let session = state.session.capture_identity(&binding)?;
     let _gate = state.session.commit(&session).await?;
     cache::save_thinking_metadata(
@@ -51,7 +51,7 @@ pub async fn cache_thinking_body(
     window: tauri::Window,
     state: State<'_, AppData>,
 ) -> Result<(), String> {
-    require_home(&window)?;
+    require_chat_owner(&window)?;
     let session = state.session.capture_identity(&binding)?;
     let _gate = state.session.commit(&session).await?;
     cache::save_thinking_body(
@@ -86,15 +86,17 @@ pub async fn cache_local_snapshot(
     window: tauri::Window,
     state: State<'_, AppData>,
 ) -> Result<(), String> {
-    require_home(&window)?;
+    require_chat_owner(&window)?;
     let session = state.session.capture_identity(&binding)?;
     let _gate = state.session.commit(&session).await?;
     cache::save_snapshot(&session.db, &name, &payload).await
 }
 
-fn require_home(window: &tauri::Window) -> Result<(), String> {
-    if window.label() != "home" {
-        return Err("只有聊天主窗可持久化账号缓存".into());
+/// aichatoverview#393：逻辑聊天主窗拥有账号缓存写权——桌面 `home`，移动 `mobile-home`。
+/// 桌面其他窗口（辅窗）仍只读；不得把移动窗重命名 home，也不得放开任意原生窗口写入。
+fn require_chat_owner(window: &tauri::Window) -> Result<(), String> {
+    match window.label() {
+        "home" | "mobile-home" => Ok(()),
+        _ => Err("只有聊天主窗可持久化账号缓存".into()),
     }
-    Ok(())
 }

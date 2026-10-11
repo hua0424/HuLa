@@ -3,7 +3,7 @@ import type { ThinkingMetadataItem, ThinkingState } from '@/types/thinking'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { imRequest } from '@/utils/ImRequestUtils'
 import { isWeb } from '@/utils/PlatformConstants'
-import { assertSessionCurrent, type SessionIdentity } from '@/services/sessionBinding'
+import { assertSessionCurrent, SessionExpiredError, type SessionIdentity } from '@/services/sessionBinding'
 import { loadThinkingByTrigger, type ThinkingDetail } from '@/services/thinkingService'
 import { thinkingETagStale } from '@/utils/windowCalibrate'
 
@@ -68,6 +68,22 @@ export const cacheLocalSnapshot = (binding: SessionIdentity, name: 'sessions' | 
 
 /** Successful cache is reused without a detail GET; missing content is not successful empty. */
 const bodyRequests = new Map<string, Promise<{ content: string; status: number }>>()
+
+/**
+ * aichatoverview#393：远端已成功且身份/归属/ETag 确认后，纯本地写故障
+ * （写守卫拒绝、磁盘失败）不阻断本轮正文返回——只留可观察信号，
+ * 缓存仍缺失则下次进入自然重试，不伪造持久化成功、不擦除旧数据。
+ * 身份/代次失效（SessionExpiredError）仍上抛；最终仍有 assertSessionCurrent
+ * 迟到回写守卫，旧账号迟到内容不会显示或持久化。
+ */
+const tolerateCacheWrite = async (task: Promise<unknown>): Promise<void> => {
+  try {
+    await task
+  } catch (error) {
+    if (error instanceof SessionExpiredError) throw error
+    console.warn('[thinking-cache] 思考缓存保存失败，已验证正文仍返回，下次进入可重试')
+  }
+}
 export const loadThinkingBody = async (
   thinking: ThinkingState,
   binding: SessionIdentity | null
@@ -147,7 +163,7 @@ const readThinkingBody = async (
           idString(item.triggerMsgId) === thinking.triggerMsgId
       )
       if (!items || !metadata) throw new Error('思考元数据尚未成功取得')
-      await cacheThinkingMetadata(binding, thinking.roomId, [thinking.triggerMsgId], items)
+      await tolerateCacheWrite(cacheThinkingMetadata(binding, thinking.roomId, [thinking.triggerMsgId], items))
     }
     // aichatoverview#351：detail 的归属、hash、状态须与本轮已确认元数据匹配；
     // ETag 不一致有界重查一次，仍不一致保留已读内容、不假已验证。
@@ -165,7 +181,8 @@ const readThinkingBody = async (
       )
       if (fresh?.bodyETag) {
         metadata = fresh
-        if (items) await cacheThinkingMetadata(binding, thinking.roomId, [thinking.triggerMsgId], items)
+        if (items)
+          await tolerateCacheWrite(cacheThinkingMetadata(binding, thinking.roomId, [thinking.triggerMsgId], items))
       }
       if (metadata?.bodyETag && detail.bodyETag && metadata.bodyETag !== detail.bodyETag)
         throw new Error('思考正文校验已失效，可重试')
@@ -173,24 +190,28 @@ const readThinkingBody = async (
     const bodyETag = detail.bodyETag ?? metadata?.bodyETag ?? null
     if (!metadata) throw new Error('思考元数据尚未成功取得')
     const confirmed: ThinkingMetadataItem = metadata
-    await cacheThinkingMetadata(
-      binding,
-      thinking.roomId,
-      [thinking.triggerMsgId],
-      [{ ...confirmed, status: detail.status, durationMs: detail.durationMs ?? undefined, bodyETag }]
-    )
-    await invokeWithErrorHandler(
-      TauriCommand.CACHE_THINKING_BODY,
-      {
+    await tolerateCacheWrite(
+      cacheThinkingMetadata(
         binding,
-        roomId: thinking.roomId,
-        triggerMsgId: thinking.triggerMsgId,
-        aiclawUid: String(thinking.aiclawId),
-        thinkingId: thinking.thinkingId,
-        content,
-        bodyEtag: bodyETag
-      },
-      { showError: false }
+        thinking.roomId,
+        [thinking.triggerMsgId],
+        [{ ...confirmed, status: detail.status, durationMs: detail.durationMs ?? undefined, bodyETag }]
+      )
+    )
+    await tolerateCacheWrite(
+      invokeWithErrorHandler(
+        TauriCommand.CACHE_THINKING_BODY,
+        {
+          binding,
+          roomId: thinking.roomId,
+          triggerMsgId: thinking.triggerMsgId,
+          aiclawUid: String(thinking.aiclawId),
+          thinkingId: thinking.thinkingId,
+          content,
+          bodyEtag: bodyETag
+        },
+        { showError: false }
+      )
     )
     await assertSessionCurrent(binding)
   } else if (!isWeb()) {
