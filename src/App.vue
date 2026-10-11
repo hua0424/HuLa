@@ -356,6 +356,8 @@ useMitt.on(WsResponseMessageType.TOKEN_EXPIRED, async (wsTokenExpire: WsTokenExp
       await ImRequestUtils.logout({ autoLogin: login.value.autoLogin })
       await resetLoginState()
       await logout()
+      // aichatoverview#395：与移动共用身份清理行为。
+      settingStore.toggleLogin(false, false)
     }
   }
 })

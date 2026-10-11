@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeScoped as invoke } from '@/services/sessionBinding'
 import { isMobile as checkMobile, isWeb } from '@/utils/PlatformConstants'
 import {
   createRouter,
