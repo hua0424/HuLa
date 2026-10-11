@@ -21,6 +21,7 @@
     "copy_failed": "Copy failed",
     "view": "View Activation Token",
     "refresh": "Regenerate Activation Token",
+    "regenerate_confirm": "Regenerate",
     "refresh_confirm": "This will invalidate the old connection token. The AI assistant will be disconnected and need to re-activate. Continue?",
     "refresh_success": "Activation token regenerated",
     "activated": "Activated",

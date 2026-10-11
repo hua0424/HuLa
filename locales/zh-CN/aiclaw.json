@@ -21,6 +21,7 @@
     "copy_failed": "复制失败",
     "view": "查看激活码",
     "refresh": "重新生成激活码",
+    "regenerate_confirm": "重新生成",
     "refresh_confirm": "重新生成后旧连接 Token 立即失效，AI 助理将断开连接并需要重新激活，确定吗？",
     "refresh_success": "激活码已重新生成",
     "activated": "已激活",
