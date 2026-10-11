@@ -1,9 +1,11 @@
 import { RoomTypeEnum } from '@/enums'
+import { isSessionCurrent, sessionBinding } from '@/services/sessionBinding'
 import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contacts'
 import { useGroupStore } from '@/stores/group'
 import { useUserStore } from '@/stores/user'
 import { getUserByIds } from '@/utils/ImRequestUtils'
+import { isWeb } from '@/utils/PlatformConstants'
 
 /**
  * REQ-016 #194 F1（PRD #190 裁决 2）：userInfoChange 帧处理。
@@ -25,6 +27,18 @@ export type UserInfoChangePayload = {
 export const handleUserInfoChange = async (data: UserInfoChangePayload): Promise<void> => {
   const uid = String(data?.uid ?? '').trim()
   if (!uid) return
+  // aichatoverview#395：记录旧绑定 origin；迟到/共享旧响应不得复活旧身份或写入新作用域。
+  const origin = sessionBinding.value
+  const startUid = (() => {
+    try {
+      return useUserStore().userInfo?.uid ? String(useUserStore().userInfo!.uid) : ''
+    } catch {
+      return ''
+    }
+  })()
+  // 未认证时不处理旧帧（退出后迟到帧不得写入）；web 无原生绑定，以 live 身份为准。
+  if (!isWeb() && !origin) return
+  if (!startUid) return
 
   const chatStore = useChatStore()
   const groupStore = useGroupStore()
@@ -44,6 +58,13 @@ export const handleUserInfoChange = async (data: UserInfoChangePayload): Promise
   let fresh: { name?: string; avatar?: string; resume?: string } | undefined
   try {
     const users = await getUserByIds([uid])
+    // aichatoverview#395：等待期间发生退出/切号则丢弃旧响应。
+    if (!isWeb() && origin && !isSessionCurrent(origin)) return
+    try {
+      if ((useUserStore().userInfo?.uid ? String(useUserStore().userInfo!.uid) : '') !== startUid) return
+    } catch {
+      return
+    }
     fresh = users?.find((u) => String(u.uid) === uid)
   } catch (error) {
     console.error('[userInfoChange] 重拉用户信息失败:', error)

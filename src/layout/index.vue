@@ -637,8 +637,10 @@ const setupNativeFileDropListeners = async () => {
 
 listen('relogin', async () => {
   info('收到重新登录事件')
+  // aichatoverview#395：与显式退出共用身份清理行为。
   await resetLoginState()
   await logout()
+  settingStore.toggleLogin(false, false)
 })
 
 onBeforeMount(async () => {
