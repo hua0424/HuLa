@@ -54,7 +54,7 @@ const loading = ref(false)
 const refreshing = ref(false)
 const fetchedToken = ref('')
 
-const displayToken = computed(() => props.token || fetchedToken.value)
+const displayToken = computed(() => fetchedToken.value || props.token)
 
 watch(visible, async (show) => {
   if (show && props.uid && !props.token) {
@@ -79,6 +79,10 @@ watch(visible, async (show) => {
 })
 
 const handleCopy = async () => {
+  if (!displayToken.value) {
+    window.$message?.error?.(t('aiclaw.token.copy_failed'))
+    return
+  }
   try {
     await navigator.clipboard.writeText(displayToken.value)
     copied.value = true
@@ -95,8 +99,8 @@ const handleRefresh = () => {
   window.$dialog?.warning({
     title: t('aiclaw.token.refresh'),
     content: t('aiclaw.token.refresh_confirm'),
-    positiveText: t('aiclaw.delete.confirm'),
-    negativeText: t('aiclaw.delete.cancel'),
+    positiveText: t('aiclaw.token.regenerate_confirm'),
+    negativeText: t('components.common.cancel'),
     onPositiveClick: async () => {
       refreshing.value = true
       try {
