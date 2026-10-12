@@ -223,6 +223,28 @@ describe('#396 移动端实时思考链', () => {
     expect(cards(hosts[0])).toHaveLength(1)
   })
 
+  it('路由挂/卸载循环 6 次后仍只消费一次，不泄漏订阅', async () => {
+    hosts.push(mountMobile())
+    const store = useChatStore()
+    const spy = vi.spyOn(store, 'startThinking')
+
+    // 模拟移动端路由切换：新宿主先挂、旧宿主后卸，循环 6 次；每轮事件都应恰好消费一次。
+    for (let i = 0; i < 6; i += 1) {
+      const next = mountMobile()
+      for (const host of hosts) host.unmount()
+      hosts = [next]
+      useMitt.emit(WsResponseMessageType.THINKING_START, startOf(think(`20${i}`), AICLAW_A))
+      await nextTick()
+    }
+    expect(spy).toHaveBeenCalledTimes(6)
+
+    // 循环结束后单帧事件仍只消费一次：无幽灵订阅叠加。
+    spy.mockClear()
+    useMitt.emit(WsResponseMessageType.THINKING_START, startOf(think('207'), AICLAW_A))
+    await nextTick()
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
+
   it('旧 epoch 帧被拒绝，不建卡', async () => {
     hosts.push(mountMobile())
     const stale = { ...identity, sessionEpoch: identity.sessionEpoch - 1 }
