@@ -40,6 +40,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { useCheckUpdate } from '@/hooks/useCheckUpdate'
 import { useLogin } from '@/hooks/useLogin'
 import { useMitt } from '@/hooks/useMitt.ts'
+import { useThinkingRealtime } from '@/hooks/useThinkingRealtime'
 import rustWebSocketClient from '@/services/webSocketRust'
 import { useContactStore } from '@/stores/contacts.ts'
 import { useGlobalStore } from '@/stores/global.ts'
@@ -55,8 +56,6 @@ import {
   type StreamDeltaPayload,
   type StreamEndPayload,
   type AiclawAuthPayload,
-  type ThinkingStartPayload,
-  type ThinkingEndPayload,
   type AiclawGroupConfigUpdatePayload
 } from '@/services/wsType.ts'
 import { useChatStore } from '@/stores/chat'
@@ -534,15 +533,8 @@ watch(
 
 // ==================== REQ-004 AIclaw Thinking 事件处理 ====================
 // S4 起思考条改为状态版：客户端不再接收 thinkingDelta，全文按需经 REST 拉取。
-// 因此这里只处理 START（开始）/ END（结束并携带状态），不再做 delta 缓冲/节流。
-
-useMitt.on(WsResponseMessageType.THINKING_START, (data: ThinkingStartPayload) => {
-  chatStore.startThinking(data)
-})
-
-useMitt.on(WsResponseMessageType.THINKING_END, (data: ThinkingEndPayload) => {
-  chatStore.finalizeThinking(data.thinkingId, data)
-})
+// aichatoverview#396：START/END 走账号级单实例消费者（桌面与移动共用），禁多入口双写。
+useThinkingRealtime()
 
 // REQ-004: 群配置变更通知（X5: 推送范围为群内所有在线成员）
 useMitt.on(WsResponseMessageType.AICLAW_GROUP_CONFIG_UPDATE, async (data: AiclawGroupConfigUpdatePayload) => {
