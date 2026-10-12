@@ -19,9 +19,13 @@ const onThinkingEnd = (data: ThinkingEndPayload) => {
 }
 
 export function useThinkingRealtime() {
+  // 仅实际执行订阅的宿主拥有 scoped 清理；非注册宿主卸载时无订阅被摘除，
+  // 不得重加（aichatoverview#396：否则每次路由挂/卸载净增一条幽灵订阅）。
+  let owned = false
   if (activeHosts === 0) {
     useMitt.on(WsResponseMessageType.THINKING_START, onThinkingStart)
     useMitt.on(WsResponseMessageType.THINKING_END, onThinkingEnd)
+    owned = true
   }
   activeHosts += 1
   onUnmounted(() => {
@@ -30,8 +34,8 @@ export function useThinkingRealtime() {
       activeHosts = 0
       useMitt.off(WsResponseMessageType.THINKING_START, onThinkingStart)
       useMitt.off(WsResponseMessageType.THINKING_END, onThinkingEnd)
-    } else {
-      // 卸载宿主的自动清理已摘除共享订阅，为剩余宿主恢复一份。
+    } else if (owned) {
+      // 注册宿主的 scoped 自动清理已摘除共享订阅，为剩余宿主恢复一份。
       useMitt.on(WsResponseMessageType.THINKING_START, onThinkingStart)
       useMitt.on(WsResponseMessageType.THINKING_END, onThinkingEnd)
     }
