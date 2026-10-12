@@ -23,6 +23,7 @@ import { emitTo } from '@tauri-apps/api/event'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { MsgEnum, NotificationTypeEnum, TauriCommand } from '@/enums'
 import { useMitt } from '@/hooks/useMitt'
+import { useThinkingRealtime } from '@/hooks/useThinkingRealtime'
 import type { MessageType } from '@/services/types'
 import {
   WsResponseMessageType,
@@ -161,6 +162,8 @@ const addFileToStore = (data: MessageType) => {
 }
 
 /** 处理收到的消息 */
+// aichatoverview#396：思考 START/END 走账号级单实例消费者（桌面与移动共用），禁多入口双写。
+useThinkingRealtime()
 useMitt.on(WsResponseMessageType.RECEIVE_MESSAGE, async (data: MessageType) => {
   // 跳过已存在的消息
   if (chatStore.checkMsgExist(String(data.message.roomId), String(data.message.id))) {
