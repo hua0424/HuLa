@@ -64,6 +64,8 @@ export const handleSessionExpired = async (): Promise<void> => {
       await ImRequestUtils.logout({ autoLogin: settingStore.login.autoLogin })
       await resetLoginState()
       await logout()
+      // aichatoverview#395：与移动共用身份清理行为（reset 已关自动登录，此处再关自启）。
+      settingStore.toggleLogin(false, false)
     }
   } catch (error) {
     console.error('处理登录失效失败：', error)

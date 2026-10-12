@@ -25,10 +25,15 @@ const readOnlyStorage: StorageLike = {
   setItem: () => {}
 }
 
+/**
+ * aichatoverview#393：逻辑聊天主窗——桌面 home，移动 mobile-home。
+ * 桌面其他窗口（辅窗）仍只读；不得把移动窗重命名 home，或允许任意原生窗口写入。
+ */
 export const isChatHomeWindow = () => {
   if (isWeb()) return true
   try {
-    return getCurrentWindow().label === 'home'
+    const label = getCurrentWindow().label
+    return label === 'home' || label === 'mobile-home'
   } catch {
     return true
   }
@@ -58,11 +63,6 @@ export const scopedChatStorage = (): StorageLike => {
 export const homeWindowOnlyStorage = (): StorageLike => {
   // web 单页无多窗问题，保持现状
   if (isWeb()) return window.localStorage
-  try {
-    // 桌面端：home 主窗读写，辅窗只读
-    return getCurrentWindow().label === 'home' ? window.localStorage : readOnlyStorage
-  } catch {
-    // 无 Tauri 运行时（单测等）：退化为现状（持久化开启），宁多勿缺
-    return window.localStorage
-  }
+  // 桌面端：逻辑聊天主窗读写，辅窗只读（#393：移动 mobile-home 也是主窗，单窗无多写者）
+  return isChatHomeWindow() ? window.localStorage : readOnlyStorage
 }

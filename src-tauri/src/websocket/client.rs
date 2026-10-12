@@ -144,6 +144,16 @@ impl BoundEmitter<'_> {
             .emit_to(target, event, self.payload(payload)?)
             .map_err(Into::into)
     }
+    /// aichatoverview#396：逻辑聊天主窗目标——桌面 `home`，移动 `mobile-home`。
+    /// 存在性分派（沿用 relogin 入口先例）：桌面行为不变；移动端此前投递到不存在的
+    /// `home` 被静默丢弃。绑定信封与会话门禁不变，广播事件不走这里。
+    fn chat_owner_label(home_exists: bool) -> &'static str {
+        if home_exists { "home" } else { "mobile-home" }
+    }
+    fn emit_to_owner<T: Serialize>(&self, event: &str, payload: T) -> Result<()> {
+        let target = Self::chat_owner_label(self.handle.get_webview_window("home").is_some());
+        self.emit_to(target, event, payload)
+    }
 }
 
 impl WebSocketClient {
@@ -919,7 +929,7 @@ impl WebSocketClient {
             }
             "loginSuccess" => {
                 info!("Login successful");
-                let _ = events.emit_to("home", "ws-login-success", data);
+                let _ = events.emit_to_owner("ws-login-success", data);
             }
 
             // 消息相关 TODO 暂时只实现聊天消息的ack
@@ -955,77 +965,77 @@ impl WebSocketClient {
                     }
                 }
 
-                let _ = events.emit_to("home", "ws-receive-message", data);
+                let _ = events.emit_to_owner("ws-receive-message", data);
             }
             "msgRecall" => {
                 info!("Message recalled");
-                let _ = events.emit_to("home", "ws-msg-recall", data);
+                let _ = events.emit_to_owner("ws-msg-recall", data);
             }
             "msgMarkItem" => {
                 info!("Message liked/disliked");
-                let _ = events.emit_to("home", "ws-msg-mark-item", data);
+                let _ = events.emit_to_owner("ws-msg-mark-item", data);
             }
 
             // 用户状态相关
             "online" => {
                 info!("User online");
-                let _ = events.emit_to("home", "ws-online", data);
+                let _ = events.emit_to_owner("ws-online", data);
             }
             "offline" => {
                 info!("User offline");
-                let _ = events.emit_to("home", "ws-offline", data);
+                let _ = events.emit_to_owner("ws-offline", data);
             }
             "userStateChange" => {
                 info!("User state changed");
-                let _ = events.emit_to("home", "ws-user-state-change", data);
+                let _ = events.emit_to_owner("ws-user-state-change", data);
             }
             // 通知总线
             "notifyEvent" => {
                 info!("新的notifyEvent");
-                let _ = events.emit_to("home", "ws-request-notify-event", data);
+                let _ = events.emit_to_owner("ws-request-notify-event", data);
             }
             "groupSetAdmin" => {
-                let _ = events.emit_to("home", "ws-group-set-admin-success", data);
+                let _ = events.emit_to_owner("ws-group-set-admin-success", data);
             }
             // 好友相关
             "newApply" => {
                 info!("New apply request");
-                let _ = events.emit_to("home", "ws-request-new-apply", data);
+                let _ = events.emit_to_owner("ws-request-new-apply", data);
             }
             "requestApprovalFriend" => {
                 info!("Friend request approved");
-                let _ = events.emit_to("home", "ws-request-approval-friend", data);
+                let _ = events.emit_to_owner("ws-request-approval-friend", data);
             }
             "memberChange" => {
                 info!("Member change");
-                let _ = events.emit_to("home", "ws-member-change", data);
+                let _ = events.emit_to_owner("ws-member-change", data);
             }
 
             // 房间/群聊相关
             "roomInfoChange" => {
                 info!("Room info changed");
-                let _ = events.emit_to("home", "ws-room-info-change", data);
+                let _ = events.emit_to_owner("ws-room-info-change", data);
             }
             "myRoomInfoChange" => {
                 info!("My room info changed");
-                let _ = events.emit_to("home", "ws-my-room-info-change", data);
+                let _ = events.emit_to_owner("ws-my-room-info-change", data);
             }
             // REQ-016 #194: 资料变更（改名/简介/头像 profile；好友备注 remark）
             "userInfoChange" => {
                 info!("User info changed");
-                let _ = events.emit_to("home", "ws-user-info-change", data);
+                let _ = events.emit_to_owner("ws-user-info-change", data);
             }
             "roomGroupNoticeMsg" => {
                 info!("Group notice published");
-                let _ = events.emit_to("home", "ws-room-group-notice-msg", data);
+                let _ = events.emit_to_owner("ws-room-group-notice-msg", data);
             }
             "roomEditGroupNoticeMsg" => {
                 info!("✏️ Group notice edited");
-                let _ = events.emit_to("home", "ws-room-edit-group-notice-msg", data);
+                let _ = events.emit_to_owner("ws-room-edit-group-notice-msg", data);
             }
             "roomDissolution" => {
                 info!("Room dissolved");
-                let _ = events.emit_to("home", "ws-room-dissolution", data);
+                let _ = events.emit_to_owner("ws-room-dissolution", data);
             }
 
             // 视频通话相关
@@ -1090,28 +1100,28 @@ impl WebSocketClient {
             // 朋友圈相关
             "feedSendMsg" => {
                 info!("Feed message received");
-                let _ = events.emit_to("home", "ws-feed-send-msg", data);
+                let _ = events.emit_to_owner("ws-feed-send-msg", data);
             }
             "feedNotify" => {
                 info!("Feed notification received (like/comment)");
-                let _ = events.emit_to("home", "ws-feed-notify", data);
+                let _ = events.emit_to_owner("ws-feed-notify", data);
             }
 
             // AIclaw 流式消息
             "streamStart" => {
                 info!("Stream start");
-                let _ = events.emit_to("home", "ws-stream-start", data);
+                let _ = events.emit_to_owner("ws-stream-start", data);
             }
             "streamDelta" => {
-                let _ = events.emit_to("home", "ws-stream-delta", data);
+                let _ = events.emit_to_owner("ws-stream-delta", data);
             }
             "streamEnd" => {
                 info!("Stream end");
-                let _ = events.emit_to("home", "ws-stream-end", data);
+                let _ = events.emit_to_owner("ws-stream-end", data);
             }
             "aiclawAuthRequest" => {
                 info!("AIclaw auth request");
-                let _ = events.emit_to("home", "ws-aiclaw-auth-request", data);
+                let _ = events.emit_to_owner("ws-aiclaw-auth-request", data);
             }
 
             // REQ-004: AIclaw 思考流式消息
@@ -1149,18 +1159,18 @@ impl WebSocketClient {
                     }
                 }
                 info!("AIclaw thinking start");
-                let _ = events.emit_to("home", "ws-thinking-start", data);
+                let _ = events.emit_to_owner("ws-thinking-start", data);
             }
             // S4 起服务端不再下发 thinkingDelta，客户端也不再转发（思考全文改为按需 REST 拉取）
             "thinkingEnd" => {
                 info!("AIclaw thinking end");
-                let _ = events.emit_to("home", "ws-thinking-end", data);
+                let _ = events.emit_to_owner("ws-thinking-end", data);
             }
 
             // REQ-004: 群配置变更广播
             "groupConfigChange" => {
                 info!("AIclaw group config change broadcast");
-                let _ = events.emit_to("home", "ws-group-config-change", data);
+                let _ = events.emit_to_owner("ws-group-config-change", data);
             }
 
             // 未知消息类型
@@ -1569,5 +1579,13 @@ mod tests {
         assert!(!is_auth_http_error(&make(200, Some("not json"))));
         assert!(!is_auth_http_error(&make(406, None)));
         assert!(!is_auth_http_error(&Error::ConnectionClosed));
+    }
+
+    /// aichatoverview#396：逻辑聊天主窗目标按窗口存在性分派——桌面 `home`
+    /// 存在时行为与旧版完全一致；仅 `home` 不存在（移动端）时投递 `mobile-home`。
+    #[test]
+    fn chat_owner_target_follows_home_window() {
+        assert_eq!(BoundEmitter::chat_owner_label(true), "home");
+        assert_eq!(BoundEmitter::chat_owner_label(false), "mobile-home");
     }
 }

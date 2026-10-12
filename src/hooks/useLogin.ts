@@ -21,7 +21,12 @@ import { getAllUserState, getUserDetail } from '../utils/ImRequestUtils'
 import { useNetwork } from '@vueuse/core'
 import { UserInfoType } from '../services/types'
 import { getEnhancedFingerprint } from '../services/fingerprint'
-import { captureSessionBinding, invokeScoped as invoke, isSessionCurrent } from '@/services/sessionBinding'
+import {
+  captureSessionBinding,
+  invokeScoped as invoke,
+  isSessionCurrent,
+  sessionBinding
+} from '@/services/sessionBinding'
 import { createBootAttempt, createRequestId, logBoot, scheduleIdle } from '@/utils/bootAttempt'
 import { useMitt } from './useMitt'
 // 安全日志：Tauri 环境用 plugin-log，浏览器 Web 环境降级到 console.log
@@ -137,6 +142,9 @@ export const useLogin = () => {
 
   /**
    * 登出账号
+   * aichatoverview#395：退出成功意味着活跃认证与当前显示身份一致撤销，同进程可直接登录另一账号。
+   * 顺序：先落盘阅读位置并保留旧绑定 origin 做原生清理，再清 live 身份；不清 loginHistory/各账号缓存。
+   * 原生“被新登录取代”失败意味着新身份已接管，此时不得清理新身份。
    */
   const logout = async () => {
     // aichatoverview#352：登出前落盘阅读位置（同账号下次登录可恢复；失败不挡登出）。
@@ -145,11 +153,24 @@ export const useLogin = () => {
     // aichatoverview#285：退出即清理历史浏览进度与进行中请求，旧请求结果不再写入
     chatStore.clearHistoryProgress()
 
+    // 退出前保留旧绑定 origin；过早清 user 会破坏正在完成的旧绑定清理。
+    const logoutOrigin = isWeb() ? null : await captureSessionBinding().catch(() => null)
     const sendLogoutEvent = async () => {
-      const binding = isWeb() ? null : await captureSessionBinding()
-      await invokeSilently(TauriCommand.UPDATE_USER_LAST_OPT_TIME, { binding })
-      await invokeSilently('ws_disconnect', { binding })
-      await invokeWithErrorHandler(TauriCommand.REMOVE_TOKENS, { binding }, { showError: false })
+      const binding = isWeb() ? null : logoutOrigin ? logoutOrigin : await captureSessionBinding().catch(() => null)
+      if (binding) {
+        await invokeSilently(TauriCommand.UPDATE_USER_LAST_OPT_TIME, { binding })
+        await invokeSilently('ws_disconnect', { binding })
+        await invokeWithErrorHandler(TauriCommand.REMOVE_TOKENS, { binding }, { showError: false })
+      } else if (isWeb()) {
+        await invokeSilently(TauriCommand.UPDATE_USER_LAST_OPT_TIME, { binding })
+        await invokeSilently('ws_disconnect', { binding })
+      }
+    }
+
+    const clearIdentityUnlessSuperseded = () => {
+      // 新登录已接管（旧 origin 失效且当前有新绑定）：不得清理新身份。
+      if (logoutOrigin && !isSessionCurrent(logoutOrigin) && sessionBinding.value) return
+      userStore.clearActiveIdentity()
     }
 
     if (isDesktop()) {
@@ -157,6 +178,13 @@ export const useLogin = () => {
       isTrayMenuShow.value = false
       try {
         await sendLogoutEvent()
+      } catch (error) {
+        // 被新登录取代：直接返回，不清理新身份、不虚报失败。
+        if (logoutOrigin && !isSessionCurrent(logoutOrigin) && sessionBinding.value) return
+        void logInfo(`登出原生清理失败: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      try {
+        clearIdentityUnlessSuperseded()
         // 创建登录窗口
         await createWebviewWindow('登录', 'login', 320, 490, undefined, false, 320, 490)
         // 发送登出事件
@@ -164,29 +192,34 @@ export const useLogin = () => {
 
         // 调整托盘大小
         await resizeWindow('tray', 130, 44)
-      } catch (_error) {
-        void logInfo('创建登录窗口失败')
+      } catch (error) {
+        void logInfo(`登出失败: ${error instanceof Error ? error.message : String(error)}`)
+        throw error
       }
     } else {
       try {
-        await sendLogoutEvent()
+        await sendLogoutEvent().catch((error) => {
+          if (logoutOrigin && !isSessionCurrent(logoutOrigin) && sessionBinding.value) return
+          void logInfo(`登出原生清理失败: ${error instanceof Error ? error.message : String(error)}`)
+        })
+        clearIdentityUnlessSuperseded()
         // 发送登出事件
         await emit(EventEnum.LOGOUT)
-      } catch (_error) {
-        void logInfo('登出失败')
-        window.$message.error('登出失败')
+      } catch (error) {
+        void logInfo(`登出失败: ${error instanceof Error ? error.message : String(error)}`)
+        window.$message.error(error instanceof Error ? error.message : '登出失败')
+        throw error
       }
     }
   }
 
   // const { openExternalUrl } = useLinkSegments()
 
-  /** 重置登录的状态 */
+  /** 重置登录的状态（aichatoverview#395：显式退出/sessionExpired/token过期/relogin 同走 reset+logout；活跃身份由 logout 在落盘后统一清理，此处不提前清 user，避免破坏退出前阅读位置落盘与旧绑定清理）。 */
   const resetLoginState = async (isAutoLogin = false) => {
-    // 1. 清理本地存储
+    // 1. 清理本地存储（只清当前 token 材料；活跃身份由 logout 收口；保留 loginHistory/各账号缓存/阅读位置）。
     if (!isAutoLogin) {
       // TODO 未来这里需要区分账号，切换不同的account；用不同的REFRESH_TOKEN调用
-      localStorage.removeItem('user')
       localStorage.removeItem('TOKEN')
       localStorage.removeItem('REFRESH_TOKEN')
     }
@@ -311,7 +344,15 @@ export const useLogin = () => {
           error instanceof Error ? error.message : String(error)
         )
       }
+      const initOrigin = isWeb() ? null : sessionBinding.value
       const userDetail: any = await getUserDetail()
+      // aichatoverview#395：迟到旧账号 user-detail 不得写入新作用域；初始化期间被退出/切号则丢弃。
+      if (!isWeb() && initOrigin && !isSessionCurrent(initOrigin)) {
+        throw new Error('登录代次已失效，丢弃旧任务')
+      }
+      if (!isWeb() && sessionBinding.value && userDetail?.uid && String(userDetail.uid) !== sessionBinding.value.uid) {
+        throw new Error('用户信息UID与认证归属不匹配')
+      }
       userStatusStore.stateId = userDetail.userStateId
       const account = {
         ...userDetail,
