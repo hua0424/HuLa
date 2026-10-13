@@ -1,10 +1,18 @@
-import { invokeScoped as invoke, listenBound as listen } from '@/services/sessionBinding'
-import type { UnlistenFn } from '@tauri-apps/api/event'
+import { invokeScoped as invoke, listenBound as listenBase } from '@/services/sessionBinding'
+import type { EventCallback, UnlistenFn } from '@tauri-apps/api/event'
 import { error, info, warn } from '@tauri-apps/plugin-log'
 import { useMitt } from '@/hooks/useMitt'
 import { MittEnum } from '@/enums'
 import { WsResponseMessageType } from '@/services/wsType'
 import { useContactStore } from '@/stores/contacts'
+
+// aichatoverview#402 真机取证探针：收集单次尝试的注册事件名（Tauri JS 侧不暴露
+// callbackId，以同 attempt 内注册序号代之；见完成日志 events 列表顺序）。
+let probeSink: ((event: string) => void) | null = null
+const listen = <T>(event: string, callback: EventCallback<T>): Promise<UnlistenFn> => {
+  probeSink?.(event)
+  return listenBase<T>(event, callback)
+}
 
 /// WebSocket 连接状态
 export enum ConnectionState {
@@ -40,49 +48,64 @@ export interface WebSocketEvent {
  */
 /**
  * 监听器管理器，类似 AbortController
+ *
+ * #402 清理确认语义：abort 只移除实际释放成功的监听，未确认（失败/超时）项
+ * 保留在集合内并随返回值上报上层；调用方不得复用已 abort 的 controller。
  */
-class ListenerController {
+export class ListenerController {
   private listeners: Set<UnlistenFn> = new Set()
   private isAborted = false
 
   add(unlisten: UnlistenFn): void {
     if (this.isAborted) {
-      // 如果已经中止，立即清理新添加的监听器
-      unlisten()
+      // 如果已经中止，立即清理新添加的监听器（结果仅记日志，不掩盖调用方错误）
+      try {
+        Promise.resolve()
+          .then(() => unlisten())
+          .catch((err) => {
+            error(`[ListenerController] 已中止后追加监听器清理失败: ${err}`)
+          })
+      } catch (err) {
+        error(`[ListenerController] 已中止后追加监听器清理失败: ${err}`)
+      }
       return
     }
     this.listeners.add(unlisten)
   }
 
-  async abort(): Promise<void> {
-    if (this.isAborted) return
+  /**
+   * 回滚本 controller 的全部监听。
+   * @returns 未确认清理的 unlisten 列表（失败/超时）。空数组 = 全部确认清理。
+   */
+  async abort(): Promise<UnlistenFn[]> {
+    if (this.isAborted) return [...this.listeners]
 
     this.isAborted = true
-    const cleanupPromises: Promise<void>[] = []
 
-    // 并行执行所有清理操作
-    for (const unlisten of this.listeners) {
-      cleanupPromises.push(
-        Promise.resolve()
-          .then(() => unlisten())
-          .catch((err) => {
-            error(`[ListenerController] 清理监听器失败: ${err}`)
-          })
-      )
+    // 逐个确认：只有实际释放成功的项才移除，失败/超时项保留并上报。
+    const results = await Promise.all(
+      [...this.listeners].map(async (unlisten) => {
+        try {
+          await Promise.race([
+            Promise.resolve().then(() => unlisten()),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('清理超时')), 5000))
+          ])
+          return { unlisten, ok: true }
+        } catch (err) {
+          error(`[ListenerController] 清理监听器失败: ${err}`)
+          return { unlisten, ok: false }
+        }
+      })
+    )
+
+    const unconfirmed = results.filter((r) => !r.ok).map((r) => r.unlisten)
+    this.listeners = new Set(unconfirmed)
+    if (unconfirmed.length > 0) {
+      warn(`[ListenerController] ${unconfirmed.length} 个监听器清理未确认，已保留`)
+    } else {
+      info(`[ListenerController] 已清理所有监听器`)
     }
-
-    // 等待所有清理完成（设置超时防止阻塞）
-    try {
-      await Promise.race([
-        Promise.all(cleanupPromises),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('清理超时')), 5000))
-      ])
-    } catch (err) {
-      warn(`[ListenerController] 部分监听器清理可能未完成: ${err}`)
-    }
-
-    this.listeners.clear()
-    info(`[ListenerController] 已清理所有监听器`)
+    return unconfirmed
   }
 
   get size(): number {
@@ -94,10 +117,16 @@ class ListenerController {
   }
 }
 
-class RustWebSocketClient {
+export class RustWebSocketClient {
   private listenerController: ListenerController = new ListenerController()
   // aichatoverview#349：业务监听幂等——重复 mount/MSG_INIT/重连不再重复注册 Tauri 监听。
   private businessListenersReady = false
+  // aichatoverview#402：单飞初始化——并发调用共享同一次尝试，不启动第二批注册。
+  private businessListenersPromise: Promise<void> | null = null
+  // aichatoverview#402：上次失败回滚后仍未确认清理的 unlisten，留待下次尝试先行释放。
+  private pendingCleanup: UnlistenFn[] = []
+  // aichatoverview#402：注册尝试序号（真机取证用探针字段）。
+  private setupAttemptSeq = 0
 
   constructor() {
     info('[RustWS] Rust WebSocket 客户端初始化')
@@ -246,9 +275,91 @@ class RustWebSocketClient {
   /**
    * 设置业务消息监听器
    * 监听 Rust 端发送的具体业务消息事件
+   *
+   * aichatoverview#402 单飞语义：首调用同步建立 in-flight 尝试并开始注册；
+   * 并发调用等待同一成功/失败，不启动第二批监听；顺序重复调用直接返回。
+   * 只有全部注册成功才置 ready；失败回滚确认后传播同一失败并允许重试。
    */
-  public async setupBusinessMessageListeners(): Promise<void> {
-    if (this.businessListenersReady) return
+  public setupBusinessMessageListeners(): Promise<void> {
+    if (this.businessListenersReady) return Promise.resolve()
+    const inflight = this.businessListenersPromise
+    if (inflight) return inflight
+    const attempt = this.runSetupAttempt()
+    this.businessListenersPromise = attempt
+    const clear = () => {
+      if (this.businessListenersPromise === attempt) this.businessListenersPromise = null
+    }
+    attempt.then(clear, clear)
+    return attempt
+  }
+
+  /**
+   * 单次注册尝试：先释放上次残留的未确认清理项（仍失败则拒绝本次尝试，
+   * 不注册新监听——阻止盲重试堆积幽灵监听），再执行全量注册。
+   */
+  private async runSetupAttempt(): Promise<void> {
+    const attempt = ++this.setupAttemptSeq
+    const startedAt = Date.now()
+    info(`[RustWS] 业务监听注册开始 attempt=${attempt}`)
+    await this.drainPendingCleanup(attempt)
+    const attemptEvents: string[] = []
+    probeSink = (event) => {
+      attemptEvents.push(event)
+    }
+    try {
+      await this.registerBusinessListeners()
+    } catch (err) {
+      probeSink = null
+      // 回滚本 attempt 已成功注册的监听；确认清理完成后换新 controller。
+      const unconfirmed = await this.listenerController.abort()
+      this.listenerController = new ListenerController()
+      if (unconfirmed.length > 0) {
+        this.pendingCleanup.push(...unconfirmed)
+        const msg = err instanceof Error ? err.message : String(err)
+        throw new Error(
+          `[RustWS] 业务监听注册失败 attempt=${attempt} 且 ${unconfirmed.length} 个监听回滚未确认（已保留，拒绝盲重试）: ${msg}`
+        )
+      }
+      throw err
+    }
+    probeSink = null
+    this.businessListenersReady = true
+    info(
+      `[RustWS] 业务监听注册完成 attempt=${attempt} listeners=${this.listenerController.size} costMs=${Date.now() - startedAt} events=[${attemptEvents.join(',')}]`
+    )
+  }
+
+  /**
+   * 释放上次失败残留的未确认清理项；仍有未确认则拒绝本次尝试。
+   */
+  private async drainPendingCleanup(attempt: number): Promise<void> {
+    if (this.pendingCleanup.length === 0) return
+    const pending = this.pendingCleanup
+    this.pendingCleanup = []
+    const stillUnconfirmed: UnlistenFn[] = []
+    for (const unlisten of pending) {
+      try {
+        await Promise.race([
+          Promise.resolve().then(() => unlisten()),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('清理超时')), 5000))
+        ])
+      } catch (err) {
+        error(`[ListenerController] 残留监听器清理仍失败: ${err}`)
+        stillUnconfirmed.push(unlisten)
+      }
+    }
+    if (stillUnconfirmed.length > 0) {
+      this.pendingCleanup.push(...stillUnconfirmed)
+      throw new Error(
+        `[RustWS] 业务监听注册拒绝 attempt=${attempt}：上次残留 ${stillUnconfirmed.length} 个监听清理仍未确认`
+      )
+    }
+  }
+
+  /**
+   * 全量业务监听注册体（无守卫；单飞/幂等由 setupBusinessMessageListeners 保证）。
+   */
+  private async registerBusinessListeners(): Promise<void> {
     const contactStore = useContactStore()
     this.listenerController.add(
       await listen('ws-login-success', (event: any) => {
@@ -553,7 +664,6 @@ class RustWebSocketClient {
         useMitt.emit(MittEnum.CONTACTS_SYNCED, event.payload)
       })
     )
-    this.businessListenersReady = true
   }
 }
 const isInTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
