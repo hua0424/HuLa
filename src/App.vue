@@ -145,6 +145,7 @@ useMitt.on(WsResponseMessageType.LOGIN_SUCCESS, async (data: LoginSuccessResType
   // 刚登录成功时同步当前/首个群聊的成员信息，避免消息显示“未知用户”
   await refreshActiveGroupMembers()
   await chatStore.reconcileThinkingAfterReconnect()
+  chatStore.startOnlineThinkingCalibration()
 })
 
 useMitt.on(WsResponseMessageType.MSG_RECALL, (data: RevokedMsgType) => {
@@ -646,6 +647,7 @@ const handleWebsocketEvent = async (event: any) => {
     // Rust 端已通过 schedule_post_reconnect_sync 调用 sync_messages，前端无需重复调用
     await chatStore.getSessionList(true)
     await chatStore.reconcileThinkingAfterReconnect()
+    chatStore.startOnlineThinkingCalibration()
 
     // 重连后同步当前/首个群聊成员信息，避免展示断网前的旧数据
     await refreshActiveGroupMembers()
@@ -670,6 +672,13 @@ const handleWebsocketEvent = async (event: any) => {
   }
 }
 
+// 在线思考校准：回前台立即按可见房间补一次，30s 节拍由 store 内单 timer 驱动
+const handleVisibilityForThinkingCalibration = () => {
+  if (document.visibilityState === 'visible') {
+    chatStore.startOnlineThinkingCalibration()
+    void chatStore.reconcileVisibleRoomThinking('foreground')
+  }
+}
 /**
  * iOS网络权限预请求
  * 在应用启动时发起一个轻量级网络请求，触发iOS的网络权限弹窗
@@ -707,6 +716,8 @@ onMounted(() => {
   }
   document.documentElement.dataset.theme = settingStore.themes.content
   window.addEventListener('dragstart', preventDrag)
+  // 在线思考校准：回前台立即按可见房间补一次，30s 节拍由 store 内单 timer 驱动
+  window.addEventListener('visibilitychange', handleVisibilityForThinkingCalibration)
 
   if (!isWeb()) {
     addListener(listenBound('websocket-event', handleWebsocketEvent), 'websocket-event')
@@ -756,6 +767,7 @@ onMounted(() => {
 onUnmounted(async () => {
   window.removeEventListener('contextmenu', preventGlobalContextMenu, false)
   window.removeEventListener('dragstart', preventDrag)
+  window.removeEventListener('visibilitychange', handleVisibilityForThinkingCalibration)
 
   // 只在桌面端的主窗口中清理全局快捷键
   if (isDesktop() && !isWeb() && appWindow.value?.label === 'home') {
