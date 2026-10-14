@@ -3289,19 +3289,13 @@ export const useChatStore = defineStore(
       void recoverMissingThinkingStart(end, key)
     }
 
-    /** Reconnect: repair a dropped END from authenticated exact-ID server state, never from latest room/run. */
-    const reconcileThinkingAfterReconnect = async () => {
-      // ponytail: at most 64 sequential GETs per reconnect; paginate only if >64 concurrent AI turns become real.
-      const binding = await captureAccount()
-      const epoch = accountEpoch
-      const pending = [...thinkingByTrigger.values()]
-        .flatMap((room) => [...room.values()].flat())
-        .filter((state) => state.status === 'pending')
-      const active = uniqBy([...thinkingStreams.values(), ...pending], (state) => state.thinkingId).slice(0, 64)
-      for (const state of active) {
-        if (!accountCurrent(binding, epoch)) return
+    /** Exact-ID reconcile core: only a precise owned server terminal completes; running/unknown stay. */
+    const reconcileThinkingStates = async (states: ThinkingState[], binding: SessionIdentity | null, epoch: number) => {
+      let completed = 0
+      for (const state of states) {
+        if (!accountCurrent(binding, epoch)) return completed
         const detail = await loadThinkingDetail(state.thinkingId, binding ?? undefined)
-        if (!accountCurrent(binding, epoch)) return
+        if (!accountCurrent(binding, epoch)) return completed
         if (
           findThinking(state.thinkingId) !== state ||
           !detail ||
@@ -3329,9 +3323,75 @@ export const useChatStore = defineStore(
             },
             true
           )
+          completed++
+          console.debug(
+            `[thinking-calibration] phase=calibrated-complete thinkingId=${state.thinkingId} roomId=${state.roomId}`
+          )
         }
       }
+      return completed
+    }
+
+    /** Reconnect: repair a dropped END from authenticated exact-ID server state, never from latest room/run. */
+    const reconcileThinkingAfterReconnect = async () => {
+      // ponytail: at most 64 sequential GETs per reconnect; paginate only if >64 concurrent AI turns become real.
+      const binding = await captureAccount()
+      const epoch = accountEpoch
+      const pending = [...thinkingByTrigger.values()]
+        .flatMap((room) => [...room.values()].flat())
+        .filter((state) => state.status === 'pending')
+      const active = uniqBy([...thinkingStreams.values(), ...pending], (state) => state.thinkingId).slice(0, 64)
+      await reconcileThinkingStates(active, binding, epoch)
       for (const id of [...pendingThinkingStarts.keys()]) await resolveCollidingStart(id, true)
+    }
+
+    // ponytail: one 30s timer + one in-flight cap reuse the exact-ID core; no per-card timers or new state machine.
+    const ONLINE_CALIBRATION_MS = 30_000
+    const ONLINE_CALIBRATION_MAX_IDS = 64
+    let calibrationTimer: ReturnType<typeof setInterval> | null = null
+    let calibrationInFlight = false
+    /** Visible-room online calibration: converges a dropped END while staying online. */
+    const reconcileVisibleRoomThinking = async (trigger = 'interval') => {
+      if (calibrationInFlight) return 0
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return 0
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return 0
+      const roomId = globalStore.currentSessionRoomId
+      if (!roomId) return 0
+      const bucket = thinkingByTrigger.get(roomId)
+      const candidates = uniqBy(
+        [
+          ...(bucket ? [...bucket.values()].flat() : []),
+          ...[...thinkingStreams.values()].filter((state) => state.roomId === roomId)
+        ],
+        (state) => state.thinkingId
+      )
+        .filter((state) => state.status === 'pending' || state.status === 'thinking')
+        .slice(0, ONLINE_CALIBRATION_MAX_IDS)
+      if (!candidates.length) return 0
+      calibrationInFlight = true
+      try {
+        const binding = await captureAccount().catch(() => null)
+        const epoch = accountEpoch
+        if (!binding && !isWeb()) return 0
+        if (!accountCurrent(binding, epoch) || globalStore.currentSessionRoomId !== roomId) return 0
+        const completed = await reconcileThinkingStates(candidates, binding, epoch)
+        console.debug(
+          `[thinking-calibration] phase=online-tick trigger=${trigger} roomId=${roomId} checked=${candidates.length} completed=${completed}`
+        )
+        return completed
+      } finally {
+        calibrationInFlight = false
+      }
+    }
+    const startOnlineThinkingCalibration = () => {
+      if (calibrationTimer) return
+      calibrationTimer = setInterval(() => {
+        void reconcileVisibleRoomThinking()
+      }, ONLINE_CALIBRATION_MS)
+    }
+    const stopOnlineThinkingCalibration = () => {
+      if (calibrationTimer) clearInterval(calibrationTimer)
+      calibrationTimer = null
     }
 
     /** 把 ThinkingState 归位到 thinkingByTrigger 的对应 triggerMsgId 桶 */
@@ -3672,6 +3732,9 @@ export const useChatStore = defineStore(
       startThinking,
       finalizeThinking,
       reconcileThinkingAfterReconnect,
+      reconcileVisibleRoomThinking,
+      startOnlineThinkingCalibration,
+      stopOnlineThinkingCalibration,
       clearThinking,
       loadThinkingByTriggerForMessages,
       markMessageAsAutoReply,
