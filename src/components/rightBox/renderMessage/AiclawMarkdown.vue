@@ -155,4 +155,9 @@ const handleClickCapture = (e: MouseEvent) => {
 .aiclaw-markdown :deep(img) {
   max-width: 100%;
 }
+/* #436：mermaid 图不撑破气泡：宽图按比例缩进容器（窄屏/移动端同样生效） */
+.aiclaw-markdown :deep(svg) {
+  max-width: 100%;
+  height: auto;
+}
 </style>

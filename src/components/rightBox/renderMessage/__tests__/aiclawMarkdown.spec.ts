@@ -225,3 +225,53 @@ describe('AiclawMarkdown 渲染与安全', () => {
     expect(container.exists()).toBe(true)
   })
 })
+
+describe('mermaid 图表与预览卡外开（#436）', () => {
+  const MERMAID_MD = '流程如下：\n\n```mermaid\ngraph TD\nA[开始] --> B[结束]\n```'
+
+  it('mermaid 已启用：isMermaidEnabled 为真（动态 loader，零静态依赖）', async () => {
+    const { isMermaidEnabled } = await import('markstream-vue')
+    expect(isMermaidEnabled()).toBe(true)
+  })
+
+  it('mermaid 围栏走图表块而非代码块：有 Mermaid 头与预览/源码切换', async () => {
+    const wrapper = mountText(makeBody(MERMAID_MD), { fromUserUid: AICLAW_UID })
+    await settleMarkdown()
+    const root = wrapper.find('[data-testid="aiclaw-markdown"]')
+    const header = root.find('.mermaid-block-header')
+    expect(header.exists()).toBe(true)
+    expect(header.text()).toContain('Mermaid')
+    // 预览/源码双模式按钮存在（桌面与移动共用同一组件链）
+    expect(header.text()).toContain('Preview')
+    expect(header.text()).toContain('Source')
+    // 人类消息不受影响：同内容仍是纯文本
+    const human = mountText(makeBody(MERMAID_MD), { fromUserUid: HUMAN_UID })
+    await settleMarkdown()
+    expect(human.find('.mermaid-block-header').exists()).toBe(false)
+    expect(human.text()).toContain('graph TD')
+  })
+
+  it('mermaid 异步成图：flowchart svg 落定（动态 import + 渲染全链路）', async () => {
+    const wrapper = mountText(makeBody(MERMAID_MD), { fromUserUid: AICLAW_UID })
+    let svgFound = false
+    for (let i = 0; i < 40 && !svgFound; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      await flushPromises()
+      const root = wrapper.find('[data-testid="aiclaw-markdown"]')
+      svgFound = root.find('svg[id^="mermaid-"]').exists() || /flowchart/.test(root.html())
+    }
+    expect(svgFound).toBe(true)
+  }, 30000)
+
+  it('预览卡点击走外部浏览器打开（下方整排，点击行为不变）', async () => {
+    const url = 'https://example.com/b'
+    const wrapper = mountText(makeBody(`看看 ${url}`, { [url]: { title: '标题B', description: '描述B', image: '' } }), {
+      fromUserUid: AICLAW_UID
+    })
+    await settleMarkdown()
+    const card = wrapper.find('.text-card')
+    expect(card.exists()).toBe(true)
+    await card.trigger('click')
+    expect(openExternalUrlMock).toHaveBeenCalledWith(url)
+  })
+})
