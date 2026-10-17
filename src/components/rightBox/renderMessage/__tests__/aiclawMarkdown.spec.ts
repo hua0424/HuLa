@@ -166,6 +166,16 @@ describe('分支判定（Text.vue）', () => {
     expect(cards.length).toBe(1)
     expect(cards[0].text()).toContain('示例')
   })
+
+  it('#436 回归：服务端 urlContentMap 为空时 AI 回复链接仍有兜底预览卡', async () => {
+    const url = 'https://example.com/md436'
+    // 服务端实查全历史均为 {}，aiclaw 分支不走 fragments，补卡必须同样触发
+    const wrapper = mountText(makeBody(`宽表见上，链接 ${url}`, {}), { fromUserUid: AICLAW_UID })
+    await settleMarkdown()
+    const cards = wrapper.findAll('.text-card')
+    expect(cards.length).toBe(1)
+    expect(cards[0].text()).toContain('链接')
+  })
 })
 
 describe('AiclawMarkdown 渲染与安全', () => {

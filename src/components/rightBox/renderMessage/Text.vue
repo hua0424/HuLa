@@ -141,7 +141,19 @@ const props = defineProps<{
 const isAiclawRendered = computed(() => !props.isStreaming && isAiclaw(props.fromUserUid))
 // 获取所有匹配的字符串
 const urlMap = props.body.urlContentMap || {}
-const keys = Object.keys(urlMap)
+// #436：服务端 urlContentMap 常为空（安洁 DM 全历史实查均为 {}），无 map 的链接由客户端兜底补卡。
+// aiclaw 分支不走 fragments，必须同样触发补卡，否则 AI 回复中的链接在正文下方没有预览卡。
+const ensureUrlCards = (raw: string): string[] => {
+  const matches = raw.match(URL_REGEX) || []
+  matches.forEach((m) => {
+    if (!urlMap[m]) {
+      urlMap[m] = { title: m, description: '链接', image: '' }
+    }
+  })
+  return Object.keys(urlMap)
+}
+// aiclaw 分支直接消费 keys（不经过 fragments），用 computed 保证补卡先行
+const keys = computed(() => ensureUrlCards((props.body.content || '').replace(/&nbsp;/g, ' ')))
 // 正则表达式常量用于匹配URL
 const URL_REGEX = /https?:\/\/[^\s<]+[^<.,:;"')\]\s]/g
 
@@ -186,21 +198,8 @@ const processLongUrls = computed(() => {
   let content = props.body.content || ''
   content = content.replace(/&nbsp;/g, '\u00A0')
 
-  return content.replace(URL_REGEX, (match, url) => {
-    // 如果urlMap中已有该链接的信息，添加到urlMap中
-    if (!urlMap[match] && url) {
-      urlMap[match] = {
-        title: url,
-        description: '链接',
-        image: ''
-      }
-      // 动态添加到keys中
-      if (!keys.includes(match)) {
-        keys.push(match)
-      }
-    }
-    return match
-  })
+  ensureUrlCards(content)
+  return content
 })
 
 // 使用匹配字符串创建动态正则表达式，并将文本拆分为片段数组
@@ -228,7 +227,7 @@ const fragments = computed(() => {
   })
 
   // 添加URL的标记
-  keys.forEach((key) => {
+  keys.value.forEach((key) => {
     let index = 0
     while ((index = content.indexOf(key, index)) !== -1) {
       markers.push({
