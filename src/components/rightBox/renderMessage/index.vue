@@ -49,7 +49,7 @@
         class="mr-3 select-none"
         :focusable="false"
         @click.stop />
-      <div class="flex items-start flex-1" :class="isMe ? 'flex-row-reverse' : ''">
+      <div class="flex items-start flex-1" :class="[isMe ? 'flex-row-reverse' : '', isMobile() ? 'min-w-0' : '']">
         <!-- 回复消息提示的箭头 -->
         <svg
           v-if="activeReply === message.message.id"
@@ -87,7 +87,11 @@
           <InfoPopover v-if="selectKey === message.message.id" :uid="fromUser.uid" />
         </n-popover>
 
-        <n-flex vertical :size="6" class="color-[--text-color] flex-1" :class="isMe ? 'items-end mr-10px' : ''">
+        <n-flex
+          vertical
+          :size="6"
+          class="color-[--text-color] flex-1"
+          :class="[isMe ? 'items-end mr-10px' : '', isMobile() ? 'min-w-0' : '']">
           <n-flex :size="6" align="center" :style="isMe ? 'flex-direction: row-reverse' : ''">
             <ContextMenu
               @select="$event.click(message, 'Main')"
@@ -166,7 +170,7 @@
             :data-key="isMe ? `U${message.message.id}` : `Q${message.message.id}`"
             :data-testid="isMe ? 'user-message' : 'assistant-message'"
             :aria-label="isMe ? '用户消息' : 'AI 回复'"
-            :class="[isMe ? 'items-end' : 'items-start', isMobile() ? 'w-full max-w-full' : '']"
+            :class="[isMe ? 'items-end' : 'items-start', isMobile() ? 'w-full max-w-full min-w-0' : '']"
             :style="{ '--bubble-max-width': bubbleMaxWidth }"
             @select="$event.click(message, 'Main')"
             :menu="handleItemType(message.message.type)"
