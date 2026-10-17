@@ -10,6 +10,25 @@
         <span class="streaming-cursor" />
       </template>
     </template>
+    <!-- aiclaw 完成态：整包 markdown 一次性渲染，预览卡移正文下方 -->
+    <template v-else-if="isAiclawRendered">
+      <AiclawMarkdown :content="body.content || ''" />
+      <div
+        v-for="key in keys"
+        :key="key"
+        rel="noopener noreferrer"
+        target="_blank"
+        class="text-card"
+        @click="openUrl(key)">
+        <div v-if="urlMap[key].image" class="text-card-image-wrapper">
+          <img class="text-card-image" :src="urlMap[key].image" @error="onImageLoadError" />
+        </div>
+        <div class="text-card-link-content">
+          <span class="text-14px line-clamp-1">{{ urlMap[key].title }}</span>
+          <span class="text-(12px [--chat-text-color]) mt-4px line-clamp-2">{{ urlMap[key].description }}</span>
+        </div>
+      </div>
+    </template>
     <!-- 正常模式：完整 fragment 解析 -->
     <template v-else v-for="(item, index) in fragments" :key="index">
       <n-popover
@@ -96,7 +115,9 @@ import { useI18n } from 'vue-i18n'
 import { openExternalUrl } from '@/hooks/useLinkSegments'
 import { useGroupStore } from '@/stores/group'
 import type { TextBody } from '@/services/types'
+import { isAiclaw } from '@/utils/AiclawUtils'
 import { isMobile } from '@/utils/PlatformConstants'
+import AiclawMarkdown from './AiclawMarkdown.vue'
 
 const { t } = useI18n()
 
@@ -113,7 +134,11 @@ const props = defineProps<{
   searchKeyword?: string
   historyMode?: boolean
   isStreaming?: boolean
+  fromUserUid?: string
 }>()
+
+// #435：仅 aiclaw 发送者完成态走 markdown；流式/人类消息维持原逻辑。
+const isAiclawRendered = computed(() => !props.isStreaming && isAiclaw(props.fromUserUid))
 // 获取所有匹配的字符串
 const urlMap = props.body.urlContentMap || {}
 const keys = Object.keys(urlMap)
