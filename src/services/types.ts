@@ -761,15 +761,6 @@ export type MsgReadUnReadCountType = {
 /** 支持的翻译服务提供商类型  */
 export type TranslateProvider = 'youdao' | 'tencent'
 
-/** AI模型 */
-export type AIModel = {
-  uid: string
-  type: 'Ollama' | 'OpenAI'
-  name: string
-  value: string
-  avatar: string
-}
-
 /** 修改用户基础信息的类型 */
 export type ModifyUserInfoType = {
   name: string

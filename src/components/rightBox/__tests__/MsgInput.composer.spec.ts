@@ -73,7 +73,6 @@ vi.mock('@/hooks/useMsgInput.ts', () => ({
   useMsgInput: () => ({
     inputKeyDown: inputKeyDownMock,
     handleAit: vi.fn(),
-    handleAI: vi.fn(),
     handleInput: vi.fn(),
     msgInput: ref(''),
     send: sendMock,
@@ -84,12 +83,9 @@ vi.mock('@/hooks/useMsgInput.ts', () => ({
     personList: ref([]),
     disabledSend: disabledSendRef,
     ait: ref(false),
-    aiDialogVisible: ref(false),
-    selectedAIKey: ref(''),
     chatKey: ref('Enter'),
     menuList: ref([]),
     selectedAitKey: ref(-1),
-    groupedAIModels: ref([]),
     updateSelectionRange: vi.fn(),
     focusOn: vi.fn(),
     getCursorSelectionRange: vi.fn()
@@ -152,7 +148,6 @@ const nButtonStub = {
 
 const mountInput = () =>
   mount(MsgInput, {
-    props: { isAIMode: false, isAIStreaming: false },
     global: {
       plugins: [i18n],
       stubs: {
@@ -187,10 +182,10 @@ const getInputDom = (wrapper: ReturnType<typeof mountInput>) =>
 
 describe('#45 空消息内联错误', () => {
   // 关键：测「可达触发」——不直调 handleDesktopSend，而是经真实 send-button 点击 / 回车，
-  // 且让 disabledSend=true（模拟真实空内容），验证按钮在非 AI 下仍可点、composer-error 可达。
-  it('门：非 AI 空输入时 send-button 不被 disabledSend 禁用（修复前因被禁用→composer-error 不可达）', () => {
+  // 且让 disabledSend=true（模拟真实空内容），验证按钮在空内容下仍可点、composer-error 可达。
+  it('门：空输入时 send-button 不被 disabledSend 禁用（修复前因被禁用→composer-error 不可达）', () => {
     disabledSendRef.value = true // 真实空内容时 disabledSend=true
-    const wrapper = mountInput() // props.isAIMode=false
+    const wrapper = mountInput()
     const btn = wrapper.get('[data-testid="send-button"]')
     expect(btn.attributes('disabled')).toBeUndefined()
   })
@@ -252,5 +247,24 @@ describe('#45 空消息内联错误', () => {
     await wrapper.get('[data-testid="message-input"]').trigger('input')
     await nextTick()
     expect(vm.composerError).toBe('')
+  })
+})
+
+describe('#445 AI 模式退役（桌面发送恒走 IM）', () => {
+  it('发送按钮恒为发送，不再有停止思考分支', () => {
+    const wrapper = mountInput()
+    const label = wrapper.get('[data-testid="send-button"]').text()
+    expect(label).toContain('发送')
+    expect(label).not.toContain('停止思考')
+  })
+
+  it('非空发送走 IM send，不触发 send-ai/stop-ai 事件', async () => {
+    const wrapper = mountInput()
+    getInputDom(wrapper).textContent = 'hello'
+    await wrapper.get('[data-testid="send-button"]').trigger('click')
+    await flushPromises()
+    expect(sendMock).toHaveBeenCalled()
+    expect(wrapper.emitted('send-ai')).toBeUndefined()
+    expect(wrapper.emitted('stop-ai')).toBeUndefined()
   })
 })

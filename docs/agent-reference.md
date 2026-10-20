@@ -112,7 +112,7 @@ Per-platform Tauri config: `src-tauri/tauri.conf.json` is the base; `tauri.{wind
 
 ## Frontend structure (`src/`)
 
-State is a large set of Pinia **setup-stores** in `src/stores/` (`chat, `contacts`, `group`, `user`, `ws`, `userStatus`, `initialSync`, `cached`, `session*`, …). Other key dirs: `services/` (WS + Tauri bridges, i18n, fingerprint, map/translate APIs), `strategy/` (`MessageStrategy.ts` / `TriggerStrategy.ts` — message-type and @-trigger handling), `hooks/`, `views/`, `mobile/` (mobile-only views, alias `#`), `components/`, `layout/`, `workers/`.
+State is a large set of Pinia **setup-stores** in `src/stores/` (`chat, `contacts`, `group`, `user`, `ws`, `userStatus`, `initialSync`, `cached`, `session*`, …). Other key dirs: `services/` (WS + Tauri bridges, i18n, fingerprint, map/translate APIs), `strategy/` (`MessageStrategy.ts` — message-type handling), `hooks/` (`useTrigger.ts` — @/topic trigger handling), `views/`, `mobile/` (mobile-only views, alias `#`), `components/`, `layout/`, `workers/`.
 
 ### Pinia patterns
 

@@ -480,7 +480,6 @@ export enum MessageStatusEnum {
 /** 触发类型枚举 */
 export enum TriggerEnum {
   MENTION = '@',
-  AI = '/',
   TOPIC = '#'
 }
 
