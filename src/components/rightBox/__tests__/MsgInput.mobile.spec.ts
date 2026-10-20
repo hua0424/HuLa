@@ -49,27 +49,26 @@ vi.mock('@/hooks/useCommon.ts', () => ({
   })
 }))
 
+// --- useMsgInput：共享可观测的 send，供移动端发送行为断言 ---
+const mobileSendMock = vi.fn().mockResolvedValue(undefined)
+const mobileDisabledSendRef = ref(false)
 vi.mock('@/hooks/useMsgInput.ts', () => ({
   useMsgInput: () => ({
     inputKeyDown: vi.fn(),
     handleAit: vi.fn(),
-    handleAI: vi.fn(),
     handleInput: vi.fn(),
     msgInput: ref(''),
-    send: vi.fn().mockResolvedValue(undefined),
+    send: mobileSendMock,
     sendLocationDirect: vi.fn(),
     sendFilesDirect: vi.fn(),
     sendVoiceDirect: vi.fn(),
     sendEmojiDirect: vi.fn(),
     personList: ref([]),
-    disabledSend: ref(false),
+    disabledSend: mobileDisabledSendRef,
     ait: ref(false),
-    aiDialogVisible: ref(false),
-    selectedAIKey: ref(''),
     chatKey: ref('Enter'),
     menuList: ref([]),
     selectedAitKey: ref(-1),
-    groupedAIModels: ref([]),
     updateSelectionRange: vi.fn(),
     focusOn: vi.fn(),
     getCursorSelectionRange: vi.fn()
@@ -124,7 +123,6 @@ const nButtonStub = {
 
 const mountMobileInput = () =>
   mount(MsgInput, {
-    props: { isAIMode: false, isAIStreaming: false },
     global: {
       plugins: [i18n],
       stubs: {
@@ -163,5 +161,33 @@ describe('#155 移动端 MsgInput testid', () => {
     vm.msgInput = 'hello'
     await nextTick()
     expect(wrapper.find('[data-testid="mobile-send-button"]').exists()).toBe(true)
+  })
+})
+
+describe('#445 移动端发送走 IM（AI 模式已退役）', () => {
+  it('有内容点击移动发送按钮 → 调用 IM send，不触发 send-ai/stop-ai', async () => {
+    const wrapper = mountMobileInput()
+    const inputEl = wrapper.find('#message-input').element as HTMLElement
+    inputEl.textContent = 'hello'
+    const vm = wrapper.vm as any
+    vm.msgInput = 'hello'
+    await nextTick()
+    await wrapper.get('[data-testid="mobile-send-button"]').trigger('click')
+    expect(mobileSendMock).toHaveBeenCalled()
+    expect(wrapper.emitted('send-ai')).toBeUndefined()
+    expect(wrapper.emitted('stop-ai')).toBeUndefined()
+  })
+
+  it('空内容点击移动发送按钮 → 不发送并弹全局提示', async () => {
+    const wrapper = mountMobileInput()
+    const inputEl = wrapper.find('#message-input').element as HTMLElement
+    inputEl.textContent = ''
+    const vm = wrapper.vm as any
+    vm.msgInput = 'not-empty-so-button-renders'
+    await nextTick()
+    mobileDisabledSendRef.value = false
+    await wrapper.get('[data-testid="mobile-send-button"]').trigger('click')
+    expect(mobileSendMock).not.toHaveBeenCalled()
+    expect((window as any).$message.warning).toHaveBeenCalled()
   })
 })

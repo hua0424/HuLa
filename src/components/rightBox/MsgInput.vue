@@ -79,10 +79,9 @@
               data-testid="send-button"
               aria-label="发送"
               color="#13987f"
-              :disabled="props.isAIMode ? (props.isAIStreaming ? false : disabledSend) : false"
               class="w-65px"
               @click="handleDesktopSend">
-              {{ props.isAIMode && props.isAIStreaming ? '停止思考' : t('editor.send') }}
+              {{ t('editor.send') }}
             </n-button>
             <n-button color="#13987f" class="p-[0_6px]">
               <template #icon>
@@ -164,42 +163,6 @@
           </n-virtual-list>
         </div>
 
-        <!-- / 提及框  -->
-        <div
-          v-if="aiDialogVisible && activeItem?.type === RoomTypeEnum.GROUP && groupedAIModels.length > 0"
-          class="AI-options">
-          <n-virtual-list
-            ref="virtualListInst-AI"
-            style="max-height: 180px"
-            :item-size="36"
-            :items="groupedAIModels"
-            v-model:selectedKey="selectedAIKey">
-            <template #default="{ item }">
-              <n-flex
-                @mouseover="() => (selectedAIKey = item.uid)"
-                :class="{ active: selectedAIKey === item.uid }"
-                @click="handleAI(item)"
-                align="center"
-                class="AI-item">
-                <n-flex align="center" justify="space-between" class="w-full pr-6px">
-                  <n-flex align="center">
-                    <img class="size-18px object-contain" :src="item.avatar" alt="" />
-                    <p class="text-(14px [--chat-text-color])">{{ item.name }}</p>
-                  </n-flex>
-
-                  <n-flex align="center" :size="6">
-                    <div
-                      class="ml-6px p-[4px_8px] size-fit bg-[--bate-bg] rounded-6px text-(11px [--bate-color] center)">
-                      Beta
-                    </div>
-                    <n-tag size="small" class="text-10px" :bordered="false" type="success">128k</n-tag>
-                  </n-flex>
-                </n-flex>
-              </n-flex>
-            </template>
-          </n-virtual-list>
-        </div>
-
         <div
           v-if="isMobile()"
           class="grid gap-2 h-2.5rem items-center"
@@ -221,10 +184,10 @@
                 data-testid="mobile-send-button"
                 aria-label="发送"
                 color="#13987f"
-                :disabled="props.isAIMode && props.isAIStreaming ? false : disabledSend"
+                :disabled="disabledSend"
                 class="w-3rem h-full"
                 @click="handleMobileSend">
-                {{ props.isAIMode && props.isAIStreaming ? '停止思考' : t('editor.send') }}
+                {{ t('editor.send') }}
               </n-button>
             </n-button-group>
           </div>
@@ -272,16 +235,6 @@ import { MobilePanelStateEnum } from '@/enums'
 import { useI18n, I18nT } from 'vue-i18n'
 import type { UploadFile } from '@/utils/FileType'
 
-interface Props {
-  isAIMode?: boolean
-  isAIStreaming?: boolean
-}
-
-const props = withDefaults(defineProps<Props>(), {
-  isAIMode: false,
-  isAIStreaming: false
-})
-
 const { t } = useI18n()
 const appWindow = isWeb() ? null : WebviewWindow.getCurrent()
 const settingStore = useSettingStore()
@@ -296,8 +249,6 @@ const gloabalStore = useGlobalStore()
 const { currentSession: activeItem } = storeToRefs(gloabalStore)
 /** ait 虚拟列表 */
 const virtualListInstAit = useTemplateRef<VirtualListInst>('virtualListInst-ait')
-/** AI 虚拟列表 */
-const virtualListInstAI = useTemplateRef<VirtualListInst>('virtualListInst-AI')
 // 录音模式状态
 const isVoiceMode = ref(false)
 const groupStore = useGroupStore()
@@ -314,7 +265,6 @@ const pendingFiles = ref<UploadFile[]>([])
 const {
   inputKeyDown,
   handleAit,
-  handleAI,
   handleInput,
   msgInput,
   send,
@@ -325,12 +275,9 @@ const {
   personList,
   disabledSend,
   ait,
-  aiDialogVisible,
-  selectedAIKey,
   chatKey,
   menuList,
   selectedAitKey,
-  groupedAIModels,
   updateSelectionRange,
   focusOn,
   getCursorSelectionRange
@@ -379,14 +326,6 @@ watch(personList, (newList) => {
   }
 })
 
-// /** 当AI列表发生变化的时候始终select第一个 */
-// watch(groupedAIModels, (newList) => {
-//   if (newList.length > 0) {
-//     /** 先设置滚动条滚动到第一个 */
-//     virtualListInstAI.value?.scrollTo({ key: newList[0].uid })
-//     selectedAIKey.value = newList[0].uid
-//   }
-// })
 const handleInternalInput = (e: Event) => {
   handleInput(e)
   if (getInputContent().trim()) composerError.value = ''
@@ -488,10 +427,6 @@ interface ClickState {
   panelState: MobilePanelStateEnum
 }
 
-interface AISendData {
-  content: string
-}
-
 /**
  * 自定义事件
  * clickMore: 点击更多按钮
@@ -505,8 +440,6 @@ const selfEmitter = defineEmits<{
   (e: 'customFocus', data: ClickState): void
   (e: 'send', data: ClickState): void
   (e: 'input', event: Event): void
-  (e: 'send-ai', data: AISendData): void
-  (e: 'stop-ai'): void
 }>()
 
 /** 设置聚焦状态 */
@@ -581,36 +514,14 @@ const getInputContent = (): string => {
   return ''
 }
 
-/**
- * 判断逻辑：
- * 1. 如果有选中的AI模型 -> AI发送 [暂不实现]
- * 2. 如果当前是AI对话模式 -> AI发送
- * 3. 默认 -> IM发送
- */
-const determineSendType = (): 'ai' | 'im' => {
-  if (props.isAIMode) {
-    return 'ai'
-  }
-  return 'im'
-}
-
 // 手机端发送逻辑
 const handleMobileSend = async () => {
-  const isAi = determineSendType() === 'ai'
-  if (isAi && props.isAIStreaming) {
-    selfEmitter('stop-ai')
-    return
-  }
   const content = getInputContent()
   if (!content.trim()) {
     window.$message.warning('请输入消息内容')
     return
   }
-  if (isAi) {
-    await handleAISend()
-  } else {
-    await send()
-  }
+  await send()
 
   // 发送后不关闭面板，保持当前状态
   selfEmitter('send', {
@@ -623,70 +534,27 @@ const handleMobileSend = async () => {
   }
 }
 
-// 清空输入框
-const clearInput = () => {
-  if (messageInputDom.value) {
-    messageInputDom.value.textContent = ''
-    // 触发输入事件更新状态
-    const event = new Event('input', { bubbles: true })
-    messageInputDom.value.dispatchEvent(event)
-  }
-}
-
-// AI发送逻辑
-const handleAISend = async () => {
-  const content = getInputContent()
-  if (!content.trim()) {
-    window.$message.warning('请输入消息内容')
-    return
-  }
-
-  selfEmitter('send-ai', {
-    content: content
-  })
-  clearInput()
-}
-
 // 桌面端发送逻辑
 const handleDesktopSend = async () => {
-  const isAi = determineSendType() === 'ai'
-  if (isAi && props.isAIStreaming) {
-    selfEmitter('stop-ai')
-    return
-  }
   const content = getInputContent()
   if (!content.trim()) {
     composerError.value = '不能发送空消息'
     return
   }
   composerError.value = ''
-  if (isAi) {
-    await handleAISend()
-  } else {
-    await send()
-  }
+  await send()
 }
 
 const handleEnterKey = (e: KeyboardEvent) => {
-  if (determineSendType() === 'ai') {
+  // #45: 桌面空消息回车走内联错误（与发送按钮一致），不再静默早返回
+  if (!getInputContent().trim()) {
     e.preventDefault()
     e.stopPropagation()
-    if (props.isAIStreaming) {
-      selfEmitter('stop-ai')
-      return
-    }
-    handleAISend()
-  } else {
-    // #45: 桌面非 AI 空消息回车也走内联错误（与发送按钮一致），不再静默早返回
-    if (!getInputContent().trim()) {
-      e.preventDefault()
-      e.stopPropagation()
-      composerError.value = '不能发送空消息'
-      return
-    }
-    composerError.value = ''
-    inputKeyDown(e)
+    composerError.value = '不能发送空消息'
+    return
   }
+  composerError.value = ''
+  inputKeyDown(e)
 }
 
 /** 监听移动端关闭面板 */
@@ -734,27 +602,17 @@ onMounted(async () => {
         handleAit(item)
       }
     }
-    // } else if (aiDialogVisible.value && Number(selectedAIKey.value) > -1) {
-    //   const item = groupedAIModels.value.find((item) => item.uid === selectedAIKey.value)
-    //   if (item) {
-    //     handleAI(item)
-    //   }
-    // }
   })
   onKeyStroke('ArrowUp', (e) => {
     e.preventDefault()
     if (ait.value) {
       handleAitKeyChange(-1, personList, virtualListInstAit.value!, selectedAitKey)
-    } else if (aiDialogVisible.value) {
-      handleAitKeyChange(-1, groupedAIModels, virtualListInstAI.value!, selectedAIKey)
     }
   })
   onKeyStroke('ArrowDown', (e) => {
     e.preventDefault()
     if (ait.value) {
       handleAitKeyChange(1, personList, virtualListInstAit.value!, selectedAitKey)
-    } else if (aiDialogVisible.value) {
-      handleAitKeyChange(1, groupedAIModels, virtualListInstAI.value!, selectedAIKey)
     }
   })
   // TODO: 暂时已经关闭了独立窗口聊天功能
@@ -811,15 +669,6 @@ onUnmounted(() => {
     removeMobileClosePanel()
   }
 })
-
-watch(
-  () => props.isAIMode,
-  (newValue) => {
-    if (!newValue) {
-      selectedAIKey.value = null
-    }
-  }
-)
 </script>
 
 <style scoped lang="scss">
