@@ -42,7 +42,6 @@ vi.mock('@/hooks/useMsgInput.ts', () => ({
   useMsgInput: () => ({
     inputKeyDown: vi.fn(),
     handleAit: vi.fn(),
-    handleAI: vi.fn(),
     handleInput: vi.fn(),
     msgInput: ref(''),
     send: vi.fn().mockResolvedValue(undefined),
@@ -53,12 +52,9 @@ vi.mock('@/hooks/useMsgInput.ts', () => ({
     personList: ref([]),
     disabledSend: ref(false),
     ait: ref(false),
-    aiDialogVisible: ref(false),
-    selectedAIKey: ref(''),
     chatKey: ref('Enter'),
     menuList: ref([]),
     selectedAitKey: ref(-1),
-    groupedAIModels: ref([]),
     updateSelectionRange: vi.fn(),
     focusOn: vi.fn(),
     getCursorSelectionRange: vi.fn()
