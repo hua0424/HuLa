@@ -83,6 +83,24 @@ const mountForm = () =>
     }
   })
 
+// #456 A10：保存/加载在途时离开页面，旧结果不得改写列表、不得发过时完成提示
+const mountWithStubbedForm = () =>
+  mount(AiclawGroupSettings, {
+    global: {
+      plugins: [i18n],
+      stubs: {
+        AutoFixHeightPage: { template: '<div><slot name="header" /><slot name="container" /></div>' },
+        HeaderBar: true,
+        AiclawGroupConfigForm: {
+          name: 'AiclawGroupConfigFormStub',
+          template: '<div data-testid="aiclaw-group-config-form" />',
+          props: ['config', 'saving', 'adapterType', 'defaultWorkspaceDir'],
+          emits: ['save']
+        }
+      }
+    }
+  })
+
 // #51 判别守卫：vitest（happy-dom）里 vue-i18n 对非法 linked 格式不抛、只把
 // 编译错误打到 console.error 并回退原串——所以仅靠 label 文本断言会假绿（裸 @ 时
 // 标签照样渲染出原串）。捕获 console.error 才能真正区分裸 @ 与已转义 @。
@@ -171,23 +189,6 @@ describe('P2：表单保存 approved=false 后同步本地列表立即刷新徽�
     ])
   })
 
-  const mountWithStubbedForm = () =>
-    mount(AiclawGroupSettings, {
-      global: {
-        plugins: [i18n],
-        stubs: {
-          AutoFixHeightPage: { template: '<div><slot name="header" /><slot name="container" /></div>' },
-          HeaderBar: true,
-          AiclawGroupConfigForm: {
-            name: 'AiclawGroupConfigFormStub',
-            template: '<div data-testid="aiclaw-group-config-form" />',
-            props: ['config', 'saving', 'adapterType', 'defaultWorkspaceDir'],
-            emits: ['save']
-          }
-        }
-      }
-    })
-
   it('表单保存 approved=false 后重载配置并同步列表，立即显示未激活徽章', async () => {
     const wrapper = mountWithStubbedForm()
     await flushPromises()
@@ -268,5 +269,63 @@ describe('AiclawGroupSettings 群配置表单（S7 回归锁 + #51 i18n @ 转义
     expect(html).not.toContain('short_reply')
     expect(html).not.toContain('short-reply')
     expect(wrapper.text()).not.toContain('简短回复')
+  })
+})
+
+describe('#456 A10：离开页面后旧加载/旧保存结果不改写列表、不发过时提示', () => {
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((r) => {
+      resolve = r
+    })
+    return { promise, resolve }
+  }
+
+  let successSpy: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getAiclawGroupConfigListMock.mockReturnValue([inactiveConfig])
+    successSpy = vi.fn()
+    ;(window as unknown as { $message: unknown }).$message = { success: successSpy, error: vi.fn() }
+  })
+
+  afterEach(() => {
+    delete (window as unknown as { $message?: unknown }).$message
+  })
+
+  it('配置加载在途时卸载：同账号数据仍可进共享缓存，但不得改写已卸载页面的列表', async () => {
+    const pending = deferred<boolean>()
+    loadAiclawGroupConfigsMock.mockReturnValue(pending.promise)
+
+    const wrapper = mountForm()
+    await flushPromises()
+    expect(loadAiclawGroupConfigsMock).toHaveBeenCalledWith(1001)
+
+    wrapper.unmount()
+    pending.resolve(true)
+    await flushPromises()
+
+    expect(getAiclawGroupConfigListMock).not.toHaveBeenCalled()
+  })
+
+  it('保存在途时卸载：不发过时的保存成功提示', async () => {
+    const pending = deferred<boolean>()
+    saveAiclawGroupConfigMock.mockReturnValue(pending.promise)
+
+    const wrapper = mountWithStubbedForm()
+    await flushPromises()
+    const forms = wrapper.findAllComponents({ name: 'AiclawGroupConfigFormStub' })
+    expect(forms).toHaveLength(1)
+
+    await forms[0].vm.$emit('save', { ...inactiveConfig })
+    await flushPromises()
+    expect(saveAiclawGroupConfigMock).toHaveBeenCalled()
+
+    wrapper.unmount()
+    pending.resolve(true)
+    await flushPromises()
+
+    expect(successSpy).not.toHaveBeenCalled()
   })
 })

@@ -91,7 +91,10 @@ const buildDefaultConfig = (uid: string, adapterType?: string) => ({
   workspaceDir: isDirBasedAdapter(adapterType) ? buildDefaultWorkspaceDir(uid, props.account) : undefined
 })
 
+// #456 A10/A12：弹窗可被重开/换 aiclaw 重载，旧加载不得改写新一轮的结果与错误态
+let loadSeq = 0
 const loadItems = async () => {
+  const seq = ++loadSeq
   savingUid.value = null
   loadError.value = false
   if (props.aiclawItems.length === 0) {
@@ -112,9 +115,11 @@ const loadItems = async () => {
 
     // REQ-016 #195：单数版只查当前群——复数版会被 userListMap 残留房间的陈旧校验失败连坐
     const result: typeof items.value = []
+    let failed = false
     for (const item of props.aiclawItems) {
-      const ok = await chatStore.loadAiclawGroupConfig(Number(item.uid), props.roomId)
-      if (!ok) loadError.value = true
+      // #456 A12：批量取数是后台场景，走静默版；失败由下方 loadError 内联提示+重试入口给出
+      const ok = await chatStore.loadAiclawGroupConfigDetail(Number(item.uid), props.roomId)
+      if (!ok) failed = true
       const matched = chatStore.getAiclawGroupConfig(Number(item.uid), props.roomId)
       result.push({
         ...item,
@@ -124,9 +129,11 @@ const loadItems = async () => {
           : { ...buildDefaultConfig(item.uid, item.adapterType), account }
       })
     }
+    if (seq !== loadSeq) return
+    loadError.value = loadError.value || failed
     items.value = result
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -152,7 +159,7 @@ const handleSave = async (
     console.error('[AiclawBatchGroupConfigModal] Failed to save config:', error)
     window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
   } finally {
-    savingUid.value = null
+    if (savingUid.value === uid) savingUid.value = null
   }
 }
 </script>

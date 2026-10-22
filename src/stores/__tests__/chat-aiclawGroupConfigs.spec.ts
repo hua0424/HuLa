@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  * 每个失败房间都弹全局 toast = 误报风暴。单房间请求必须 showError:false，由调用方按返回
  * boolean 自行决定提示，且单房间失败不影响其余房间入库。
  */
-
 vi.hoisted(() => {
   class WorkerStub {
     onerror: ((e: unknown) => void) | null = null
@@ -96,6 +95,7 @@ vi.mock('@/stores/sessionUnread', () => ({
 }))
 
 import { useChatStore } from '@/stores/chat'
+import { sessionBinding } from '@/services/sessionBinding'
 
 describe('chatStore.loadAiclawGroupConfigs（REQ-016 #196 F5 复数版静默）', () => {
   beforeEach(() => {
@@ -179,5 +179,217 @@ describe('chatStore 单房间配置读写（#210 二期：事件驱动收敛的�
 
     expect(chatStore.getAiclawGroupConfig(1001, 'room-1')).toBeUndefined()
     expect(chatStore.getAiclawGroupConfigList(1001).map((c) => c.roomId)).toEqual(['room-2'])
+  })
+})
+
+/**
+ * #456 群配置读取收敛与并发有效性保护。
+ * 全部走真实 store 的公开读取/更新/移除入口，用受控 Promise 决定底层响应顺序，
+ * 断言「请求次数」与「最终状态」——不 mock 整个 store、不耦合私有 Map/版本实现。
+ */
+describe('chatStore 群配置读取收敛（#456）', () => {
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+  /** 等到 imRequest 真的发出（此刻本次读取的版本号/守卫都已捕获，后续失效必然生效） */
+  const waitForRequest = async (times: number) => {
+    await vi.waitFor(() => expect(imRequestMock).toHaveBeenCalledTimes(times))
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    imRequestMock.mockReset()
+    groupStoreMocks.getRoomIdsByUid.mockReset().mockReturnValue(['1', '2', '3'])
+    groupStoreMocks.addGroupDetail.mockReset().mockResolvedValue(undefined)
+    groupStoreMocks.getGroupDetail.mockReset().mockReturnValue(undefined)
+    // 重置账号上下文（watch 会顺带把 accountEpoch 推进一位，不影响断言）
+    sessionBinding.value = null
+  })
+
+  it('A1：同键「基础加载」与「详情加载」并发时底层配置请求只发一次', async () => {
+    const response = deferred<Record<string, unknown>>()
+    imRequestMock.mockReturnValue(response.promise)
+
+    const chatStore = useChatStore()
+    // 两个入口同时发起：不能 await 第一个，否则就变成串行了
+    const active = chatStore.loadAiclawGroupConfig(1001, '1')
+    const detail = chatStore.loadAiclawGroupConfigDetail(1001, '1')
+    await waitForRequest(1)
+
+    response.resolve({ roomId: '1', rateLimitPerMinute: 7, dailyLimit: 70, respondToAi: true, mentionRequired: false })
+
+    // 入口语义保留：主动版与静默版都拿到「成功」
+    await expect(active).resolves.toBe(true)
+    await expect(detail).resolves.toBe(true)
+    expect(imRequestMock).toHaveBeenCalledTimes(1)
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toMatchObject({ rateLimitPerMinute: 7, dailyLimit: 70 })
+  })
+
+  it('A2：不同助理/不同群并发读取不合并，结果各归各键', async () => {
+    imRequestMock.mockResolvedValue({ roomId: '1', rateLimitPerMinute: 7 })
+
+    const chatStore = useChatStore()
+    await Promise.all([
+      chatStore.loadAiclawGroupConfigDetail(1001, '1'),
+      chatStore.loadAiclawGroupConfigDetail(1002, '1'),
+      chatStore.loadAiclawGroupConfigDetail(1001, '2')
+    ])
+
+    expect(imRequestMock).toHaveBeenCalledTimes(3)
+    expect(imRequestMock.mock.calls.map((call) => call[0].params)).toEqual([
+      { aiclawUid: 1001, roomId: 1 },
+      { aiclawUid: 1002, roomId: 1 },
+      { aiclawUid: 1001, roomId: 2 }
+    ])
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toBeTruthy()
+    expect(chatStore.getAiclawGroupConfig(1002, '1')).toBeTruthy()
+    expect(chatStore.getAiclawGroupConfig(1001, '2')).toBeTruthy()
+  })
+
+  it('A3：在途状态用完即释放——失败可重试，成功也不做永久读取屏障', async () => {
+    imRequestMock
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce({ roomId: '1', rateLimitPerMinute: 7 })
+      .mockResolvedValueOnce({ roomId: '1', rateLimitPerMinute: 9 })
+
+    const chatStore = useChatStore()
+    await expect(chatStore.loadAiclawGroupConfigDetail(1001, '1')).resolves.toBe(false)
+    // 失败后重试必须重新发请求（在途记录已释放）
+    await expect(chatStore.loadAiclawGroupConfigDetail(1001, '1')).resolves.toBe(true)
+    // 成功后再读同样重新取数：缓存不是「一次读取永久有效」的屏障
+    await expect(chatStore.loadAiclawGroupConfigDetail(1001, '1')).resolves.toBe(true)
+    expect(imRequestMock).toHaveBeenCalledTimes(3)
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toMatchObject({ rateLimitPerMinute: 9 })
+  })
+
+  it('A5：WS 更新后，先前发起的旧读取不得覆盖新状态', async () => {
+    const response = deferred<Record<string, unknown>>()
+    imRequestMock.mockReturnValue(response.promise)
+
+    const chatStore = useChatStore()
+    const stale = chatStore.loadAiclawGroupConfigDetail(1001, '1')
+    await waitForRequest(1)
+
+    // WS 广播先到：缓存换成新值
+    chatStore.updateAiclawGroupConfig(1001, 1, {
+      rateLimitPerMinute: 99,
+      dailyLimit: 990,
+      respondToAi: false,
+      mentionRequired: true
+    } as never)
+
+    // 旧读取后到，带着旧数据
+    response.resolve({ roomId: '1', rateLimitPerMinute: 7 })
+    await expect(stale).resolves.toBe(false)
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toMatchObject({ rateLimitPerMinute: 99, dailyLimit: 990 })
+  })
+
+  it('A6：成员移除后，在途旧读取不得把配置复活', async () => {
+    const response = deferred<Record<string, unknown>>()
+    imRequestMock.mockReturnValue(response.promise)
+
+    const chatStore = useChatStore()
+    const stale = chatStore.loadAiclawGroupConfigDetail(1001, '1')
+    await waitForRequest(1)
+
+    chatStore.removeAiclawGroupConfig(1001, '1')
+    response.resolve({ roomId: '1', rateLimitPerMinute: 7 })
+
+    await expect(stale).resolves.toBe(false)
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toBeUndefined()
+  })
+
+  it('A7：旧请求结束不清掉新请求的在途记录，也不破坏后续合并', async () => {
+    const first = deferred<Record<string, unknown>>()
+    const second = deferred<Record<string, unknown>>()
+    imRequestMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+
+    const chatStore = useChatStore()
+    const oldRead = chatStore.loadAiclawGroupConfigDetail(1001, '1')
+    await waitForRequest(1)
+
+    // 新数据到达 → 旧读取失去提交资格并解除合并
+    chatStore.updateAiclawGroupConfig(1001, 1, { rateLimitPerMinute: 99 } as never)
+    const newRead = chatStore.loadAiclawGroupConfigDetail(1001, '1')
+    await waitForRequest(2)
+
+    first.resolve({ roomId: '1', rateLimitPerMinute: 7 })
+    await expect(oldRead).resolves.toBe(false)
+
+    // 旧请求 settle 后，新请求的在途记录仍可被第三个读取复用
+    const thirdRead = chatStore.loadAiclawGroupConfigDetail(1001, '1')
+    expect(imRequestMock).toHaveBeenCalledTimes(2)
+
+    second.resolve({ roomId: '1', rateLimitPerMinute: 8 })
+    await expect(newRead).resolves.toBe(true)
+    await expect(thirdRead).resolves.toBe(true)
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toMatchObject({ rateLimitPerMinute: 8 })
+  })
+
+  it('A8：配置已回、补群详情期间切账号 → 旧配置不提交，也不当作普通补全失败吞掉', async () => {
+    const enrichment = deferred<void>()
+    groupStoreMocks.addGroupDetail.mockReturnValue(enrichment.promise)
+    imRequestMock.mockResolvedValue({ roomId: '1', rateLimitPerMinute: 7 })
+
+    const chatStore = useChatStore()
+    const stale = chatStore.loadAiclawGroupConfigDetail(1001, '1')
+    await vi.waitFor(() => expect(groupStoreMocks.addGroupDetail).toHaveBeenCalled())
+
+    // 补全还在飞时账号切换（watch 同步推进 accountEpoch 并清缓存）
+    sessionBinding.value = { backendKey: 'backend-2', uid: 'u2', sessionEpoch: 2 }
+    enrichment.resolve()
+
+    await expect(stale).resolves.toBe(false)
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toBeUndefined()
+  })
+
+  it('A9：账号变化后全量循环不再为剩余旧房间发请求', async () => {
+    const response = deferred<Record<string, unknown>>()
+    imRequestMock.mockReturnValue(response.promise)
+
+    const chatStore = useChatStore()
+    const pending = chatStore.loadAiclawGroupConfigs(1001)
+    await waitForRequest(1)
+
+    sessionBinding.value = { backendKey: 'backend-2', uid: 'u2', sessionEpoch: 2 }
+    response.resolve({ roomId: '1', rateLimitPerMinute: 7 })
+
+    await expect(pending).resolves.toBe(false)
+    // 剩下的 room-2 / room-3 不得继续请求
+    expect(imRequestMock).toHaveBeenCalledTimes(1)
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toBeUndefined()
+  })
+
+  it('A11：空响应不算成功加载——不落缓存、不伪造默认值', async () => {
+    imRequestMock.mockResolvedValue(null)
+
+    const chatStore = useChatStore()
+    await expect(chatStore.loadAiclawGroupConfigDetail(1001, '1')).resolves.toBe(false)
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toBeUndefined()
+    expect(chatStore.getAiclawGroupConfigList(1001)).toEqual([])
+  })
+
+  it('A12：主动读取失败给明确反馈，后台读取同一失败保持静默', async () => {
+    const errorMock = vi.fn()
+    ;(window as unknown as { $message: unknown }).$message = { error: errorMock, success: vi.fn(), warning: vi.fn() }
+    imRequestMock.mockRejectedValue(new Error('boom'))
+
+    try {
+      const chatStore = useChatStore()
+      await expect(chatStore.loadAiclawGroupConfigDetail(1001, '1')).resolves.toBe(false)
+      expect(errorMock).not.toHaveBeenCalled()
+
+      await expect(chatStore.loadAiclawGroupConfig(1001, '1')).resolves.toBe(false)
+      expect(errorMock).toHaveBeenCalledTimes(1)
+      expect(errorMock).toHaveBeenCalledWith('boom')
+    } finally {
+      delete (window as unknown as { $message?: unknown }).$message
+    }
   })
 })

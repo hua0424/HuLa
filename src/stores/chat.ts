@@ -35,7 +35,7 @@ import { useGlobalStore } from '@/stores/global.ts'
 import { useFeedStore } from '@/stores/feed.ts'
 import { useGroupStore } from '@/stores/group.ts'
 import { useUserStore } from '@/stores/user.ts'
-import { getSessionDetail, markMsgRead } from '@/utils/ImRequestUtils'
+import { getSessionDetail, imRequest, markMsgRead } from '@/utils/ImRequestUtils'
 import { renderReplyContent } from '@/utils/RenderReplyContent.ts'
 import { invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { useSessionUnreadStore } from '@/stores/sessionUnread'
@@ -43,6 +43,7 @@ import { useAiclawStore } from '@/stores/aiclaw'
 import type { AiclawGroupConfig, ThinkingEndPayload, ThinkingStartPayload } from '@/services/wsType'
 import { loadThinkingByTrigger, loadThinkingDetail, type ThinkingDetail } from '@/services/thinkingService'
 import { normalizeAiclawGroupConfig } from '@/utils/aiclawGroupConfig'
+import { useI18nGlobal } from '@/services/i18n'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 import { isWeb } from '@/utils/PlatformConstants'
 import { useMitt } from '@/hooks/useMitt'
@@ -2772,6 +2773,127 @@ export const useChatStore = defineStore(
     type AiclawGroupConfigItem = AiclawGroupConfig & { roomId: string; roomName?: string; account?: string }
     const aiclawGroupConfigs = reactive(new Map<string, AiclawGroupConfigItem>())
 
+    /**
+     * #456 读取收敛与过期结果隔离：
+     * - inFlight：同键（账号+助理+群）的有效读取合并到同一个底层请求，不重复打服务端；
+     * - versions：该键的数据版本，WS 更新/保存成功/成员移除都会 +1，让在途旧读取失去提交资格；
+     * - guard：发起时捕获的账号绑定与 epoch，账号失效/切换后旧结果一律不得写缓存。
+     * 提交前同时校验 guard 与 version，任一不成立即丢弃（不写缓存、不覆盖新数据）。
+     */
+    type AiclawConfigGuard = { binding: SessionIdentity | null; epoch: number; live: boolean }
+    type AiclawConfigRead = {
+      key: string
+      roomId: string
+      guard: AiclawConfigGuard
+      version: number
+      /** 归一化后的配置项；读取失败/空响应为 null */
+      item: AiclawGroupConfigItem | null
+      error: unknown
+    }
+    const aiclawConfigInFlight = new Map<string, Promise<AiclawConfigRead>>()
+    const aiclawConfigVersions = new Map<string, number>()
+    const aiclawConfigKey = (aiclawUid: number, roomId: string | number) => `${aiclawUid}:${roomId}`
+    const aiclawConfigVersionOf = (key: string) => aiclawConfigVersions.get(key) ?? 0
+    /** 作废该键的在途旧读取：版本 +1 并解除合并，旧结果不得再提交 */
+    const invalidateAiclawGroupConfig = (key: string) => {
+      aiclawConfigVersions.set(key, aiclawConfigVersionOf(key) + 1)
+      aiclawConfigInFlight.delete(key)
+    }
+    const captureAiclawConfigGuard = async (): Promise<AiclawConfigGuard> => {
+      const epoch = accountEpoch
+      try {
+        return { binding: await captureAccount(), epoch, live: true }
+      } catch {
+        // 账号已失效：本次读取没有提交资格，由调用方按「未成功」处理（不冒充普通失败）
+        return { binding: null, epoch, live: false }
+      }
+    }
+    const aiclawConfigGuardCurrent = (guard: AiclawConfigGuard) =>
+      guard.live && accountCurrent(guard.binding, guard.epoch)
+
+    /**
+     * 底层配置读取（同键合并 + 静默）：只取数/归一化，失败不弹 toast（#456 A12 后台静默），
+     * 提示由各入口按场景决定。
+     */
+    const readAiclawGroupConfig = (aiclawUid: number, roomId: string | number): Promise<AiclawConfigRead> => {
+      const key = aiclawConfigKey(aiclawUid, roomId)
+      const pending = aiclawConfigInFlight.get(key)
+      if (pending) return pending
+      const request = (async (): Promise<AiclawConfigRead> => {
+        const { ImUrlEnum } = await import('@/enums')
+        const guard = await captureAiclawConfigGuard()
+        const version = aiclawConfigVersionOf(key)
+        let item: AiclawGroupConfigItem | null = null
+        let error: unknown = null
+        if (guard.live) {
+          try {
+            // REQ-016 #196 F5：单房间失败静默（陈旧房间 server 校验必炸，弹全局 toast = 误报）
+            const raw = await imRequest<Record<string, unknown>>(
+              {
+                url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
+                params: { aiclawUid, roomId: Number(roomId) }
+              },
+              { showError: false }
+            )
+            // A11：空响应不是「默认配置」，按读取失败处理（server 契约见 #456 证据）
+            if (raw) {
+              item = {
+                ...normalizeAiclawGroupConfig(raw),
+                roomId: String(raw.roomId ?? roomId),
+                roomName: typeof raw.roomName === 'string' ? raw.roomName : undefined
+              }
+            }
+          } catch (e) {
+            error = e
+            console.error(`[ChatStore] Failed to load aiclaw group config: ${key}`, e)
+          }
+        }
+        return { key, roomId: String(roomId), guard, version, item, error }
+      })()
+      aiclawConfigInFlight.set(key, request)
+      const settle = () => {
+        // 只清理自己这条记录，避免旧读取结束时删掉后来新请求的合并记录
+        if (aiclawConfigInFlight.get(key) === request) aiclawConfigInFlight.delete(key)
+      }
+      request.then(settle, settle)
+      return request
+    }
+
+    /**
+     * 提交一次读取结果：先过账号/版本守卫，再补群名+群号（共享缓存命中即 no-op），
+     * 补全期间守卫失效同样放弃写入。返回是否写入缓存。
+     */
+    const commitAiclawConfigRead = async (read: AiclawConfigRead): Promise<boolean> => {
+      if (!read.item) return false
+      const stale = () => !aiclawConfigGuardCurrent(read.guard) || aiclawConfigVersionOf(read.key) !== read.version
+      if (stale()) return false
+      const existing = aiclawGroupConfigs.get(read.key)
+      const item: AiclawGroupConfigItem = {
+        ...read.item,
+        roomName: read.item.roomName ?? existing?.roomName,
+        account: existing?.account
+      }
+      try {
+        const groupStore = useGroupStore()
+        // #56：补群名 + 群号（account）供卡片显示「群名(群号)」；#196 F5 陈旧房间取详情同样静默。
+        // 单群取数失败不抛——走 buildGroupCardLabel 兜底阶梯，不影响整列表。
+        await groupStore.addGroupDetail(read.roomId, { showError: false })
+        const detail = groupStore.getGroupDetail(read.roomId)
+        if (detail) {
+          item.roomName = detail.groupName || item.roomName
+          item.account = detail.account
+        }
+      } catch (error) {
+        // #456 A8：账号失效不是「补全失败」——不得当成降级吞掉，直接放弃本次提交
+        if (error instanceof SessionExpiredError) return false
+        // 取数失败：保留 server raw.roomName（若有），account 留空，由显示层兜底
+      }
+      // 补全期间账号切换 / 该键被 WS 更新或移除：旧读取不得写回（#456 A3/A5/A7）
+      if (stale()) return false
+      aiclawGroupConfigs.set(read.key, item)
+      return true
+    }
+
     /** 加载 aiclaw 群配置（遍历 aiclaw 所在群逐一获取），返回是否全部成功 */
     const loadAiclawGroupConfigs = async (aiclawUid: number): Promise<boolean> => {
       const groupStore = useGroupStore()
@@ -2783,9 +2905,13 @@ export const useChatStore = defineStore(
           if (key.startsWith(`${aiclawUid}:`)) keysToDelete.push(key)
         }
         keysToDelete.forEach((k) => aiclawGroupConfigs.delete(k))
+        // A3：账号失效/切换后不得继续用旧会话把后续群写进新账号缓存
+        const guard = await captureAiclawConfigGuard()
+        if (!guard.live) return false
         // 获取 aiclaw 所在的所有群 roomId
         const roomIds = groupStore.getRoomIdsByUid(String(aiclawUid))
         for (const roomId of roomIds) {
+          if (!aiclawConfigGuardCurrent(guard)) return false
           // 单个群配置获取失败不影响其他群，但需让调用方知道本次加载不完整
           if (!(await loadAiclawGroupConfigDetail(aiclawUid, roomId))) allSuccess = false
         }
@@ -2797,86 +2923,32 @@ export const useChatStore = defineStore(
     }
 
     /**
-     * 加载单个 aiclaw 群配置并补群名/群号（#210 二期：事件驱动收敛的增量取数原语，
-     * 与复数版共用同一套取数/归一化/兜底逻辑）。
-     * 单房间失败静默（showError:false，陈旧房间 server 校验必炸，弹全局 toast = 误报），
-     * 由返回 boolean 交给调用方裁决。
+     * 加载单个 aiclaw 群配置并补群名/群号（#210 二期：事件驱动收敛的增量取数原语）。
+     * 与主动版共用同一条在途请求（#456 A1）；单房间失败静默，由返回 boolean 交给调用方裁决。
      */
     const loadAiclawGroupConfigDetail = async (aiclawUid: number, roomId: string | number): Promise<boolean> => {
-      const { imRequest } = await import('@/utils/ImRequestUtils')
-      const { ImUrlEnum } = await import('@/enums')
-      const { normalizeAiclawGroupConfig } = await import('@/utils/aiclawGroupConfig')
-      const groupStore = useGroupStore()
-      try {
-        // REQ-016 #196 F5：单房间失败静默——见复数版注释
-        const raw = await imRequest<Record<string, unknown>>(
-          {
-            url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
-            params: { aiclawUid, roomId: Number(roomId) }
-          },
-          { showError: false }
-        )
-        if (raw) {
-          // #56：补群名 + 群号（account）供卡片显示「群名(群号)」。
-          // 共享缓存命中即 no-op（零网络）；未命中 addGroupDetail 调现有端点拉一次。
-          // 单群取数失败不抛——走 buildGroupCardLabel 兜底阶梯，不影响整列表。
-          let groupName = raw.roomName as string | undefined
-          let account: string | undefined
-          try {
-            // #196 F5：陈旧房间（退群/解散残留）取详情同样静默，不弹全局 toast
-            await groupStore.addGroupDetail(String(roomId), { showError: false })
-            const detail = groupStore.getGroupDetail(String(roomId))
-            if (detail) {
-              groupName = detail.groupName || groupName
-              account = detail.account
-            }
-          } catch {
-            // 取数失败：保留 server raw.roomName（若有），account 留空，由显示层兜底
-          }
-          const existing = aiclawGroupConfigs.get(`${aiclawUid}:${roomId}`)
-          const normalized: AiclawGroupConfigItem = {
-            ...normalizeAiclawGroupConfig(raw),
-            roomId: String(raw.roomId ?? roomId),
-            roomName: groupName ?? existing?.roomName,
-            account: account ?? existing?.account
-          }
-          aiclawGroupConfigs.set(`${aiclawUid}:${roomId}`, normalized)
-        }
-        return true
-      } catch {
-        return false
-      }
+      return commitAiclawConfigRead(await readAiclawGroupConfig(aiclawUid, roomId))
     }
 
-    /** 逐出单个 aiclaw 群配置缓存（#210 二期：成员移除/群解散后缓存不得复活该房间） */
+    /** 逐出单个 aiclaw 群配置缓存（#210 二期：成员移除/群解散后缓存不得复活该房间；#456 A7 同时作废在途旧读取） */
     const removeAiclawGroupConfig = (aiclawUid: number, roomId: string | number) => {
-      aiclawGroupConfigs.delete(`${aiclawUid}:${roomId}`)
+      const key = aiclawConfigKey(aiclawUid, roomId)
+      invalidateAiclawGroupConfig(key)
+      aiclawGroupConfigs.delete(key)
     }
 
-    /** 加载单个 aiclaw 群配置（REQ-009 #86 成员列表按需拉取 approved） */
+    /**
+     * 加载单个 aiclaw 群配置（REQ-009 #86 成员列表按需拉取 approved）。
+     * #456 A12：主动操作与后台读取合并同一条失败请求时，后台静默、这里仍给出明确反馈。
+     */
     const loadAiclawGroupConfig = async (aiclawUid: number, roomId: string | number): Promise<boolean> => {
-      const { imRequest } = await import('@/utils/ImRequestUtils')
-      const { ImUrlEnum } = await import('@/enums')
-      const key = `${aiclawUid}:${roomId}`
-      try {
-        const raw = await imRequest<Record<string, unknown>>({
-          url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
-          params: { aiclawUid, roomId: Number(roomId) }
-        })
-        if (!raw) return false
-        const existing = aiclawGroupConfigs.get(key)
-        const normalized: AiclawGroupConfigItem = {
-          ...normalizeAiclawGroupConfig(raw),
-          roomId: String(raw.roomId ?? roomId),
-          roomName: existing?.roomName,
-          account: existing?.account
-        }
-        aiclawGroupConfigs.set(key, normalized)
-        return true
-      } catch (error) {
-        console.error(`[ChatStore] Failed to load aiclaw group config: ${key}`, error)
-        return false
+      const read = await readAiclawGroupConfig(aiclawUid, roomId)
+      const ok = await commitAiclawConfigRead(read)
+      if (!read.item && read.guard.live) {
+        const message = read.error instanceof Error ? read.error.message : ''
+        window.$message?.error?.(message || useI18nGlobal().t('aiclaw.group_settings.load_failed'))
       }
+      return ok
     }
 
     /** 获取单个 aiclaw 群配置缓存（用于沉默标识等读场景） */
@@ -2884,13 +2956,14 @@ export const useChatStore = defineStore(
       return aiclawGroupConfigs.get(`${aiclawUid}:${roomId}`)
     }
 
-    /** 更新 aiclaw 群配置（本地缓存，WS 通知时调用） */
+    /** 更新 aiclaw 群配置（本地缓存，WS 通知时调用；#456 A5/A6：新数据到达即作废在途旧读取） */
     const updateAiclawGroupConfig = (aiclawUid: number, roomId: number, config: AiclawGroupConfig) => {
-      const key = `${aiclawUid}:${roomId}`
+      const key = aiclawConfigKey(aiclawUid, roomId)
       const existing = aiclawGroupConfigs.get(key)
       // WS 广播的 boolean 字段可能是 1/0 integer，统一经 normalizeAiclawGroupConfig 归一化
       const raw = config as Record<string, unknown>
       const normalized: AiclawGroupConfig = normalizeAiclawGroupConfig(raw)
+      invalidateAiclawGroupConfig(key)
       aiclawGroupConfigs.set(key, {
         ...normalized,
         roomId: String(roomId),
@@ -2909,6 +2982,8 @@ export const useChatStore = defineStore(
         url: ImUrlEnum.AICLAW_GROUP_CONFIG_UPDATE,
         body: buildAiclawGroupConfigUpdateBody(aiclawUid, roomId, config)
       })
+      // #456 A6：保存已成功，此前发起（拿到旧数据）的读取不得再写回覆盖
+      invalidateAiclawGroupConfig(aiclawConfigKey(aiclawUid, roomId))
     }
 
     /** 获取某 aiclaw 的所有群配置列表 */
@@ -3631,6 +3706,9 @@ export const useChatStore = defineStore(
         pendingStreamReplace.clear()
         autoReplyMessages.clear()
         aiclawGroupConfigs.clear()
+        // #456 A3：账号切换后旧账号的在途读取与版本号一并作废，不得写进新账号缓存
+        aiclawConfigInFlight.clear()
+        aiclawConfigVersions.clear()
         clearAllExpirationTimers()
         thinkingCacheErrors.value = {}
         lastReadActiveTime.value = {}

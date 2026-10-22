@@ -177,6 +177,7 @@
           <!-- Group chat settings -->
           <div
             class="flex items-center justify-between px-24px py-16px cursor-pointer hover:bg-[--list-hover-color] transition-colors"
+            data-testid="aiclaw-open-group-settings"
             @click="handleOpenGroupSettings">
             <span class="text-14px text-[--text-color]">{{ t('aiclaw.detail.group_settings') }}</span>
             <svg class="size-16px text-#ccc"><use href="#right"></use></svg>
@@ -928,16 +929,21 @@ const handleBackToDetail = () => {
 }
 
 // REQ-004: 群聊配置
+// #456 A10：加载期间切助理/切页时，旧结果不得改写当前列表、不得改新页面的加载态
+let groupConfigLoadSeq = 0
 const reloadGroupConfigs = async () => {
-  if (!selectedUid.value) return
+  const uid = selectedUid.value
+  if (!uid) return
+  const seq = ++groupConfigLoadSeq
   groupConfigLoading.value = true
   try {
-    await chatStore.loadAiclawGroupConfigs(Number(selectedUid.value))
-    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(selectedUid.value))
+    await chatStore.loadAiclawGroupConfigs(Number(uid))
+    if (seq !== groupConfigLoadSeq || String(selectedUid.value) !== String(uid)) return
+    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
   } catch (error) {
     console.error('[AiAssistant] Failed to load group configs:', error)
   } finally {
-    groupConfigLoading.value = false
+    if (seq === groupConfigLoadSeq) groupConfigLoading.value = false
   }
 }
 
@@ -962,18 +968,26 @@ const handleAddedToGroup = async () => {
 // 两道闸门：取数失败不加/不换卡（防卡片因瞬时故障消失）；与选中 aiclaw 无关的成员
 // 变化不动列表（防 AiclawGroupConfigForm 的 watch(props.config) 重置编辑中表单）。
 const groupConfigConverging = ref(false)
+// #456 A10：收敛进行中又来了新变化时记一次尾随重跑，避免旧收敛把新页面/新变化吞掉
+let groupConfigConvergePending = false
 const convergeGroupConfigs = async () => {
   if (rightView.value !== 'groupSettings' || !selectedUid.value) return
-  if (groupConfigConverging.value) return
+  if (groupConfigConverging.value) {
+    groupConfigConvergePending = true
+    return
+  }
   groupConfigConverging.value = true
   try {
+    const uid = String(selectedUid.value)
     const before = groupConfigList.value
       .map((c) => String(c.roomId))
       .sort()
       .join(',')
-    const allOk = await chatStore.loadAiclawGroupConfigs(Number(selectedUid.value))
+    const allOk = await chatStore.loadAiclawGroupConfigs(Number(uid))
     if (!allOk) return
-    const next = chatStore.getAiclawGroupConfigList(Number(selectedUid.value))
+    // #456 A10：收敛期间切了助理/离开群设置页 → 旧结果不得改写当前列表
+    if (rightView.value !== 'groupSettings' || String(selectedUid.value) !== uid) return
+    const next = chatStore.getAiclawGroupConfigList(Number(uid))
     const after = next
       .map((c) => String(c.roomId))
       .sort()
@@ -985,6 +999,10 @@ const convergeGroupConfigs = async () => {
     console.error('[AiAssistant] 群设置静默收敛失败:', error)
   } finally {
     groupConfigConverging.value = false
+    if (groupConfigConvergePending) {
+      groupConfigConvergePending = false
+      void convergeGroupConfigs()
+    }
   }
 }
 
@@ -1031,10 +1049,10 @@ const handleMemberChangeBroadcast = async (payload: MemberChangeBroadcastPayload
   if (payload.changeType === ChangeTypeEnum.JOIN) {
     // 拉进新群：取数成功才加卡（闸门：失败不替换，防卡片因瞬时故障抖动）
     const ok = await chatStore.loadAiclawGroupConfigDetail(Number(uid), roomId)
-    if (ok) {
-      // 缓存与列表自 tab 激活起由本路径增量维护，直接以缓存重铺（旧卡片对象引用不变）
-      groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
-    }
+    // #456 A10：取数期间切了助理/离开群设置页 → 旧结果不得改写当前列表
+    if (!ok || rightView.value !== 'groupSettings' || String(selectedUid.value) !== uid) return
+    // 缓存与列表自 tab 激活起由本路径增量维护，直接以缓存重铺（旧卡片对象引用不变）
+    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
   } else {
     removeGroupConfigCard(uid, roomId)
   }
@@ -1054,10 +1072,11 @@ const setupMemberChangeListener = async () => {
 const handleSaveGroupConfig = async (
   config: import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string }
 ) => {
-  if (!selectedUid.value) return
+  const uid = selectedUid.value
+  if (!uid) return
   savingGroupConfig.value = config.roomId
   try {
-    await chatStore.saveAiclawGroupConfig(Number(selectedUid.value), config.roomId, {
+    await chatStore.saveAiclawGroupConfig(Number(uid), config.roomId, {
       rateLimitPerMinute: config.rateLimitPerMinute,
       dailyLimit: config.dailyLimit,
       respondToAi: config.respondToAi,
@@ -1065,15 +1084,17 @@ const handleSaveGroupConfig = async (
       approved: config.approved,
       workspaceDir: config.workspaceDir
     })
-    await chatStore.loadAiclawGroupConfig(Number(selectedUid.value), config.roomId)
+    await chatStore.loadAiclawGroupConfig(Number(uid), config.roomId)
+    // #456 A10：保存/刷新期间切了助理 → 不改写新列表、不发过时完成提示
+    if (String(selectedUid.value) !== String(uid)) return
     // 同步本地列表，让排序/徽章立即刷新（P2：表单 toggle 关闭批准也要即时生效）
-    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(selectedUid.value))
+    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
     window.$message?.success?.(t('aiclaw.group_settings.save_success'))
   } catch (error) {
     console.error('[AiAssistant] Failed to save group config:', error)
     window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
   } finally {
-    savingGroupConfig.value = null
+    if (savingGroupConfig.value === config.roomId) savingGroupConfig.value = null
   }
 }
 
@@ -1082,19 +1103,22 @@ const handleSaveGroupConfig = async (
 const handleApproveGroupConfig = async (
   config: import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string }
 ) => {
-  if (!selectedUid.value) return
+  const uid = selectedUid.value
+  if (!uid) return
   savingGroupConfig.value = config.roomId
   try {
-    await chatStore.saveAiclawGroupConfig(Number(selectedUid.value), config.roomId, { approved: true })
-    await chatStore.loadAiclawGroupConfig(Number(selectedUid.value), config.roomId)
+    await chatStore.saveAiclawGroupConfig(Number(uid), config.roomId, { approved: true })
+    await chatStore.loadAiclawGroupConfig(Number(uid), config.roomId)
+    // #456 A10：同上，切助理后不发过时完成提示、不改写新列表
+    if (String(selectedUid.value) !== String(uid)) return
     // 同步本地列表，让排序/徽章立即刷新
-    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(selectedUid.value))
+    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
     window.$message?.success?.(t('aiclaw.group_settings.approve_success'))
   } catch (error) {
     console.error('[AiAssistant] Failed to approve group config:', error)
     window.$message?.error?.(t('aiclaw.group_settings.approve_failed'))
   } finally {
-    savingGroupConfig.value = null
+    if (savingGroupConfig.value === config.roomId) savingGroupConfig.value = null
   }
 }
 

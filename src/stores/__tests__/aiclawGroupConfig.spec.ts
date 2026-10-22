@@ -99,7 +99,8 @@ describe('useAiclawGroupConfigStore', () => {
     })
   })
 
-  it('openModal 成功但缓存无当前群配置时使用默认值', async () => {
+  // #456 A11：无配置不算成功加载，不得用默认值冒充已加载
+  it('openModal 返回 true 但缓存无当前群配置时按加载失败处理，不伪造默认值', async () => {
     mockFns.loadConfig.mockResolvedValue(true)
     mockFns.getConfig.mockReturnValue(undefined)
 
@@ -107,13 +108,9 @@ describe('useAiclawGroupConfigStore', () => {
     await wrapper.vm.store.openModal('2001')
     await flushPromises()
 
-    expect(wrapper.vm.store.modalContext?.config).toMatchObject({
-      roomId: 'room-1',
-      rateLimitPerMinute: 10,
-      dailyLimit: 1000,
-      respondToAi: true,
-      mentionRequired: true
-    })
+    expect(wrapper.vm.store.modalLoading).toBe(false)
+    expect(wrapper.vm.store.modalError).toBe('加载群聊配置失败')
+    expect(wrapper.vm.store.modalContext).toBeNull()
   })
 
   it('openModal 加载返回 false 时设置 error 且 modalContext 为空', async () => {
