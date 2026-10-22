@@ -39,16 +39,18 @@ const activeConfig = {
   approved: true
 }
 
-const loadAiclawGroupConfigMock = vi.fn().mockResolvedValue(undefined)
+const loadAiclawGroupConfigDetailMock = vi.fn().mockResolvedValue(true)
 const saveAiclawGroupConfigMock = vi.fn().mockResolvedValue(undefined)
 const loadAiclawGroupConfigsMock = vi.fn().mockResolvedValue(undefined)
 const getAiclawGroupConfigListMock = vi.fn().mockReturnValue([groupConfig])
+const getAiclawGroupConfigMock = vi.fn().mockReturnValue(undefined)
 
 vi.mock('@/stores/chat', () => ({
   useChatStore: () => ({
     loadAiclawGroupConfigs: loadAiclawGroupConfigsMock,
-    loadAiclawGroupConfig: loadAiclawGroupConfigMock,
+    loadAiclawGroupConfigDetail: loadAiclawGroupConfigDetailMock,
     getAiclawGroupConfigList: getAiclawGroupConfigListMock,
+    getAiclawGroupConfig: getAiclawGroupConfigMock,
     saveAiclawGroupConfig: saveAiclawGroupConfigMock
   })
 }))
@@ -160,7 +162,7 @@ describe('REQ-012 #114：未激活群卡显眼化 + 一键批准', () => {
       // #134：批准只提交 approved 位，禁止携带其它字段覆盖未保存的表单值
       { approved: true }
     )
-    expect(loadAiclawGroupConfigMock).toHaveBeenCalledWith(1001, 'room-2')
+    expect(loadAiclawGroupConfigDetailMock).toHaveBeenCalledWith(1001, 'room-2')
   })
 })
 
@@ -229,7 +231,7 @@ describe('P2：表单保存 approved=false 后同步本地列表立即刷新徽�
     await flushPromises()
 
     expect(saveAiclawGroupConfigMock).toHaveBeenCalledWith(1001, 'room-2', expect.objectContaining({ approved: false }))
-    expect(loadAiclawGroupConfigMock).toHaveBeenCalledWith(1001, 'room-2')
+    expect(loadAiclawGroupConfigDetailMock).toHaveBeenCalledWith(1001, 'room-2')
 
     const cards = wrapper.findAll('[data-testid="aiclaw-group-card"]')
     const betaCard = cards.find((c) => c.text().includes('Beta 群'))
@@ -327,5 +329,68 @@ describe('#456 A10：离开页面后旧加载/旧保存结果不改写列表、�
     await flushPromises()
 
     expect(successSpy).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * #457：保存/批准闭环——刷新必须在保存成功之后发起（store 已在保存成功时作废旧读取），
+ * 刷新失败与保存失败分开表达，不误报保存失败也不宣称已刷新到最新。
+ */
+describe('#457 A4/A13：保存后刷新代次与失败表达', () => {
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((r) => {
+      resolve = r
+    })
+    return { promise, resolve }
+  }
+
+  let message: { success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn>; warning: ReturnType<typeof vi.fn> }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getAiclawGroupConfigListMock.mockReturnValue([inactiveConfig])
+    message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as unknown as { $message: unknown }).$message = message
+  })
+
+  afterEach(() => {
+    delete (window as unknown as { $message?: unknown }).$message
+  })
+
+  it('A4：保存返回前不发起刷新；保存成功后只刷新一次并发保存成功提示', async () => {
+    const pending = deferred<void>()
+    saveAiclawGroupConfigMock.mockReturnValue(pending.promise)
+
+    const wrapper = mountWithStubbedForm()
+    await flushPromises()
+    const forms = wrapper.findAllComponents({ name: 'AiclawGroupConfigFormStub' })
+    await forms[0].vm.$emit('save', { ...inactiveConfig })
+    await flushPromises()
+
+    expect(loadAiclawGroupConfigDetailMock).not.toHaveBeenCalled()
+
+    pending.resolve()
+    await flushPromises()
+
+    expect(loadAiclawGroupConfigDetailMock).toHaveBeenCalledTimes(1)
+    expect(loadAiclawGroupConfigDetailMock).toHaveBeenCalledWith(1001, 'room-2')
+    expect(message.success).toHaveBeenCalledTimes(1)
+    expect(message.error).not.toHaveBeenCalled()
+  })
+
+  // #457 A13：保存成功 + 刷新失败 → 明确「已保存但刷新失败」，不误报保存失败
+  it('A13：保存成功但刷新失败 → 给独立提示，不误报保存失败', async () => {
+    loadAiclawGroupConfigDetailMock.mockResolvedValueOnce(false)
+
+    const wrapper = mountWithStubbedForm()
+    await flushPromises()
+    const forms = wrapper.findAllComponents({ name: 'AiclawGroupConfigFormStub' })
+    await forms[0].vm.$emit('save', { ...inactiveConfig })
+    await flushPromises()
+
+    expect(message.error).not.toHaveBeenCalled()
+    expect(message.success).not.toHaveBeenCalled()
+    expect(message.warning).toHaveBeenCalledWith('配置已保存，但刷新失败，界面可能不是最新')
   })
 })

@@ -52,6 +52,7 @@ describe('AiclawBatchGroupConfigModal', () => {
     mockGetGroupDetail.mockReset()
     mockLoad.mockResolvedValue(true)
     mockGetConfig.mockReturnValue(undefined)
+    mockSave.mockResolvedValue(undefined)
     mockGetGroupDetail.mockReturnValue({ account: 'hula_g1' })
   })
 
@@ -191,5 +192,63 @@ describe('AiclawBatchGroupConfigModal', () => {
     await flushPromises()
 
     expect(document.querySelector('[data-testid="aiclaw-batch-config-error"]')).toBeNull()
+  })
+
+  // #457 A13：保存成功但刷新失败 → 明确「已保存但刷新失败」，不误报保存失败
+  it('A13：保存成功但刷新失败 → 提示已保存但刷新失败，不误报保存失败', async () => {
+    const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as unknown as { $message: unknown }).$message = message
+    mockLoad.mockResolvedValue(false)
+
+    mountModal({
+      visible: true,
+      roomId: 'room-1',
+      account: 'hula_g1',
+      aiclawItems: [{ uid: '1001', name: 'OpenCode Bot', adapterType: 'opencode' }]
+    })
+    await flushPromises()
+
+    ;(document.querySelector('[data-testid="aiclaw-group-config-save"]') as HTMLElement | null)?.click()
+    await flushPromises()
+
+    expect(mockSave).toHaveBeenCalledTimes(1)
+    expect(message.error).not.toHaveBeenCalled()
+    expect(message.success).not.toHaveBeenCalled()
+    expect(message.warning).toHaveBeenCalledWith('配置已保存，但刷新失败，界面可能不是最新')
+    delete (window as unknown as { $message?: unknown }).$message
+  })
+
+  // #457 A10：保存在途时目标成员变了（弹窗重载）→ 旧保存结果不得铺列表、不得发过时完成提示
+  it('A10：保存在途时目标成员变化 → 不铺旧结果、不发过时完成提示', async () => {
+    const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as unknown as { $message: unknown }).$message = message
+    let resolveSave!: () => void
+    mockSave.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveSave = resolve
+      })
+    )
+
+    const wrapper = mountModal({
+      visible: true,
+      roomId: 'room-1',
+      account: 'hula_g1',
+      aiclawItems: [{ uid: '1001', name: 'OpenCode Bot', adapterType: 'opencode' }]
+    })
+    await flushPromises()
+
+    ;(document.querySelector('[data-testid="aiclaw-group-config-save"]') as HTMLElement | null)?.click()
+    await flushPromises()
+    expect(mockSave).toHaveBeenCalledTimes(1)
+
+    await wrapper.setProps({ aiclawItems: [{ uid: '1002', name: 'OpenClaw Bot', adapterType: 'openclaw' }] })
+    await flushPromises()
+
+    resolveSave()
+    await flushPromises()
+
+    expect(message.success).not.toHaveBeenCalled()
+    expect(message.warning).not.toHaveBeenCalled()
+    delete (window as unknown as { $message?: unknown }).$message
   })
 })

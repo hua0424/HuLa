@@ -42,7 +42,7 @@ import { useSessionUnreadStore } from '@/stores/sessionUnread'
 import { useAiclawStore } from '@/stores/aiclaw'
 import type { AiclawGroupConfig, ThinkingEndPayload, ThinkingStartPayload } from '@/services/wsType'
 import { loadThinkingByTrigger, loadThinkingDetail, type ThinkingDetail } from '@/services/thinkingService'
-import { normalizeAiclawGroupConfig } from '@/utils/aiclawGroupConfig'
+import { buildAiclawGroupConfigUpdateBody, normalizeAiclawGroupConfig } from '@/utils/aiclawGroupConfig'
 import { useI18nGlobal } from '@/services/i18n'
 import { unreadCountManager } from '@/utils/UnreadCountManager'
 import { isWeb } from '@/utils/PlatformConstants'
@@ -2974,15 +2974,14 @@ export const useChatStore = defineStore(
 
     /** 保存 aiclaw 群配置到 server（#134：支持部分字段更新，批准时只传 approved） */
     const saveAiclawGroupConfig = async (aiclawUid: number, roomId: string, config: Partial<AiclawGroupConfig>) => {
-      const { imRequest } = await import('@/utils/ImRequestUtils')
       const { ImUrlEnum } = await import('@/enums')
-      const { buildAiclawGroupConfigUpdateBody } = await import('@/utils/aiclawGroupConfig')
       // #53：开关是 boolean，server VO 要 Integer(0/1)，由 helper 统一转换后再发
       await imRequest({
         url: ImUrlEnum.AICLAW_GROUP_CONFIG_UPDATE,
         body: buildAiclawGroupConfigUpdateBody(aiclawUid, roomId, config)
       })
-      // #456 A6：保存已成功，此前发起（拿到旧数据）的读取不得再写回覆盖
+      // #456 A6 / #457 A4：保存已成功，此前发起（拿到旧数据）的读取不得再写回覆盖，
+      // 保存后的刷新必须以新代次重新取数（不复用旧在途请求）。
       invalidateAiclawGroupConfig(aiclawConfigKey(aiclawUid, roomId))
     }
 

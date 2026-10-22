@@ -1027,9 +1027,23 @@ watch(
 // #210 二期（桌面多窗路径）：主窗 WS_MEMBER_CHANGE/ROOM_DISSOLUTION 经 Tauri 事件直驱收敛。
 // 与签名 watcher 按平台互斥（#67 P1）：桌面端 watcher 首行短路，web/移动端无此事件
 // （broadcast 对 web no-op），watcher 是 web/移动端唯一收敛路径。
-const removeGroupConfigCard = (uid: string, roomId: string) => {
+// #457：保存/批准按房间作代次编号——旧保存流程（切页、切助理、成员移除、被新操作取代）不得改写列表、
+// 改变新操作状态或发过时反馈；成员移除另记代次，让在途保存不再刷新/提示。
+const groupConfigOpTokens = new Map<string, number>()
+const groupConfigRemovedTokens = new Map<string, number>()
+const nextGroupConfigOp = (roomId: string) => {
+  const token = (groupConfigOpTokens.get(roomId) ?? 0) + 1
+  groupConfigOpTokens.set(roomId, token)
+  return token
+}
+
+const removeGroupConfigCard = (uid: string, roomId: string, notifyEditEnded = false) => {
   chatStore.removeAiclawGroupConfig(Number(uid), roomId)
-  if (groupConfigList.value.some((c) => String(c.roomId) === roomId)) {
+  groupConfigRemovedTokens.set(roomId, (groupConfigRemovedTokens.get(roomId) ?? 0) + 1)
+  const shown = groupConfigList.value.some((c) => String(c.roomId) === roomId)
+  // #457 A6：助理被移出群后该项编辑结束（卡片卸载，草稿随之作废），明确告知用户
+  if (notifyEditEnded && shown) window.$message?.warning?.(t('aiclaw.group_settings.edit_ended_removed'))
+  if (shown) {
     // filter 保留其余卡片对象引用 → 编辑中表单不被重置
     groupConfigList.value = groupConfigList.value.filter((c) => String(c.roomId) !== roomId)
   }
@@ -1054,7 +1068,8 @@ const handleMemberChangeBroadcast = async (payload: MemberChangeBroadcastPayload
     // 缓存与列表自 tab 激活起由本路径增量维护，直接以缓存重铺（旧卡片对象引用不变）
     groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
   } else {
-    removeGroupConfigCard(uid, roomId)
+    // #457 A6：该助理被移出本群 → 该项编辑结束，明确告知（不静默丢弃草稿）
+    removeGroupConfigCard(uid, roomId, true)
   }
 }
 
@@ -1069,58 +1084,80 @@ const setupMemberChangeListener = async () => {
   }
 }
 
-const handleSaveGroupConfig = async (
-  config: import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string }
+// #457 A4/A6/A10/A13：保存/批准的成功反馈与刷新统一走这里——保存成功即固定本次编辑代次，
+// 之后的刷新失败单独表达（不误报保存失败、不宣称已最新），失效的旧流程不改写列表/状态/提示。
+const runGroupConfigSave = async (
+  config: { roomId: string },
+  submit: (aiclawUid: number) => Promise<unknown>,
+  messages: { success: string; failure: string }
 ) => {
   const uid = selectedUid.value
   if (!uid) return
-  savingGroupConfig.value = config.roomId
+  const roomId = config.roomId
+  const op = nextGroupConfigOp(roomId)
+  const removed = groupConfigRemovedTokens.get(roomId) ?? 0
+  const editAlive = () =>
+    groupConfigOpTokens.get(roomId) === op && (groupConfigRemovedTokens.get(roomId) ?? 0) === removed
+  const uiCurrent = () =>
+    editAlive() && rightView.value === 'groupSettings' && String(selectedUid.value) === String(uid)
+  savingGroupConfig.value = roomId
   try {
-    await chatStore.saveAiclawGroupConfig(Number(uid), config.roomId, {
-      rateLimitPerMinute: config.rateLimitPerMinute,
-      dailyLimit: config.dailyLimit,
-      respondToAi: config.respondToAi,
-      mentionRequired: config.mentionRequired,
-      approved: config.approved,
-      workspaceDir: config.workspaceDir
-    })
-    await chatStore.loadAiclawGroupConfig(Number(uid), config.roomId)
-    // #456 A10：保存/刷新期间切了助理 → 不改写新列表、不发过时完成提示
-    if (String(selectedUid.value) !== String(uid)) return
+    try {
+      await submit(Number(uid))
+    } catch (error) {
+      console.error('[AiAssistant] Failed to submit group config:', roomId, error)
+      if (uiCurrent()) window.$message?.error?.(messages.failure)
+      return
+    }
+    // 保存已成功：编辑入口已失效（切页/切助理/成员移除/被新操作取代）→ 不刷新、不发过时完成提示
+    if (!uiCurrent()) return
+    // #457 A4：保存成功后的刷新必须是保存之后发起的新读取（store 在保存成功时已作废旧在途读取），
+    // 旧读取结果既不能回滚界面，也不能让本次刷新复用它。
+    const refreshed = await chatStore.loadAiclawGroupConfigDetail(Number(uid), roomId)
+    if (!uiCurrent()) return
     // 同步本地列表，让排序/徽章立即刷新（P2：表单 toggle 关闭批准也要即时生效）
     groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
-    window.$message?.success?.(t('aiclaw.group_settings.save_success'))
-  } catch (error) {
-    console.error('[AiAssistant] Failed to save group config:', error)
-    window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
+    // #457 A13：保存成功但刷新失败 → 明确「已保存，界面可能不是最新」，既不误报保存失败也不宣称已刷新
+    if (refreshed || chatStore.getAiclawGroupConfig(Number(uid), roomId)) {
+      window.$message?.success?.(messages.success)
+    } else {
+      window.$message?.warning?.(t('aiclaw.group_settings.saved_refresh_failed'))
+    }
   } finally {
-    if (savingGroupConfig.value === config.roomId) savingGroupConfig.value = null
+    if (groupConfigOpTokens.get(roomId) === op && savingGroupConfig.value === roomId) savingGroupConfig.value = null
   }
 }
 
+const handleSaveGroupConfig = (
+  config: import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string }
+) =>
+  runGroupConfigSave(
+    config,
+    (aiclawUid) =>
+      chatStore.saveAiclawGroupConfig(aiclawUid, config.roomId, {
+        rateLimitPerMinute: config.rateLimitPerMinute,
+        dailyLimit: config.dailyLimit,
+        respondToAi: config.respondToAi,
+        mentionRequired: config.mentionRequired,
+        approved: config.approved,
+        workspaceDir: config.workspaceDir
+      }),
+    { success: t('aiclaw.group_settings.save_success'), failure: t('aiclaw.group_settings.save_failed') }
+  )
+
 // REQ-012 #114：一键批准（approved=true）并立即重载该群配置
 // #134：批准只提交 approved 位，不携带其它表单字段，避免覆盖未保存的编辑值。
-const handleApproveGroupConfig = async (
+const handleApproveGroupConfig = (
   config: import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string }
-) => {
-  const uid = selectedUid.value
-  if (!uid) return
-  savingGroupConfig.value = config.roomId
-  try {
-    await chatStore.saveAiclawGroupConfig(Number(uid), config.roomId, { approved: true })
-    await chatStore.loadAiclawGroupConfig(Number(uid), config.roomId)
-    // #456 A10：同上，切助理后不发过时完成提示、不改写新列表
-    if (String(selectedUid.value) !== String(uid)) return
-    // 同步本地列表，让排序/徽章立即刷新
-    groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
-    window.$message?.success?.(t('aiclaw.group_settings.approve_success'))
-  } catch (error) {
-    console.error('[AiAssistant] Failed to approve group config:', error)
-    window.$message?.error?.(t('aiclaw.group_settings.approve_failed'))
-  } finally {
-    if (savingGroupConfig.value === config.roomId) savingGroupConfig.value = null
-  }
-}
+) =>
+  runGroupConfigSave(
+    config,
+    (aiclawUid) => chatStore.saveAiclawGroupConfig(aiclawUid, config.roomId, { approved: true }),
+    {
+      success: t('aiclaw.group_settings.approve_success'),
+      failure: t('aiclaw.group_settings.approve_failed')
+    }
+  )
 
 // REQ-009 #88: 从通知跳转到指定 aiclaw 的群设置卡片
 const selectAiclawAndOpenGroupSettings = async (aiclawUid: string, roomId: string) => {

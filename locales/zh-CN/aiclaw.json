@@ -143,6 +143,8 @@
     "save": "保存",
     "save_success": "配置已保存",
     "save_failed": "保存失败",
+    "saved_refresh_failed": "配置已保存，但刷新失败，界面可能不是最新",
+    "edit_ended_removed": "该 AI 助理已被移出本群，相关编辑已结束",
     "load_failed": "加载群聊配置失败",
     "batch_title": "AI 助理入群配置",
     "batch_subtitle": "请为新加入的 AI 助理批准入群并设置工作目录",

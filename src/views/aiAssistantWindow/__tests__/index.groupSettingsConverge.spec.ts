@@ -348,6 +348,37 @@ describe('#210 二期 桌面端 Tauri 事件直驱收敛', () => {
     expect(cards[0].text()).toContain('room-2 群')
   })
 
+  // #457 A6（编辑部分）：成员移除使该编辑失效 → 在途保存返回后不得再刷新/发完成提示
+  it('广播「选中 aiclaw 被移出群」时保存仍在途 → 保存返回后不刷新、不发过时完成提示', async () => {
+    const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as any).$message = message
+    let resolveSave!: () => void
+    chatStoreMocks.saveAiclawGroupConfig.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve
+        })
+    )
+
+    const wrapper = mountWindow()
+    await flushPromises()
+    const forms = wrapper.findAllComponents({ name: 'AiclawGroupConfigFormStub' })
+    await forms[0].vm.$emit('save', makeConfig('room-1'))
+    await flushPromises()
+    expect(chatStoreMocks.saveAiclawGroupConfig).toHaveBeenCalledTimes(1)
+
+    await fireMemberChange({ roomId: 'room-1', changeType: ChangeTypeEnum.REMOVE, uidList: ['1001'] })
+    expect(chatStoreMocks.removeAiclawGroupConfig).toHaveBeenCalledWith(1001, 'room-1')
+
+    resolveSave()
+    await flushPromises()
+
+    // 失效编辑入口：不再发起刷新，也不发「已保存」完成提示
+    expect(chatStoreMocks.loadAiclawGroupConfigDetail).not.toHaveBeenCalled()
+    expect(message.success).not.toHaveBeenCalled()
+    delete (window as any).$message
+  })
+
   it('被移出最后一个群 → 两张卡片全部消失', async () => {
     const wrapper = mountWindow()
     await flushPromises()
