@@ -393,3 +393,118 @@ describe('chatStore 群配置读取收敛（#456）', () => {
     }
   })
 })
+
+/**
+ * #457：保存成功 = 读取代次切换点。保存之后的刷新必须重新发请求（不得并入保存前的在途读取），
+ * 保存前的旧响应返回时不得回滚配置、不得被当成成功；刷新失败也不删已有有效缓存。
+ */
+describe('chatStore 保存/刷新代次（#457）', () => {
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+  const waitForRequest = async (times: number) => {
+    await vi.waitFor(() => expect(imRequestMock).toHaveBeenCalledTimes(times))
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    imRequestMock.mockReset()
+    groupStoreMocks.getRoomIdsByUid.mockReset().mockReturnValue(['1', '2', '3'])
+    groupStoreMocks.addGroupDetail.mockReset().mockResolvedValue(undefined)
+    groupStoreMocks.getGroupDetail.mockReset().mockReturnValue(undefined)
+    sessionBinding.value = null
+  })
+
+  it('A4：保存后的刷新不复用保存前的旧读取，旧响应不回滚配置也不冒充成功', async () => {
+    const stale = deferred<Record<string, unknown>>()
+    imRequestMock.mockReturnValueOnce(stale.promise)
+
+    const chatStore = useChatStore()
+    const oldRead = chatStore.loadAiclawGroupConfigDetail(1001, '1')
+    await waitForRequest(1)
+
+    // 保存成功：store 作废保存前的读取代次（旧在途立即失去提交资格）
+    await chatStore.saveAiclawGroupConfig(1001, '1', {
+      rateLimitPerMinute: 3,
+      dailyLimit: 30,
+      respondToAi: true,
+      mentionRequired: true,
+      approved: true
+    } as never)
+
+    // 保存后的刷新必须是新请求，不能并到旧在途读取上
+    const fresh = deferred<Record<string, unknown>>()
+    imRequestMock.mockReturnValueOnce(fresh.promise)
+    const refresh = chatStore.loadAiclawGroupConfigDetail(1001, '1')
+    await waitForRequest(2)
+
+    // 旧读取最后才回来：不回滚、不算成功
+    stale.resolve({ roomId: '1', rateLimitPerMinute: 99, dailyLimit: 999, respondToAi: false, mentionRequired: false })
+    await expect(oldRead).resolves.toBe(false)
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toBeUndefined()
+
+    fresh.resolve({ roomId: '1', rateLimitPerMinute: 4, dailyLimit: 40, respondToAi: true, mentionRequired: true })
+    await expect(refresh).resolves.toBe(true)
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toMatchObject({ rateLimitPerMinute: 4, dailyLimit: 40 })
+  })
+
+  it('A13：保存后的刷新失败不算成功、不删已有有效配置（刷新失败与保存失败是两个结果）', async () => {
+    imRequestMock.mockResolvedValueOnce({
+      roomId: '1',
+      rateLimitPerMinute: 5,
+      dailyLimit: 50,
+      respondToAi: true,
+      mentionRequired: true,
+      approved: true
+    })
+
+    const chatStore = useChatStore()
+    await expect(chatStore.loadAiclawGroupConfigDetail(1001, '1')).resolves.toBe(true)
+
+    await chatStore.saveAiclawGroupConfig(1001, '1', {
+      rateLimitPerMinute: 6,
+      dailyLimit: 60,
+      respondToAi: true,
+      mentionRequired: true,
+      approved: true
+    } as never)
+
+    imRequestMock.mockRejectedValueOnce(new Error('network down'))
+    await expect(chatStore.loadAiclawGroupConfigDetail(1001, '1')).resolves.toBe(false)
+
+    // 刷新失败不得清掉保存前已生效的配置（普通单群读取失败不主动删已有有效配置）
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toMatchObject({ rateLimitPerMinute: 5, dailyLimit: 50 })
+  })
+
+  it('A4/A6：成员移除后保存返回的旧刷新不得复活该群配置', async () => {
+    imRequestMock.mockResolvedValueOnce({
+      roomId: '1',
+      rateLimitPerMinute: 5,
+      dailyLimit: 50,
+      respondToAi: true,
+      mentionRequired: true,
+      approved: true
+    })
+
+    const chatStore = useChatStore()
+    await expect(chatStore.loadAiclawGroupConfigDetail(1001, '1')).resolves.toBe(true)
+
+    const inFlight = deferred<Record<string, unknown>>()
+    imRequestMock.mockReturnValueOnce(inFlight.promise)
+    const refresh = chatStore.loadAiclawGroupConfigDetail(1001, '1')
+    await waitForRequest(2)
+
+    // 成员移除：逐出缓存并作废在途读取
+    chatStore.removeAiclawGroupConfig(1001, '1')
+
+    inFlight.resolve({ roomId: '1', rateLimitPerMinute: 7, dailyLimit: 70, respondToAi: true, mentionRequired: true })
+    await expect(refresh).resolves.toBe(false)
+    expect(chatStore.getAiclawGroupConfig(1001, '1')).toBeUndefined()
+  })
+})

@@ -45,7 +45,7 @@ import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue
 import { useChatStore } from '@/stores/chat'
 import { useGroupStore } from '@/stores/group'
 import type { AiclawGroupConfig } from '@/services/wsType'
-import { buildDefaultWorkspaceDir, isDirBasedAdapter } from '@/utils/aiclawGroupConfig'
+import { buildDefaultWorkspaceDir, aiclawGroupConfigReflects, isDirBasedAdapter } from '@/utils/aiclawGroupConfig'
 
 export type BatchAiclawItem = {
   uid: string
@@ -151,13 +151,34 @@ const handleSave = async (
   uid: string,
   config: AiclawGroupConfig & { roomId: string; roomName?: string; account?: string }
 ) => {
+  const seq = loadSeq
   savingUid.value = uid
   try {
-    await chatStore.saveAiclawGroupConfig(Number(uid), props.roomId, config)
-    window.$message?.success?.(t('aiclaw.group_settings.save_success'))
-  } catch (error) {
-    console.error('[AiclawBatchGroupConfigModal] Failed to save config:', error)
-    window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
+    try {
+      await chatStore.saveAiclawGroupConfig(Number(uid), props.roomId, config)
+    } catch (error) {
+      console.error('[AiclawBatchGroupConfigModal] Failed to save config:', error)
+      if (savingUid.value === uid) window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
+      return
+    }
+    // #457 A4/A13：保存后的刷新是保存之后的新读取（store 已作废保存前的旧读取）；
+    // 刷新失败单独提示，不误报保存失败也不宣称已刷新。
+    const refreshed = await chatStore.loadAiclawGroupConfigDetail(Number(uid), props.roomId)
+    if (seq !== loadSeq || savingUid.value !== uid) return
+    const matched = chatStore.getAiclawGroupConfig(Number(uid), props.roomId)
+    if (matched) {
+      items.value = items.value.map((item) =>
+        String(item.uid) === uid
+          ? { ...item, config: { ...matched, account: matched.account || item.config.account } }
+          : item
+      )
+    }
+    // #457 A13：刷新失败时缓存可能仍是保存前的值，只有确实一致才能宣称已更新
+    if (refreshed || aiclawGroupConfigReflects(matched, config)) {
+      window.$message?.success?.(t('aiclaw.group_settings.save_success'))
+    } else {
+      window.$message?.warning?.(t('aiclaw.group_settings.saved_refresh_failed'))
+    }
   } finally {
     if (savingUid.value === uid) savingUid.value = null
   }

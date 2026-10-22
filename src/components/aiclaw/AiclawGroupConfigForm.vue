@@ -94,12 +94,31 @@ const ensureDefaults = (cfg: ConfigItem): ConfigItem => ({
   workspaceDir: cfg.workspaceDir ?? (showWorkspaceDir.value ? props.defaultWorkspaceDir : undefined)
 })
 
-const localConfig = ref<ConfigItem>(ensureDefaults({ ...props.config }))
+/** 用户可编辑字段（roomName/account/roomId 等展示字段不参与草稿判定） */
+const formSignature = (cfg: ConfigItem) =>
+  JSON.stringify([
+    cfg.rateLimitPerMinute,
+    cfg.dailyLimit,
+    cfg.respondToAi,
+    cfg.mentionRequired,
+    cfg.approved,
+    cfg.workspaceDir
+  ])
 
+/** 最近一次与服务端对齐的值；localConfig 与之不同即视为存在未保存草稿 */
+const baseline = ref<ConfigItem>(ensureDefaults({ ...props.config }))
+const localConfig = ref<ConfigItem>({ ...baseline.value })
+
+// #457 A14：同群后台配置更新不得重置未保存输入；无草稿时才跟随服务端（无关群变化不重建卡片内容）。
+// 保存成功后的刷新回包与草稿一致 → 视为已对齐并更新基线；不一致的后台更新一律不覆盖草稿。
 watch(
   () => props.config,
   (newConfig) => {
-    localConfig.value = ensureDefaults({ ...newConfig })
+    const next = ensureDefaults({ ...newConfig })
+    const draft = formSignature(localConfig.value) !== formSignature(baseline.value)
+    if (draft && formSignature(next) !== formSignature(localConfig.value)) return
+    baseline.value = next
+    localConfig.value = { ...next }
   },
   { deep: true }
 )
