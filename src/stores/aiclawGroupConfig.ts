@@ -32,15 +32,6 @@ export const useAiclawGroupConfigStore = defineStore(StoresEnum.AICLAW_GROUP_CON
   // 防止关闭弹窗后仍在飞的 openModal 异步加载覆盖新的弹窗上下文
   let openModalCallId = 0
 
-  const defaultConfigFor = (roomId: string): AiclawGroupConfigItem => ({
-    roomId,
-    rateLimitPerMinute: 10,
-    dailyLimit: 1000,
-    respondToAi: true,
-    mentionRequired: true,
-    approved: false
-  })
-
   /** 打开指定 aiclaw 在当前群的配置弹窗 */
   const openModal = async (targetUid: string) => {
     const globalStore = useGlobalStore()
@@ -77,13 +68,17 @@ export const useAiclawGroupConfigStore = defineStore(StoresEnum.AICLAW_GROUP_CON
         return
       }
       const matched = chatStore.getAiclawGroupConfig(Number(targetUid), roomId)
+      // #456 A11：缓存无配置不算「加载成功」——不用默认值冒充已加载的数据，直接给错误态
+      if (!matched) {
+        modalError.value = t('aiclaw.group_settings.load_failed')
+        return
+      }
       const adapterType = aiclawStore.getAdapterType(targetUid)
-      const config = matched ?? defaultConfigFor(roomId)
       modalContext.value = {
         aiclawUid: targetUid,
         roomId,
         adapterType,
-        config
+        config: matched
       }
     } catch (error) {
       console.error('[AiclawGroupConfigStore] 加载 aiclaw 群配置失败:', error)

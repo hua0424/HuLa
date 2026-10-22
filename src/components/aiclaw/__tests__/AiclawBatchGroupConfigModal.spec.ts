@@ -25,7 +25,7 @@ const mockGetGroupDetail = vi.fn()
 
 vi.mock('@/stores/chat', () => ({
   useChatStore: () => ({
-    loadAiclawGroupConfig: mockLoad,
+    loadAiclawGroupConfigDetail: mockLoad,
     getAiclawGroupConfig: mockGetConfig,
     saveAiclawGroupConfig: mockSave
   })

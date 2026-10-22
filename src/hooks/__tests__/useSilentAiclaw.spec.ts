@@ -12,7 +12,7 @@ import { nextTick, reactive, ref } from 'vue'
 
 const mockGetUserInfo = vi.fn()
 const mockGetAiclawGroupConfig = vi.fn()
-const mockLoadAiclawGroupConfig = vi.fn().mockResolvedValue(true)
+const mockLoadAiclawGroupConfigDetail = vi.fn().mockResolvedValue(true)
 
 const globalState = reactive<{ currentSessionRoomId: string }>({ currentSessionRoomId: '' })
 const chatState = reactive<{ isGroup: boolean }>({ isGroup: false })
@@ -25,7 +25,7 @@ vi.mock('@/stores/chat', () => ({
       return chatState.isGroup
     },
     getAiclawGroupConfig: mockGetAiclawGroupConfig,
-    loadAiclawGroupConfig: mockLoadAiclawGroupConfig
+    loadAiclawGroupConfigDetail: mockLoadAiclawGroupConfigDetail
   }))
 }))
 vi.mock('@/stores/global', () => ({
@@ -52,7 +52,7 @@ describe('useSilentAiclaw', () => {
     setActivePinia(createPinia())
     mockGetUserInfo.mockReset()
     mockGetAiclawGroupConfig.mockReset()
-    mockLoadAiclawGroupConfig.mockClear()
+    mockLoadAiclawGroupConfigDetail.mockClear()
     globalState.currentSessionRoomId = ''
     chatState.isGroup = false
     groupUserList.value = []
@@ -113,16 +113,16 @@ describe('useSilentAiclaw', () => {
       ]
       const { loadSilentConfigsForCurrentRoom } = useSilentAiclaw({ autoWatch: false })
       await loadSilentConfigsForCurrentRoom()
-      expect(mockLoadAiclawGroupConfig).toHaveBeenCalledTimes(2)
-      expect(mockLoadAiclawGroupConfig).toHaveBeenCalledWith(1, '100')
-      expect(mockLoadAiclawGroupConfig).toHaveBeenCalledWith(3, '100')
+      expect(mockLoadAiclawGroupConfigDetail).toHaveBeenCalledTimes(2)
+      expect(mockLoadAiclawGroupConfigDetail).toHaveBeenCalledWith(1, '100')
+      expect(mockLoadAiclawGroupConfigDetail).toHaveBeenCalledWith(3, '100')
     })
 
     it('无当前房间时不拉取', async () => {
       groupUserList.value = [{ uid: '1', userType: AICLAW }]
       const { loadSilentConfigsForCurrentRoom } = useSilentAiclaw({ autoWatch: false })
       await loadSilentConfigsForCurrentRoom()
-      expect(mockLoadAiclawGroupConfig).not.toHaveBeenCalled()
+      expect(mockLoadAiclawGroupConfigDetail).not.toHaveBeenCalled()
     })
   })
 
@@ -131,14 +131,14 @@ describe('useSilentAiclaw', () => {
       useSilentAiclaw({ autoWatch: true })
       // immediate 首次：roomId 空，不拉
       await nextTick()
-      expect(mockLoadAiclawGroupConfig).not.toHaveBeenCalled()
+      expect(mockLoadAiclawGroupConfigDetail).not.toHaveBeenCalled()
 
       // 进群 + 成员就绪
       groupUserList.value = [{ uid: '1', userType: AICLAW }]
       globalState.currentSessionRoomId = '100'
       chatState.isGroup = true
       await nextTick()
-      expect(mockLoadAiclawGroupConfig).toHaveBeenCalledWith(1, '100')
+      expect(mockLoadAiclawGroupConfigDetail).toHaveBeenCalledWith(1, '100')
     })
   })
 })

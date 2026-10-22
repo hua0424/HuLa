@@ -105,18 +105,27 @@ const fetchAdapterType = async () => {
   }
 }
 
+// #456 A10：离开本页后，旧加载/保存/批准结果不得改写已卸载页面、也不发过时完成提示
+let disposed = false
+onBeforeUnmount(() => {
+  disposed = true
+})
+
 const fetchConfigs = async () => {
   loading.value = true
   try {
     await chatStore.loadAiclawGroupConfigs(Number(uid))
+    // #456 A10：离开本页后旧加载不得改写列表（同账号有效数据仍已进共享缓存）
+    if (disposed) return
     groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
   } catch (error) {
     console.error('[AiclawGroupSettings] Failed to load configs:', error)
   } finally {
-    loading.value = false
+    if (!disposed) loading.value = false
   }
 }
 
+// #456 A10：离开本页后，旧保存结果不得改写已卸载页面、也不发过时完成提示
 const handleSaveGroupConfig = async (config: GroupConfigItem) => {
   savingGroupConfig.value = config.roomId
   try {
@@ -129,6 +138,7 @@ const handleSaveGroupConfig = async (config: GroupConfigItem) => {
       workspaceDir: config.workspaceDir
     })
     await chatStore.loadAiclawGroupConfig(Number(uid), config.roomId)
+    if (disposed) return
     // 同步本地列表，让排序/徽章立即刷新（P2：表单 toggle 关闭批准也要即时生效）
     groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
     window.$message?.success?.(t('aiclaw.group_settings.save_success'))
@@ -136,7 +146,7 @@ const handleSaveGroupConfig = async (config: GroupConfigItem) => {
     console.error('[AiclawGroupSettings] Failed to save config:', error)
     window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
   } finally {
-    savingGroupConfig.value = null
+    if (savingGroupConfig.value === config.roomId) savingGroupConfig.value = null
   }
 }
 
@@ -147,6 +157,7 @@ const handleApproveGroupConfig = async (config: GroupConfigItem) => {
   try {
     await chatStore.saveAiclawGroupConfig(Number(uid), config.roomId, { approved: true })
     await chatStore.loadAiclawGroupConfig(Number(uid), config.roomId)
+    if (disposed) return
     // 同步本地列表，让排序/徽章立即刷新
     groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
     window.$message?.success?.(t('aiclaw.group_settings.approve_success'))
@@ -154,7 +165,7 @@ const handleApproveGroupConfig = async (config: GroupConfigItem) => {
     console.error('[AiclawGroupSettings] Failed to approve config:', error)
     window.$message?.error?.(t('aiclaw.group_settings.approve_failed'))
   } finally {
-    savingGroupConfig.value = null
+    if (savingGroupConfig.value === config.roomId) savingGroupConfig.value = null
   }
 }
 

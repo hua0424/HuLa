@@ -272,3 +272,66 @@ describe('REQ-012 #114：AI 助理群设置未激活群卡显眼化 + 一键批�
     expect(betaCard!.find('[data-testid="aiclaw-group-card-inactive-badge"]').exists()).toBe(true)
   })
 })
+
+describe('#456 A10：加载在途时切页/切助理，旧结果不改写当前列表与加载态', () => {
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((r) => {
+      resolve = r
+    })
+    return { promise, resolve }
+  }
+
+  it('先发起的加载后返回时不得覆盖后发起加载的列表', async () => {
+    const first = deferred<boolean>()
+    const second = deferred<boolean>()
+    chatStoreMocks.loadAiclawGroupConfigs.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+
+    const wrapper = mountWindow()
+    await flushPromises()
+    // query 带 aiclawUid 时进页即加载一次（仍在途）
+    expect(chatStoreMocks.loadAiclawGroupConfigs).toHaveBeenCalledTimes(1)
+
+    // 第一次加载仍在途：切回列表再进群设置，发起第二次加载
+    await wrapper.find('[data-testid="aiclaw-back-group-settings"]').trigger('click')
+    await flushPromises()
+    const openEntry = wrapper.find('[data-testid="aiclaw-open-group-settings"]')
+    expect(openEntry.exists()).toBe(true)
+    await openEntry.trigger('click')
+    await flushPromises()
+    expect(chatStoreMocks.loadAiclawGroupConfigs).toHaveBeenCalledTimes(2)
+
+    chatStoreMocks.getAiclawGroupConfigList.mockReturnValue([
+      {
+        roomId: 'room-9',
+        roomName: '新群',
+        rateLimitPerMinute: 5,
+        dailyLimit: 100,
+        respondToAi: false,
+        mentionRequired: true,
+        approved: true
+      }
+    ])
+    second.resolve(true)
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="aiclaw-group-card"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('新群')
+
+    // 旧加载（第一次）此时才返回：不得改写当前列表
+    chatStoreMocks.getAiclawGroupConfigList.mockReturnValue([
+      {
+        roomId: 'room-1',
+        roomName: '旧群',
+        rateLimitPerMinute: 5,
+        dailyLimit: 100,
+        respondToAi: false,
+        mentionRequired: true,
+        approved: true
+      }
+    ])
+    first.resolve(true)
+    await flushPromises()
+    expect(wrapper.text()).toContain('新群')
+    expect(wrapper.text()).not.toContain('旧群')
+  })
+})
