@@ -67,7 +67,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
-import { buildDefaultWorkspaceDir, sortAiclawGroupConfigs } from '@/utils/aiclawGroupConfig'
+import { buildDefaultWorkspaceDir, aiclawGroupConfigReflects, sortAiclawGroupConfigs } from '@/utils/aiclawGroupConfig'
 import { ImUrlEnum } from '@/enums'
 import { imRequest } from '@/utils/ImRequestUtils'
 import type { AiclawGroupConfig } from '@/services/wsType'
@@ -130,7 +130,8 @@ const fetchConfigs = async () => {
 const runSave = async (
   config: GroupConfigItem,
   submit: () => Promise<unknown>,
-  messages: { success: string; failure: string }
+  messages: { success: string; failure: string },
+  submitted: Partial<AiclawGroupConfig>
 ) => {
   savingGroupConfig.value = config.roomId
   try {
@@ -146,7 +147,8 @@ const runSave = async (
     if (disposed) return
     // 同步本地列表，让排序/徽章立即刷新（P2：表单 toggle 关闭批准也要即时生效）
     groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
-    if (refreshed || chatStore.getAiclawGroupConfig(Number(uid), config.roomId)) {
+    // #457 A13：只有拿到保存之后的刷新结果，或共享缓存已与本次提交一致，才能宣称界面是最新的
+    if (refreshed || aiclawGroupConfigReflects(chatStore.getAiclawGroupConfig(Number(uid), config.roomId), submitted)) {
       window.$message?.success?.(messages.success)
     } else {
       window.$message?.warning?.(t('aiclaw.group_settings.saved_refresh_failed'))
@@ -156,28 +158,37 @@ const runSave = async (
   }
 }
 
-const handleSaveGroupConfig = (config: GroupConfigItem) =>
-  runSave(
+const handleSaveGroupConfig = (config: GroupConfigItem) => {
+  const submitted: AiclawGroupConfig = {
+    rateLimitPerMinute: config.rateLimitPerMinute,
+    dailyLimit: config.dailyLimit,
+    respondToAi: config.respondToAi,
+    mentionRequired: config.mentionRequired,
+    approved: config.approved,
+    workspaceDir: config.workspaceDir
+  }
+  return runSave(
     config,
-    () =>
-      chatStore.saveAiclawGroupConfig(Number(uid), config.roomId, {
-        rateLimitPerMinute: config.rateLimitPerMinute,
-        dailyLimit: config.dailyLimit,
-        respondToAi: config.respondToAi,
-        mentionRequired: config.mentionRequired,
-        approved: config.approved,
-        workspaceDir: config.workspaceDir
-      }),
-    { success: t('aiclaw.group_settings.save_success'), failure: t('aiclaw.group_settings.save_failed') }
+    () => chatStore.saveAiclawGroupConfig(Number(uid), config.roomId, submitted),
+    { success: t('aiclaw.group_settings.save_success'), failure: t('aiclaw.group_settings.save_failed') },
+    submitted
   )
+}
 
 // REQ-012 #114：一键批准并立即重载该群配置
 // #134：批准只提交 approved 位，不携带其它表单字段，避免覆盖未保存的编辑值。
-const handleApproveGroupConfig = (config: GroupConfigItem) =>
-  runSave(config, () => chatStore.saveAiclawGroupConfig(Number(uid), config.roomId, { approved: true }), {
-    success: t('aiclaw.group_settings.approve_success'),
-    failure: t('aiclaw.group_settings.approve_failed')
-  })
+const handleApproveGroupConfig = (config: GroupConfigItem) => {
+  const submitted: Partial<AiclawGroupConfig> = { approved: true }
+  return runSave(
+    config,
+    () => chatStore.saveAiclawGroupConfig(Number(uid), config.roomId, submitted),
+    {
+      success: t('aiclaw.group_settings.approve_success'),
+      failure: t('aiclaw.group_settings.approve_failed')
+    },
+    submitted
+  )
+}
 
 onMounted(async () => {
   highlightRoomId.value = (route.query.roomId as string) || null

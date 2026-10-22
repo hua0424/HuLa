@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  aiclawGroupConfigReflects,
   buildAiclawGroupConfigUpdateBody,
   buildGroupCardLabel,
   normalizeAiclawGroupConfig,
@@ -187,5 +188,49 @@ describe('#56 buildGroupCardLabel：群名(群号) + 兜底阶梯', () => {
 
   it('名称/群号两端空白被 trim（不产生 "名称( )" 这种脏串）', () => {
     expect(buildGroupCardLabel('  Dawn的群组 ', ' hula_mq8zrGyH ', '1')).toBe('Dawn的群组(hula_mq8zrGyH)')
+  })
+})
+
+/**
+ * #457 A13：保存后「界面是否已是最新」的判定缝。
+ *
+ * 保存成功后 store 只作废旧读取、不写缓存，所以刷新失败时缓存里往往还是保存前的值；
+ * 只有拿到保存之后的刷新结果，或缓存已与本次提交一致，才能宣称界面已更新。
+ */
+describe('aiclawGroupConfigReflects（#457 A13 刷新失败判定）', () => {
+  const saved: AiclawGroupConfig = {
+    rateLimitPerMinute: 5,
+    dailyLimit: 100,
+    respondToAi: false,
+    mentionRequired: true,
+    approved: false,
+    workspaceDir: '~/.aichat/opencode/workspace/1001/group/hula_g1'
+  }
+
+  it('缓存为空 → 不能宣称已更新', () => {
+    expect(aiclawGroupConfigReflects(undefined, saved)).toBe(false)
+    expect(aiclawGroupConfigReflects(null, saved)).toBe(false)
+  })
+
+  it('缓存仍是保存前的值 → 不能宣称已更新', () => {
+    expect(aiclawGroupConfigReflects({ ...saved, rateLimitPerMinute: 10 }, saved)).toBe(false)
+  })
+
+  it('缓存与本次提交一致 → 可以宣称已更新', () => {
+    expect(aiclawGroupConfigReflects({ ...saved }, saved)).toBe(true)
+  })
+
+  it('只提交 approved 时，仅比较 approved（不因其它字段被旧值拖成 false）', () => {
+    expect(aiclawGroupConfigReflects({ ...saved, approved: true }, { approved: true })).toBe(true)
+    expect(aiclawGroupConfigReflects({ ...saved }, { approved: true })).toBe(false)
+  })
+
+  it('提交里没下发的字段（undefined）不参与比较', () => {
+    expect(
+      aiclawGroupConfigReflects({ ...saved, workspaceDir: undefined }, { ...saved, workspaceDir: undefined })
+    ).toBe(true)
+    expect(
+      aiclawGroupConfigReflects({ rateLimitPerMinute: 5 }, { rateLimitPerMinute: 5, workspaceDir: undefined })
+    ).toBe(true)
   })
 })

@@ -432,6 +432,43 @@ describe('#457 保存刷新闭环（web 路径）', () => {
     expect(message.warning).toHaveBeenCalledWith('配置已保存，但刷新失败，界面可能不是最新')
   })
 
+  // #457 A13/MF-2：刷新失败且共享缓存仍是保存前的值（进页预填的旧值）→ 不得宣称已刷新
+  it('A13：刷新失败且缓存仍是保存前的值 → 仍按刷新失败提示', async () => {
+    chatStoreMocks.loadAiclawGroupConfigDetail.mockResolvedValueOnce(false)
+    chatStoreMocks.getAiclawGroupConfig.mockReturnValue({
+      roomId: 'room-2',
+      rateLimitPerMinute: 10,
+      dailyLimit: 1000,
+      respondToAi: true,
+      mentionRequired: true,
+      approved: false
+    })
+
+    const wrapper = mountWindow()
+    await flushPromises()
+    const forms = wrapper.findAllComponents({ name: 'AiclawGroupConfigFormStub' })
+    await forms[0].vm.$emit('save', savePayload)
+    await flushPromises()
+
+    expect(message.success).not.toHaveBeenCalled()
+    expect(message.warning).toHaveBeenCalledWith('配置已保存，但刷新失败，界面可能不是最新')
+  })
+
+  // #457 A13：刷新没拿到结果，但缓存已与本次提交一致（例如 WS 已同步）→ 可以宣称已更新
+  it('A13：刷新无结果但缓存已与提交一致 → 给保存成功提示', async () => {
+    chatStoreMocks.loadAiclawGroupConfigDetail.mockResolvedValueOnce(false)
+    chatStoreMocks.getAiclawGroupConfig.mockReturnValue({ ...savePayload })
+
+    const wrapper = mountWindow()
+    await flushPromises()
+    const forms = wrapper.findAllComponents({ name: 'AiclawGroupConfigFormStub' })
+    await forms[0].vm.$emit('save', savePayload)
+    await flushPromises()
+
+    expect(message.success).toHaveBeenCalledWith('配置已保存')
+    expect(message.warning).not.toHaveBeenCalled()
+  })
+
   // #457 A10：保存在途时离开群设置页 → 不刷新、不发过时完成提示
   it('A10：保存在途时离开群设置页 → 不发过时完成提示、不改写页面', async () => {
     const save = deferred<void>()

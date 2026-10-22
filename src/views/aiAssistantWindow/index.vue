@@ -542,7 +542,12 @@ import { ImUrlEnum, ChangeTypeEnum } from '@/enums'
 import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
 import { isDesktop, isWeb } from '@/utils/PlatformConstants'
 import { MEMBER_CHANGE_EVENT, type MemberChangeBroadcastPayload } from '@/utils/memberChangeBroadcast'
-import { buildDefaultWorkspaceDir, buildGroupCardLabel, sortAiclawGroupConfigs } from '@/utils/aiclawGroupConfig'
+import {
+  buildDefaultWorkspaceDir,
+  buildGroupCardLabel,
+  aiclawGroupConfigReflects,
+  sortAiclawGroupConfigs
+} from '@/utils/aiclawGroupConfig'
 import { formatAiclawConversationTime } from '@/utils/aiclawConversationTime'
 import { useChatStore } from '@/stores/chat'
 import { useAiclawStore } from '@/stores/aiclaw'
@@ -1089,7 +1094,8 @@ const setupMemberChangeListener = async () => {
 const runGroupConfigSave = async (
   config: { roomId: string },
   submit: (aiclawUid: number) => Promise<unknown>,
-  messages: { success: string; failure: string }
+  messages: { success: string; failure: string },
+  submitted: Partial<import('@/services/wsType').AiclawGroupConfig>
 ) => {
   const uid = selectedUid.value
   if (!uid) return
@@ -1117,8 +1123,9 @@ const runGroupConfigSave = async (
     if (!uiCurrent()) return
     // 同步本地列表，让排序/徽章立即刷新（P2：表单 toggle 关闭批准也要即时生效）
     groupConfigList.value = chatStore.getAiclawGroupConfigList(Number(uid))
-    // #457 A13：保存成功但刷新失败 → 明确「已保存，界面可能不是最新」，既不误报保存失败也不宣称已刷新
-    if (refreshed || chatStore.getAiclawGroupConfig(Number(uid), roomId)) {
+    // #457 A13：只有拿到保存之后的刷新结果，或共享缓存已与本次提交一致，才能宣称界面是最新的；
+    // 「保存成功但刷新失败」时缓存仍是保存前的值，必须提示刷新失败，既不误报保存失败也不宣称已刷新。
+    if (refreshed || aiclawGroupConfigReflects(chatStore.getAiclawGroupConfig(Number(uid), roomId), submitted)) {
       window.$message?.success?.(messages.success)
     } else {
       window.$message?.warning?.(t('aiclaw.group_settings.saved_refresh_failed'))
@@ -1130,34 +1137,39 @@ const runGroupConfigSave = async (
 
 const handleSaveGroupConfig = (
   config: import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string }
-) =>
-  runGroupConfigSave(
+) => {
+  const submitted: import('@/services/wsType').AiclawGroupConfig = {
+    rateLimitPerMinute: config.rateLimitPerMinute,
+    dailyLimit: config.dailyLimit,
+    respondToAi: config.respondToAi,
+    mentionRequired: config.mentionRequired,
+    approved: config.approved,
+    workspaceDir: config.workspaceDir
+  }
+  return runGroupConfigSave(
     config,
-    (aiclawUid) =>
-      chatStore.saveAiclawGroupConfig(aiclawUid, config.roomId, {
-        rateLimitPerMinute: config.rateLimitPerMinute,
-        dailyLimit: config.dailyLimit,
-        respondToAi: config.respondToAi,
-        mentionRequired: config.mentionRequired,
-        approved: config.approved,
-        workspaceDir: config.workspaceDir
-      }),
-    { success: t('aiclaw.group_settings.save_success'), failure: t('aiclaw.group_settings.save_failed') }
+    (aiclawUid) => chatStore.saveAiclawGroupConfig(aiclawUid, config.roomId, submitted),
+    { success: t('aiclaw.group_settings.save_success'), failure: t('aiclaw.group_settings.save_failed') },
+    submitted
   )
+}
 
 // REQ-012 #114：一键批准（approved=true）并立即重载该群配置
 // #134：批准只提交 approved 位，不携带其它表单字段，避免覆盖未保存的编辑值。
 const handleApproveGroupConfig = (
   config: import('@/services/wsType').AiclawGroupConfig & { roomId: string; roomName?: string }
-) =>
-  runGroupConfigSave(
+) => {
+  const submitted: Partial<import('@/services/wsType').AiclawGroupConfig> = { approved: true }
+  return runGroupConfigSave(
     config,
-    (aiclawUid) => chatStore.saveAiclawGroupConfig(aiclawUid, config.roomId, { approved: true }),
+    (aiclawUid) => chatStore.saveAiclawGroupConfig(aiclawUid, config.roomId, submitted),
     {
       success: t('aiclaw.group_settings.approve_success'),
       failure: t('aiclaw.group_settings.approve_failed')
-    }
+    },
+    submitted
   )
+}
 
 // REQ-009 #88: 从通知跳转到指定 aiclaw 的群设置卡片
 const selectAiclawAndOpenGroupSettings = async (aiclawUid: string, roomId: string) => {

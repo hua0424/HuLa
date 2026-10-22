@@ -350,6 +350,7 @@ describe('#457 A4/A13：保存后刷新代次与失败表达', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     getAiclawGroupConfigListMock.mockReturnValue([inactiveConfig])
+    getAiclawGroupConfigMock.mockReturnValue(undefined)
     message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
     ;(window as unknown as { $message: unknown }).$message = message
   })
@@ -392,5 +393,41 @@ describe('#457 A4/A13：保存后刷新代次与失败表达', () => {
     expect(message.error).not.toHaveBeenCalled()
     expect(message.success).not.toHaveBeenCalled()
     expect(message.warning).toHaveBeenCalledWith('配置已保存，但刷新失败，界面可能不是最新')
+  })
+
+  // #457 A13/MF-2：刷新失败且共享缓存仍是保存前的值（进页预填的旧值）→ 不得宣称已刷新
+  it('A13：刷新失败且缓存仍是保存前的值 → 仍按刷新失败提示', async () => {
+    loadAiclawGroupConfigDetailMock.mockResolvedValueOnce(false)
+    getAiclawGroupConfigMock.mockReturnValue({
+      rateLimitPerMinute: 10,
+      dailyLimit: 1000,
+      respondToAi: true,
+      mentionRequired: true,
+      approved: false
+    })
+
+    const wrapper = mountWithStubbedForm()
+    await flushPromises()
+    const forms = wrapper.findAllComponents({ name: 'AiclawGroupConfigFormStub' })
+    await forms[0].vm.$emit('save', { ...inactiveConfig })
+    await flushPromises()
+
+    expect(message.success).not.toHaveBeenCalled()
+    expect(message.warning).toHaveBeenCalledWith('配置已保存，但刷新失败，界面可能不是最新')
+  })
+
+  // #457 A13：刷新没拿到结果，但缓存已与本次提交一致 → 可以宣称已更新
+  it('A13：刷新无结果但缓存已与提交一致 → 给保存成功提示', async () => {
+    loadAiclawGroupConfigDetailMock.mockResolvedValueOnce(false)
+    getAiclawGroupConfigMock.mockReturnValue({ ...inactiveConfig })
+
+    const wrapper = mountWithStubbedForm()
+    await flushPromises()
+    const forms = wrapper.findAllComponents({ name: 'AiclawGroupConfigFormStub' })
+    await forms[0].vm.$emit('save', { ...inactiveConfig })
+    await flushPromises()
+
+    expect(message.success).toHaveBeenCalledTimes(1)
+    expect(message.warning).not.toHaveBeenCalled()
   })
 })

@@ -5,6 +5,7 @@ import { useChatStore } from '@/stores/chat'
 import { useGlobalStore } from '@/stores/global'
 import { useAiclawStore } from '@/stores/aiclaw'
 import type { AiclawGroupConfig } from '@/services/wsType'
+import { aiclawGroupConfigReflects } from '@/utils/aiclawGroupConfig'
 import { useI18n } from 'vue-i18n'
 
 export type AiclawGroupConfigItem = AiclawGroupConfig & { roomId: string; roomName?: string; account?: string }
@@ -119,7 +120,8 @@ export const useAiclawGroupConfigStore = defineStore(StoresEnum.AICLAW_GROUP_CON
       // store 在保存成功时已作废保存前的旧读取，这里的刷新拿到的一定是保存之后的数据
       const refreshed = await chatStore.loadAiclawGroupConfigDetail(Number(aiclawUid), roomId)
       if (!sameContext()) return
-      if (refreshed || chatStore.getAiclawGroupConfig(Number(aiclawUid), roomId)) {
+      // #457 A13：刷新失败时缓存可能仍是保存前的值，只有确实一致才能宣称已更新
+      if (refreshed || aiclawGroupConfigReflects(chatStore.getAiclawGroupConfig(Number(aiclawUid), roomId), config)) {
         window.$message?.success?.(t('aiclaw.group_settings.save_success'))
       } else {
         window.$message?.warning?.(t('aiclaw.group_settings.saved_refresh_failed'))

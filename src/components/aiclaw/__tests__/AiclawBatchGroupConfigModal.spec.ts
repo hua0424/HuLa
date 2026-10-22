@@ -218,6 +218,59 @@ describe('AiclawBatchGroupConfigModal', () => {
     delete (window as unknown as { $message?: unknown }).$message
   })
 
+  // #457 A13/MF-2：刷新失败且缓存仍是保存前的值 → 不得宣称已刷新
+  it('A13：刷新失败且缓存仍是保存前的值 → 仍提示已保存但刷新失败', async () => {
+    const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as unknown as { $message: unknown }).$message = message
+    mockLoad.mockResolvedValue(false)
+    mockGetConfig.mockReturnValue({
+      rateLimitPerMinute: 999,
+      dailyLimit: 1000,
+      respondToAi: true,
+      mentionRequired: true,
+      approved: false
+    })
+
+    mountModal({
+      visible: true,
+      roomId: 'room-1',
+      account: 'hula_g1',
+      aiclawItems: [{ uid: '1001', name: 'OpenCode Bot', adapterType: 'opencode' }]
+    })
+    await flushPromises()
+
+    ;(document.querySelector('[data-testid="aiclaw-group-config-save"]') as HTMLElement | null)?.click()
+    await flushPromises()
+
+    expect(message.success).not.toHaveBeenCalled()
+    expect(message.warning).toHaveBeenCalledWith('配置已保存，但刷新失败，界面可能不是最新')
+    delete (window as unknown as { $message?: unknown }).$message
+  })
+
+  // #457 A13：刷新没拿到结果，但缓存已与本次提交一致 → 可以宣称已更新
+  it('A13：刷新无结果但缓存已与提交一致 → 提示保存成功', async () => {
+    const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as unknown as { $message: unknown }).$message = message
+    mockLoad.mockResolvedValue(false)
+    // 提交体即本用例写入缓存的值（模拟 WS 已把本次提交同步进共享缓存）
+    mockGetConfig.mockImplementation(() => mockSave.mock.calls[0]?.[2])
+
+    mountModal({
+      visible: true,
+      roomId: 'room-1',
+      account: 'hula_g1',
+      aiclawItems: [{ uid: '1001', name: 'OpenCode Bot', adapterType: 'opencode' }]
+    })
+    await flushPromises()
+
+    ;(document.querySelector('[data-testid="aiclaw-group-config-save"]') as HTMLElement | null)?.click()
+    await flushPromises()
+
+    expect(message.success).toHaveBeenCalledWith('配置已保存')
+    expect(message.warning).not.toHaveBeenCalled()
+    delete (window as unknown as { $message?: unknown }).$message
+  })
+
   // #457 A10：保存在途时目标成员变了（弹窗重载）→ 旧保存结果不得铺列表、不得发过时完成提示
   it('A10：保存在途时目标成员变化 → 不铺旧结果、不发过时完成提示', async () => {
     const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }

@@ -59,6 +59,30 @@ export const buildAiclawGroupConfigUpdateBody = (
   return body
 }
 
+/** 参与「保存后是否已生效」比较的群配置字段（server VO 语义，见 normalizeAiclawGroupConfig） */
+const AICLAW_CONFIG_FIELDS = [
+  'rateLimitPerMinute',
+  'dailyLimit',
+  'respondToAi',
+  'mentionRequired',
+  'approved',
+  'workspaceDir'
+] as const
+
+/**
+ * #457 A13：共享缓存里的该项配置是否已经反映出本次提交的字段。
+ *
+ * 保存成功后 store 只作废旧读取、不写缓存，所以「保存成功 + 刷新失败」时缓存里往往还是
+ * 保存前的值。只有拿到保存之后的刷新结果，或缓存已与本次提交一致，才能宣称界面是最新的；
+ * 否则必须提示刷新失败。提交里没下发的字段（undefined，server 保持原值）不参与比较，
+ * roomId / roomName 等非配置字段一律忽略。
+ */
+export const aiclawGroupConfigReflects = (
+  cached: Partial<AiclawGroupConfig> | null | undefined,
+  submitted: Partial<AiclawGroupConfig>
+): boolean =>
+  !!cached && AICLAW_CONFIG_FIELDS.every((key) => submitted[key] === undefined || cached[key] === submitted[key])
+
 /**
  * #56 群卡片标题：把内部数字 room_id 显示替换成「群名称(群号)」，
  * 例 `Dawn的群组(hula_mq8zrGyH)`。群号 = im_room_group.account（唯一人类可读群标识，

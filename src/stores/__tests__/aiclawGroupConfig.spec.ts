@@ -219,6 +219,92 @@ describe('useAiclawGroupConfigStore', () => {
     }
   })
 
+  // #457 A13/MF-2：刷新失败且共享缓存仍是保存前的值（弹窗打开时预填的旧值）→ 不得宣称已刷新
+  it('saveModal 保存成功但刷新失败且缓存仍是旧值时，按刷新失败提示', async () => {
+    mockFns.loadDetail.mockResolvedValue(false)
+    mockFns.getConfig.mockReturnValue({
+      roomId: 'room-1',
+      rateLimitPerMinute: 3,
+      dailyLimit: 1000,
+      respondToAi: true,
+      mentionRequired: true
+    })
+    const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as any).$message = message
+    try {
+      const wrapper = mountStore()
+      wrapper.vm.store.modalContext = {
+        aiclawUid: '2001',
+        roomId: 'room-1',
+        config: {
+          roomId: 'room-1',
+          rateLimitPerMinute: 10,
+          dailyLimit: 1000,
+          respondToAi: true,
+          mentionRequired: true
+        }
+      }
+      wrapper.vm.store.modalVisible = true
+
+      await wrapper.vm.store.saveModal({
+        roomId: 'room-1',
+        rateLimitPerMinute: 10,
+        dailyLimit: 1000,
+        respondToAi: true,
+        mentionRequired: true
+      } as any)
+      await flushPromises()
+
+      expect(message.success).not.toHaveBeenCalled()
+      expect(message.warning).toHaveBeenCalledWith('配置已保存，但刷新失败，界面可能不是最新')
+    } finally {
+      delete (window as any).$message
+    }
+  })
+
+  // #457 A13：刷新没拿到结果，但缓存已与本次提交一致 → 可以宣称已更新
+  it('saveModal 刷新无结果但缓存已与提交一致时，给保存成功提示', async () => {
+    mockFns.loadDetail.mockResolvedValue(false)
+    mockFns.getConfig.mockReturnValue({
+      roomId: 'room-1',
+      rateLimitPerMinute: 10,
+      dailyLimit: 1000,
+      respondToAi: true,
+      mentionRequired: true
+    })
+    const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as any).$message = message
+    try {
+      const wrapper = mountStore()
+      wrapper.vm.store.modalContext = {
+        aiclawUid: '2001',
+        roomId: 'room-1',
+        config: {
+          roomId: 'room-1',
+          rateLimitPerMinute: 10,
+          dailyLimit: 1000,
+          respondToAi: true,
+          mentionRequired: true
+        }
+      }
+      wrapper.vm.store.modalVisible = true
+
+      await wrapper.vm.store.saveModal({
+        roomId: 'room-1',
+        rateLimitPerMinute: 10,
+        dailyLimit: 1000,
+        respondToAi: true,
+        mentionRequired: true
+      } as any)
+      await flushPromises()
+
+      expect(message.success).toHaveBeenCalledTimes(1)
+      expect(message.warning).not.toHaveBeenCalled()
+    } finally {
+      delete (window as any).$message
+    }
+  })
+
   // #457 A4/A10：旧保存流程不得关闭新弹窗、改新操作状态或发过时完成提示
   it('saveModal 保存期间弹窗被新上下文取代：不关闭新弹窗、不发过时提示', async () => {
     let releaseSave: () => void = () => {}

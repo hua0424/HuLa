@@ -45,7 +45,7 @@ import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue
 import { useChatStore } from '@/stores/chat'
 import { useGroupStore } from '@/stores/group'
 import type { AiclawGroupConfig } from '@/services/wsType'
-import { buildDefaultWorkspaceDir, isDirBasedAdapter } from '@/utils/aiclawGroupConfig'
+import { buildDefaultWorkspaceDir, aiclawGroupConfigReflects, isDirBasedAdapter } from '@/utils/aiclawGroupConfig'
 
 export type BatchAiclawItem = {
   uid: string
@@ -173,7 +173,8 @@ const handleSave = async (
           : item
       )
     }
-    if (refreshed || matched) {
+    // #457 A13：刷新失败时缓存可能仍是保存前的值，只有确实一致才能宣称已更新
+    if (refreshed || aiclawGroupConfigReflects(matched, config)) {
       window.$message?.success?.(t('aiclaw.group_settings.save_success'))
     } else {
       window.$message?.warning?.(t('aiclaw.group_settings.saved_refresh_failed'))
