@@ -1,4 +1,5 @@
 import { createPinia, setActivePinia } from 'pinia'
+import { PiniaSharedState } from 'pinia-shared-state'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, toRaw } from 'vue'
 
@@ -179,6 +180,33 @@ describe('#239 键类型契约（5 脆弱 store 逐键形态，变更即红）',
     expect(rawBinding(stores.chat, 'aiclawGroupConfigs')).toBeInstanceOf(Map)
     // group 的 dissolvedRoomIds/friendInfoCache 未 return（闭包内部），不在 $state 断言面——
     // 其形态约束由上一条 omit 断言前向锁定
+  })
+
+  it('#243 onlineCountMap 必须是 ref；memberOrderCounters 保持闭包内部', () => {
+    expect(isRef(rawBinding(stores.group, 'onlineCountMap'))).toBe(true)
+    // memberOrderCounters 是闭包内部计数器，不参与共享/持久化，免疫收包整键替换；不纳入 $state 契约面。
+  })
+
+  it('#243 onlineCountMap 双 store 收包写穿、后续写入及整房间删除可见', async () => {
+    const createWindowStore = () => {
+      const pinia = createPinia()
+      pinia.use(PiniaSharedState({ enable: false, initialize: false, type: 'simulate' as never }))
+      createApp({}).use(pinia)
+      setActivePinia(pinia)
+      return useGroupStore()
+    }
+    const main = createWindowStore()
+    const aux = createWindowStore()
+    main.onlineCountMap['room243'] = 2
+    await vi.waitFor(() => expect(aux.onlineCountMap['room243']).toBe(2), { timeout: 3000 })
+    // 收包后调用闭包 action，证明后续写入的不是被替换掉的孤儿对象，且零值能回传。
+    aux.updateMemberCache('room243', [])
+    expect(aux.onlineCountMap['room243']).toBe(0)
+    await vi.waitFor(() => expect(main.onlineCountMap['room243']).toBe(0), { timeout: 3000 })
+    main.onlineCountMap['room243'] = 3
+    await vi.waitFor(() => expect(aux.onlineCountMap['room243']).toBe(3), { timeout: 3000 })
+    main.removeAllUsers('room243')
+    await vi.waitFor(() => expect(Object.hasOwn(aux.onlineCountMap, 'room243')).toBe(false), { timeout: 3000 })
   })
 
   it('A 类 9 键必须是 ref 形态（#237 终裁第 1 条：收包整键替换写穿 ref.value，活同步落地）', () => {
