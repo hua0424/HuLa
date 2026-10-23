@@ -36,7 +36,7 @@ export const useGroupStore = defineStore(
     // #239 PR2：A 类键 reactive→ref——收包整键替换写穿 ref.value，跨窗活同步落地（#237 终裁第 1 条）
     const userListMap = ref<Record<string, UserItem[]>>({})
     const memberOrderCounters = reactive<Record<string, number>>({})
-    const onlineCountMap = reactive<Record<string, number>>({})
+    const onlineCountMap = ref<Record<string, number>>({})
 
     // #179：选中会话期间按 roomId 抑制相关请求的网络错误弹窗（注册表见 errorToastSuppression），
     // 幽灵会话由 useMessage 兜底统一清理并给出优雅提示，瞬时错误由调用方补回提示。
@@ -106,13 +106,13 @@ export const useGroupStore = defineStore(
       if (!Array.isArray(members) || members.length === 0) {
         userListMap.value[roomId] = []
         memberOrderCounters[roomId] = 0
-        onlineCountMap[roomId] = 0
+        onlineCountMap.value[roomId] = 0
         return
       }
 
       const sortedMembers = sortMembersByRole(roomId, members as InternalUserItem[])
       userListMap.value[roomId] = sortedMembers
-      onlineCountMap[roomId] = sortedMembers.filter((m) => m.activeStatus === OnlineEnum.ONLINE).length
+      onlineCountMap.value[roomId] = sortedMembers.filter((m) => m.activeStatus === OnlineEnum.ONLINE).length
     }
     const groupDetails = ref<GroupDetailReq[]>([])
     const userListOptions = ref({ isLast: false, loading: true, cursor: '' }) // 分页加载相关状态（#239 PR2：A 类键 ref 化）
@@ -537,7 +537,7 @@ export const useGroupStore = defineStore(
         group.memberNum = totalNum
         group.onlineNum = onlineNum
         if (typeof onlineNum === 'number') {
-          onlineCountMap[roomId] = onlineNum
+          onlineCountMap.value[roomId] = onlineNum
         }
       }
     }
@@ -731,7 +731,7 @@ export const useGroupStore = defineStore(
     const removeAllUsers = (roomId: string) => {
       delete userListMap.value[roomId]
       delete memberOrderCounters[roomId]
-      delete onlineCountMap[roomId]
+      delete onlineCountMap.value[roomId]
     }
 
     /**
