@@ -143,6 +143,8 @@
     "save": "Save",
     "save_success": "Settings saved",
     "save_failed": "Save failed",
+    "saved_refresh_failed": "Settings saved, but refresh failed; the view may be out of date",
+    "edit_ended_removed": "This assistant was removed from the group; editing has ended",
     "load_failed": "Failed to load group chat settings",
     "batch_load_partial_failed": "Some configs failed to load; defaults are shown",
     "retry": "Retry",

@@ -16,6 +16,7 @@ vi.mock('@/stores/global', () => ({
 const mockFns = vi.hoisted(() => ({
   loadConfig: vi.fn(),
   loadConfigs: vi.fn(),
+  loadDetail: vi.fn(),
   getConfig: vi.fn(),
   saveConfig: vi.fn()
 }))
@@ -25,6 +26,7 @@ vi.mock('@/stores/chat', () => ({
     getAiclawGroupConfig: mockFns.getConfig,
     loadAiclawGroupConfig: mockFns.loadConfig,
     loadAiclawGroupConfigs: mockFns.loadConfigs,
+    loadAiclawGroupConfigDetail: mockFns.loadDetail,
     saveAiclawGroupConfig: mockFns.saveConfig
   }))
 }))
@@ -64,6 +66,7 @@ describe('useAiclawGroupConfigStore', () => {
   beforeEach(() => {
     mockFns.loadConfig.mockReset()
     mockFns.loadConfigs.mockReset()
+    mockFns.loadDetail.mockReset().mockResolvedValue(true)
     mockFns.getConfig.mockReset().mockReturnValue(undefined)
     mockFns.saveConfig.mockReset()
   })
@@ -99,7 +102,8 @@ describe('useAiclawGroupConfigStore', () => {
     })
   })
 
-  it('openModal 成功但缓存无当前群配置时使用默认值', async () => {
+  // #456 A11：无配置不算成功加载，不得用默认值冒充已加载
+  it('openModal 返回 true 但缓存无当前群配置时按加载失败处理，不伪造默认值', async () => {
     mockFns.loadConfig.mockResolvedValue(true)
     mockFns.getConfig.mockReturnValue(undefined)
 
@@ -107,13 +111,9 @@ describe('useAiclawGroupConfigStore', () => {
     await wrapper.vm.store.openModal('2001')
     await flushPromises()
 
-    expect(wrapper.vm.store.modalContext?.config).toMatchObject({
-      roomId: 'room-1',
-      rateLimitPerMinute: 10,
-      dailyLimit: 1000,
-      respondToAi: true,
-      mentionRequired: true
-    })
+    expect(wrapper.vm.store.modalLoading).toBe(false)
+    expect(wrapper.vm.store.modalError).toBe('加载群聊配置失败')
+    expect(wrapper.vm.store.modalContext).toBeNull()
   })
 
   it('openModal 加载返回 false 时设置 error 且 modalContext 为空', async () => {
@@ -141,32 +141,219 @@ describe('useAiclawGroupConfigStore', () => {
   })
 
   it('saveModal 成功时关闭弹窗并清空 saving', async () => {
-    const wrapper = mountStore()
-    wrapper.vm.store.modalContext = {
-      aiclawUid: '2001',
-      roomId: 'room-1',
-      config: {
+    const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as any).$message = message
+    try {
+      const wrapper = mountStore()
+      wrapper.vm.store.modalContext = {
+        aiclawUid: '2001',
+        roomId: 'room-1',
+        config: {
+          roomId: 'room-1',
+          rateLimitPerMinute: 10,
+          dailyLimit: 1000,
+          respondToAi: true,
+          mentionRequired: true
+        }
+      }
+      wrapper.vm.store.modalVisible = true
+
+      await wrapper.vm.store.saveModal({
         roomId: 'room-1',
         rateLimitPerMinute: 10,
         dailyLimit: 1000,
         respondToAi: true,
         mentionRequired: true
-      }
-    }
-    wrapper.vm.store.modalVisible = true
+      } as any)
+      await flushPromises()
 
-    await wrapper.vm.store.saveModal({
+      expect(mockFns.saveConfig).toHaveBeenCalledWith(2001, 'room-1', expect.any(Object))
+      expect(wrapper.vm.store.modalSaving).toBe(false)
+      expect(wrapper.vm.store.modalVisible).toBe(false)
+      // #457 A4：刷新走保存之后的新代次读取（detail），不复用保存前的旧请求
+      expect(mockFns.loadDetail).toHaveBeenCalledWith(2001, 'room-1')
+      expect(message.success).toHaveBeenCalledTimes(1)
+      expect(message.warning).not.toHaveBeenCalled()
+    } finally {
+      delete (window as any).$message
+    }
+  })
+
+  // #457 A13：保存成功 + 刷新失败 → 弹窗照常关闭，提示「已保存但未刷新」，既不误报保存失败也不宣称已刷新
+  it('saveModal 保存成功但刷新失败时给独立提示，不误报保存失败', async () => {
+    mockFns.loadDetail.mockResolvedValue(false)
+    mockFns.getConfig.mockReturnValue(undefined)
+    const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as any).$message = message
+    try {
+      const wrapper = mountStore()
+      wrapper.vm.store.modalContext = {
+        aiclawUid: '2001',
+        roomId: 'room-1',
+        config: {
+          roomId: 'room-1',
+          rateLimitPerMinute: 10,
+          dailyLimit: 1000,
+          respondToAi: true,
+          mentionRequired: true
+        }
+      }
+      wrapper.vm.store.modalVisible = true
+
+      await wrapper.vm.store.saveModal({
+        roomId: 'room-1',
+        rateLimitPerMinute: 10,
+        dailyLimit: 1000,
+        respondToAi: true,
+        mentionRequired: true
+      } as any)
+      await flushPromises()
+
+      expect(wrapper.vm.store.modalVisible).toBe(false)
+      expect(wrapper.vm.store.modalSaving).toBe(false)
+      expect(message.error).not.toHaveBeenCalled()
+      expect(message.success).not.toHaveBeenCalled()
+      expect(message.warning).toHaveBeenCalledWith('配置已保存，但刷新失败，界面可能不是最新')
+    } finally {
+      delete (window as any).$message
+    }
+  })
+
+  // #457 A13/MF-2：刷新失败且共享缓存仍是保存前的值（弹窗打开时预填的旧值）→ 不得宣称已刷新
+  it('saveModal 保存成功但刷新失败且缓存仍是旧值时，按刷新失败提示', async () => {
+    mockFns.loadDetail.mockResolvedValue(false)
+    mockFns.getConfig.mockReturnValue({
+      roomId: 'room-1',
+      rateLimitPerMinute: 3,
+      dailyLimit: 1000,
+      respondToAi: true,
+      mentionRequired: true
+    })
+    const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as any).$message = message
+    try {
+      const wrapper = mountStore()
+      wrapper.vm.store.modalContext = {
+        aiclawUid: '2001',
+        roomId: 'room-1',
+        config: {
+          roomId: 'room-1',
+          rateLimitPerMinute: 10,
+          dailyLimit: 1000,
+          respondToAi: true,
+          mentionRequired: true
+        }
+      }
+      wrapper.vm.store.modalVisible = true
+
+      await wrapper.vm.store.saveModal({
+        roomId: 'room-1',
+        rateLimitPerMinute: 10,
+        dailyLimit: 1000,
+        respondToAi: true,
+        mentionRequired: true
+      } as any)
+      await flushPromises()
+
+      expect(message.success).not.toHaveBeenCalled()
+      expect(message.warning).toHaveBeenCalledWith('配置已保存，但刷新失败，界面可能不是最新')
+    } finally {
+      delete (window as any).$message
+    }
+  })
+
+  // #457 A13：刷新没拿到结果，但缓存已与本次提交一致 → 可以宣称已更新
+  it('saveModal 刷新无结果但缓存已与提交一致时，给保存成功提示', async () => {
+    mockFns.loadDetail.mockResolvedValue(false)
+    mockFns.getConfig.mockReturnValue({
       roomId: 'room-1',
       rateLimitPerMinute: 10,
       dailyLimit: 1000,
       respondToAi: true,
       mentionRequired: true
-    } as any)
-    await flushPromises()
+    })
+    const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as any).$message = message
+    try {
+      const wrapper = mountStore()
+      wrapper.vm.store.modalContext = {
+        aiclawUid: '2001',
+        roomId: 'room-1',
+        config: {
+          roomId: 'room-1',
+          rateLimitPerMinute: 10,
+          dailyLimit: 1000,
+          respondToAi: true,
+          mentionRequired: true
+        }
+      }
+      wrapper.vm.store.modalVisible = true
 
-    expect(mockFns.saveConfig).toHaveBeenCalledWith(2001, 'room-1', expect.any(Object))
-    expect(wrapper.vm.store.modalSaving).toBe(false)
-    expect(wrapper.vm.store.modalVisible).toBe(false)
+      await wrapper.vm.store.saveModal({
+        roomId: 'room-1',
+        rateLimitPerMinute: 10,
+        dailyLimit: 1000,
+        respondToAi: true,
+        mentionRequired: true
+      } as any)
+      await flushPromises()
+
+      expect(message.success).toHaveBeenCalledTimes(1)
+      expect(message.warning).not.toHaveBeenCalled()
+    } finally {
+      delete (window as any).$message
+    }
+  })
+
+  // #457 A4/A10：旧保存流程不得关闭新弹窗、改新操作状态或发过时完成提示
+  it('saveModal 保存期间弹窗被新上下文取代：不关闭新弹窗、不发过时提示', async () => {
+    let releaseSave: () => void = () => {}
+    mockFns.saveConfig.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseSave = resolve
+        })
+    )
+    const message = { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+    ;(window as any).$message = message
+    try {
+      const wrapper = mountStore()
+      wrapper.vm.store.modalContext = {
+        aiclawUid: '2001',
+        roomId: 'room-1',
+        config: { roomId: 'room-1', rateLimitPerMinute: 10, dailyLimit: 1000, respondToAi: true, mentionRequired: true }
+      }
+      wrapper.vm.store.modalVisible = true
+
+      const pending = wrapper.vm.store.saveModal({
+        roomId: 'room-1',
+        rateLimitPerMinute: 10,
+        dailyLimit: 1000,
+        respondToAi: true,
+        mentionRequired: true
+      } as any)
+      await flushPromises()
+
+      // 期间用户为另一个群打开了新弹窗
+      wrapper.vm.store.modalContext = {
+        aiclawUid: '2001',
+        roomId: 'room-2',
+        config: { roomId: 'room-2', rateLimitPerMinute: 10, dailyLimit: 1000, respondToAi: true, mentionRequired: true }
+      }
+      wrapper.vm.store.modalVisible = true
+
+      releaseSave()
+      await pending
+      await flushPromises()
+
+      expect(wrapper.vm.store.modalVisible).toBe(true)
+      expect(mockFns.loadDetail).not.toHaveBeenCalled()
+      expect(message.success).not.toHaveBeenCalled()
+      expect(message.warning).not.toHaveBeenCalled()
+      expect(wrapper.vm.store.modalSaving).toBe(false)
+    } finally {
+      delete (window as any).$message
+    }
   })
 
   it('saveModal 失败时保持弹窗打开并清空 saving', async () => {

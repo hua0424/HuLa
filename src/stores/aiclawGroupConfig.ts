@@ -5,6 +5,7 @@ import { useChatStore } from '@/stores/chat'
 import { useGlobalStore } from '@/stores/global'
 import { useAiclawStore } from '@/stores/aiclaw'
 import type { AiclawGroupConfig } from '@/services/wsType'
+import { aiclawGroupConfigReflects } from '@/utils/aiclawGroupConfig'
 import { useI18n } from 'vue-i18n'
 
 export type AiclawGroupConfigItem = AiclawGroupConfig & { roomId: string; roomName?: string; account?: string }
@@ -31,15 +32,6 @@ export const useAiclawGroupConfigStore = defineStore(StoresEnum.AICLAW_GROUP_CON
 
   // 防止关闭弹窗后仍在飞的 openModal 异步加载覆盖新的弹窗上下文
   let openModalCallId = 0
-
-  const defaultConfigFor = (roomId: string): AiclawGroupConfigItem => ({
-    roomId,
-    rateLimitPerMinute: 10,
-    dailyLimit: 1000,
-    respondToAi: true,
-    mentionRequired: true,
-    approved: false
-  })
 
   /** 打开指定 aiclaw 在当前群的配置弹窗 */
   const openModal = async (targetUid: string) => {
@@ -77,13 +69,17 @@ export const useAiclawGroupConfigStore = defineStore(StoresEnum.AICLAW_GROUP_CON
         return
       }
       const matched = chatStore.getAiclawGroupConfig(Number(targetUid), roomId)
+      // #456 A11：缓存无配置不算「加载成功」——不用默认值冒充已加载的数据，直接给错误态
+      if (!matched) {
+        modalError.value = t('aiclaw.group_settings.load_failed')
+        return
+      }
       const adapterType = aiclawStore.getAdapterType(targetUid)
-      const config = matched ?? defaultConfigFor(roomId)
       modalContext.value = {
         aiclawUid: targetUid,
         roomId,
         adapterType,
-        config
+        config: matched
       }
     } catch (error) {
       console.error('[AiclawGroupConfigStore] 加载 aiclaw 群配置失败:', error)
@@ -96,22 +92,42 @@ export const useAiclawGroupConfigStore = defineStore(StoresEnum.AICLAW_GROUP_CON
     }
   }
 
+  // #457 A4/A13：保存后的刷新必须以保存之后的新代次取数，刷新失败与保存失败分开表达；
+  // 弹窗已被新上下文取代时，旧保存流程不得关闭新弹窗、改新操作状态或发过时反馈。
+  let saveCallId = 0
+
   /** 保存当前弹窗中的 aiclaw 群配置 */
   const saveModal = async (config: AiclawGroupConfigItem) => {
-    if (!modalContext.value) return
+    const context = modalContext.value
+    if (!context) return
 
     const chatStore = useChatStore()
-    const { aiclawUid, roomId } = modalContext.value
+    const { aiclawUid, roomId } = context
+    const callId = ++saveCallId
+    const sameContext = () =>
+      callId === saveCallId && modalContext.value?.aiclawUid === aiclawUid && modalContext.value?.roomId === roomId
     modalSaving.value = true
     try {
-      await chatStore.saveAiclawGroupConfig(Number(aiclawUid), roomId, config as AiclawGroupConfig)
-      window.$message?.success?.(t('aiclaw.group_settings.save_success'))
+      try {
+        await chatStore.saveAiclawGroupConfig(Number(aiclawUid), roomId, config as AiclawGroupConfig)
+      } catch (error) {
+        console.error('[AiclawGroupConfigStore] 保存 aiclaw 群配置失败:', error)
+        if (sameContext()) window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
+        return
+      }
+      if (!sameContext()) return
       modalVisible.value = false
-    } catch (error) {
-      console.error('[AiclawGroupConfigStore] 保存 aiclaw 群配置失败:', error)
-      window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
+      // store 在保存成功时已作废保存前的旧读取，这里的刷新拿到的一定是保存之后的数据
+      const refreshed = await chatStore.loadAiclawGroupConfigDetail(Number(aiclawUid), roomId)
+      if (!sameContext()) return
+      // #457 A13：刷新失败时缓存可能仍是保存前的值，只有确实一致才能宣称已更新
+      if (refreshed || aiclawGroupConfigReflects(chatStore.getAiclawGroupConfig(Number(aiclawUid), roomId), config)) {
+        window.$message?.success?.(t('aiclaw.group_settings.save_success'))
+      } else {
+        window.$message?.warning?.(t('aiclaw.group_settings.saved_refresh_failed'))
+      }
     } finally {
-      modalSaving.value = false
+      if (callId === saveCallId) modalSaving.value = false
     }
   }
 

@@ -45,7 +45,7 @@ import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue
 import { useChatStore } from '@/stores/chat'
 import { useGroupStore } from '@/stores/group'
 import type { AiclawGroupConfig } from '@/services/wsType'
-import { buildDefaultWorkspaceDir, isDirBasedAdapter } from '@/utils/aiclawGroupConfig'
+import { buildDefaultWorkspaceDir, aiclawGroupConfigReflects, isDirBasedAdapter } from '@/utils/aiclawGroupConfig'
 
 export type BatchAiclawItem = {
   uid: string
@@ -91,7 +91,10 @@ const buildDefaultConfig = (uid: string, adapterType?: string) => ({
   workspaceDir: isDirBasedAdapter(adapterType) ? buildDefaultWorkspaceDir(uid, props.account) : undefined
 })
 
+// #456 A10/A12：弹窗可被重开/换 aiclaw 重载，旧加载不得改写新一轮的结果与错误态
+let loadSeq = 0
 const loadItems = async () => {
+  const seq = ++loadSeq
   savingUid.value = null
   loadError.value = false
   if (props.aiclawItems.length === 0) {
@@ -112,9 +115,11 @@ const loadItems = async () => {
 
     // REQ-016 #195：单数版只查当前群——复数版会被 userListMap 残留房间的陈旧校验失败连坐
     const result: typeof items.value = []
+    let failed = false
     for (const item of props.aiclawItems) {
-      const ok = await chatStore.loadAiclawGroupConfig(Number(item.uid), props.roomId)
-      if (!ok) loadError.value = true
+      // #456 A12：批量取数是后台场景，走静默版；失败由下方 loadError 内联提示+重试入口给出
+      const ok = await chatStore.loadAiclawGroupConfigDetail(Number(item.uid), props.roomId)
+      if (!ok) failed = true
       const matched = chatStore.getAiclawGroupConfig(Number(item.uid), props.roomId)
       result.push({
         ...item,
@@ -124,9 +129,11 @@ const loadItems = async () => {
           : { ...buildDefaultConfig(item.uid, item.adapterType), account }
       })
     }
+    if (seq !== loadSeq) return
+    loadError.value = loadError.value || failed
     items.value = result
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -144,15 +151,36 @@ const handleSave = async (
   uid: string,
   config: AiclawGroupConfig & { roomId: string; roomName?: string; account?: string }
 ) => {
+  const seq = loadSeq
   savingUid.value = uid
   try {
-    await chatStore.saveAiclawGroupConfig(Number(uid), props.roomId, config)
-    window.$message?.success?.(t('aiclaw.group_settings.save_success'))
-  } catch (error) {
-    console.error('[AiclawBatchGroupConfigModal] Failed to save config:', error)
-    window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
+    try {
+      await chatStore.saveAiclawGroupConfig(Number(uid), props.roomId, config)
+    } catch (error) {
+      console.error('[AiclawBatchGroupConfigModal] Failed to save config:', error)
+      if (savingUid.value === uid) window.$message?.error?.(t('aiclaw.group_settings.save_failed'))
+      return
+    }
+    // #457 A4/A13：保存后的刷新是保存之后的新读取（store 已作废保存前的旧读取）；
+    // 刷新失败单独提示，不误报保存失败也不宣称已刷新。
+    const refreshed = await chatStore.loadAiclawGroupConfigDetail(Number(uid), props.roomId)
+    if (seq !== loadSeq || savingUid.value !== uid) return
+    const matched = chatStore.getAiclawGroupConfig(Number(uid), props.roomId)
+    if (matched) {
+      items.value = items.value.map((item) =>
+        String(item.uid) === uid
+          ? { ...item, config: { ...matched, account: matched.account || item.config.account } }
+          : item
+      )
+    }
+    // #457 A13：刷新失败时缓存可能仍是保存前的值，只有确实一致才能宣称已更新
+    if (refreshed || aiclawGroupConfigReflects(matched, config)) {
+      window.$message?.success?.(t('aiclaw.group_settings.save_success'))
+    } else {
+      window.$message?.warning?.(t('aiclaw.group_settings.saved_refresh_failed'))
+    }
   } finally {
-    savingUid.value = null
+    if (savingUid.value === uid) savingUid.value = null
   }
 }
 </script>

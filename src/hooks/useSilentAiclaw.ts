@@ -42,7 +42,8 @@ export const useSilentAiclaw = (options: { autoWatch?: boolean } = {}) => {
     const roomId = globalStore.currentSessionRoomId
     if (!roomId) return
     const aiclawMembers = groupStore.userList.filter((m) => m.userType === UserType.AICLAW)
-    await Promise.all(aiclawMembers.map((m) => chatStore.loadAiclawGroupConfig(Number(m.uid), roomId)))
+    // #456 A12：沉默标识是后台读取，走静默版（与主动读取共享在途请求，失败不弹 toast）
+    await Promise.all(aiclawMembers.map((m) => chatStore.loadAiclawGroupConfigDetail(Number(m.uid), roomId)))
   }
 
   // 监听「进入群聊 / 群成员变化」两路信号，避免只 watch userList.length
