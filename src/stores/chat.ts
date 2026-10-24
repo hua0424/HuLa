@@ -292,7 +292,7 @@ export const useChatStore = defineStore(
     }
 
     // 存储所有消息的Record
-    const messageMap = reactive<Record<string, Record<string, MessageType>>>({})
+    const messageMap = ref<Record<string, Record<string, MessageType>>>({})
     // aichatoverview#285：每个房间明确保存两套进度。local 是本地分页状态；
     // remote 的 cursor/isLast 原样代表服务端分页状态。UI isLast 统一派生为
     // localExhausted && remoteStatus === 'end'。cursor 保留为本地游标镜像（兼容旧读取）。
@@ -377,7 +377,7 @@ export const useChatStore = defineStore(
     // 回复消息的映射关系
     const replyMapping = reactive<Record<string, Record<string, string[]>>>({})
     // 存储撤回的消息内容和时间
-    const recalledMessages = reactive<Record<string, RecalledMessage>>({})
+    const recalledMessages = ref<Record<string, RecalledMessage>>({})
     // 存储每条撤回消息的过期定时器
     const expirationTimers: Record<string, boolean> = {}
     const isMsgMultiChoose = ref<boolean>(false)
@@ -388,7 +388,7 @@ export const useChatStore = defineStore(
 
     // 当前聊天室的消息Map计算属性
     const currentMessageMap = computed(() => {
-      return messageMap[globalStore.currentSessionRoomId] || {}
+      return messageMap.value[globalStore.currentSessionRoomId] || {}
     })
 
     // 当前聊天室的消息加载状态计算属性
@@ -456,21 +456,21 @@ export const useChatStore = defineStore(
     })
 
     // 新消息计数相关的响应式数据
-    const newMsgCount = reactive<Record<string, { count: number; isStart: boolean }>>({})
+    const newMsgCount = ref<Record<string, { count: number; isStart: boolean }>>({})
 
     // 当前聊天室的新消息计数计算属性
     const currentNewMsgCount = computed({
       get: () => {
         const roomId = globalStore.currentSessionRoomId
-        const current = newMsgCount[roomId]
+        const current = newMsgCount.value[roomId]
         if (current === undefined) {
-          newMsgCount[roomId] = { count: 0, isStart: false }
+          newMsgCount.value[roomId] = { count: 0, isStart: false }
         }
-        return newMsgCount[roomId]
+        return newMsgCount.value[roomId]
       },
       set: (val) => {
         const roomId = globalStore.currentSessionRoomId
-        newMsgCount[roomId] = val as { count: number; isStart: boolean }
+        newMsgCount.value[roomId] = val as { count: number; isStart: boolean }
       }
     })
 
@@ -480,13 +480,13 @@ export const useChatStore = defineStore(
      * 注意：只清空消息内容，不删除 key，避免影响响应式依赖
      */
     const clearOtherRoomsMessages = (currentRoomId: string) => {
-      for (const roomId in messageMap) {
+      for (const roomId in messageMap.value) {
         if (roomId !== currentRoomId) {
           // 只清空消息内容，保留响应式对象结构
-          for (const msgId in messageMap[roomId]) {
-            const msg = messageMap[roomId][msgId]
+          for (const msgId in messageMap.value[roomId]) {
+            const msg = messageMap.value[roomId][msgId]
             if (shouldKeepTransientMessage(msg)) continue
-            delete messageMap[roomId][msgId]
+            delete messageMap.value[roomId][msgId]
           }
         }
       }
@@ -494,15 +494,15 @@ export const useChatStore = defineStore(
 
     // 清空指定房间消息，但保留本地临时消息（上传/发送中或失败）
     const clearRoomMessagesExceptTransient = (roomId: string) => {
-      if (!messageMap[roomId]) {
-        messageMap[roomId] = {}
+      if (!messageMap.value[roomId]) {
+        messageMap.value[roomId] = {}
         return
       }
 
-      for (const msgId in messageMap[roomId]) {
-        const msg = messageMap[roomId][msgId]
+      for (const msgId in messageMap.value[roomId]) {
+        const msg = messageMap.value[roomId][msgId]
         if (shouldKeepTransientMessage(msg)) continue
-        delete messageMap[roomId][msgId]
+        delete messageMap.value[roomId][msgId]
       }
     }
 
@@ -672,15 +672,17 @@ export const useChatStore = defineStore(
     })
 
     const chatMessageListByRoomId = computed(() => (roomId: string) => {
-      if (!messageMap[roomId] || Object.keys(messageMap[roomId]).length === 0) return []
+      if (!messageMap.value[roomId] || Object.keys(messageMap.value[roomId]).length === 0) return []
 
-      return Object.values(messageMap[roomId]).sort((a, b) => (a.message.sendTime ?? 0) - (b.message.sendTime ?? 0))
+      return Object.values(messageMap.value[roomId]).sort(
+        (a, b) => (a.message.sendTime ?? 0) - (b.message.sendTime ?? 0)
+      )
     })
 
     const findRoomIdByMsgId = (msgId: string) => {
       if (!msgId) return ''
-      for (const roomId of Object.keys(messageMap)) {
-        const roomMessages = messageMap[roomId]
+      for (const roomId of Object.keys(messageMap.value)) {
+        const roomMessages = messageMap.value[roomId]
         if (roomMessages && msgId in roomMessages) {
           return roomId
         }
@@ -807,7 +809,7 @@ export const useChatStore = defineStore(
       const requestBrowseSeq = browseSeq[roomId] ?? 0
       // IPC 返回与 WS 到达之间的竞态：请求开始时的消息更新序号与已存在 ID
       const requestMsgSeq = roomMsgSeq[roomId] ?? 0
-      const existedIds = new Set(Object.keys(messageMap[roomId] ?? {}))
+      const existedIds = new Set(Object.keys(messageMap.value[roomId] ?? {}))
 
       // aichatoverview#285 D1：链已开始（more）却请求游标为空，说明确认游标在传递中
       // 丢失，用本代次确认值恢复继续向前翻页；重拉首页的结果 100% 已缓存。首页回填
@@ -905,8 +907,8 @@ export const useChatStore = defineStore(
       refreshDerivedEnd(roomId)
 
       // 确保 messageMap[roomId] 已初始化
-      if (!messageMap[roomId]) {
-        messageMap[roomId] = {}
+      if (!messageMap.value[roomId]) {
+        messageMap.value[roomId] = {}
       }
 
       const list = Array.isArray(data.list) ? data.list : []
@@ -921,11 +923,11 @@ export const useChatStore = defineStore(
         if (existedBefore) {
           // 已更新的保留当前对象：请求期间被 WS 更新过的 ID 不被旧页覆盖
           if (wsTouched) continue
-          const current = messageMap[roomId][String(msgId)]
+          const current = messageMap.value[roomId][String(msgId)]
           if (shouldKeepTransientMessage(current)) continue
         }
         // 消息按 ID 合并，展示按稳定的 (sendTime,id) 顺序（computed 排序），保留临时发送消息
-        messageMap[roomId][String(msgId)] = msg
+        messageMap.value[roomId][String(msgId)] = msg
         merged++
       }
 
@@ -950,7 +952,7 @@ export const useChatStore = defineStore(
       const localResult = await getPageMsg(size, roomId, '', true, 'local')
       if (!localResult.ok) return localResult
       const progress = ensureProgress(roomId)
-      const localCount = Object.keys(messageMap[roomId] ?? {}).length
+      const localCount = Object.keys(messageMap.value[roomId] ?? {}).length
       if (decideFirstScreen(localCount, progress.remoteStatus) === 'backfill-remote') {
         const remoteResult = await getPageMsg(size, roomId, '', true, 'remote')
         if (remoteResult.ok) void calibrateWindow(roomId)
@@ -1105,9 +1107,9 @@ export const useChatStore = defineStore(
       const requestBrowse = browseSeq[roomId] ?? 0
       for (let page = 0; page < RESTORE_BACKFILL_PAGES; page++) {
         if ((browseSeq[roomId] ?? 0) !== requestBrowse) return false
-        if (messageMap[roomId]?.[anchorMsgId]) return true
+        if (messageMap.value[roomId]?.[anchorMsgId]) return true
         const progress = ensureProgress(roomId)
-        if (progress.isLast) return !!messageMap[roomId]?.[anchorMsgId]
+        if (progress.isLast) return !!messageMap.value[roomId]?.[anchorMsgId]
         if (progress.error) progress.error = ''
         try {
           await loadMore()
@@ -1115,7 +1117,7 @@ export const useChatStore = defineStore(
           // 瞬时失败（绑定/DB 竞态）不中断回填，下一页继续重试。
         }
       }
-      return !!messageMap[roomId]?.[anchorMsgId]
+      return !!messageMap.value[roomId]?.[anchorMsgId]
     }
 
     // 重登/重进房间恢复上次房间与阅读位置。返回简短结论供 boot 日志与验收记录。
@@ -1137,7 +1139,7 @@ export const useChatStore = defineStore(
       }
       const missing = previousRoomId || snapshot?.lastRoomId || ''
       if (!missing) return 'empty'
-      const hasLocal = !!messageMap[missing] && Object.keys(messageMap[missing]).length > 0
+      const hasLocal = !!messageMap.value[missing] && Object.keys(messageMap.value[missing]).length > 0
       if (!sessionOptions.value.isError && !hasLocal) {
         if (globalStore.currentSessionRoomId) globalStore.updateCurrentSessionRoomId('')
         return `gone:${missing}`
@@ -1175,7 +1177,7 @@ export const useChatStore = defineStore(
       // 结果绑定请求时浏览代次与消息更新序号
       const requestBrowseSeq = browseSeq[roomId] ?? 0
       const requestMsgSeq = roomMsgSeq[roomId] ?? 0
-      const existedIds = new Set(Object.keys(messageMap[roomId] ?? {}))
+      const existedIds = new Set(Object.keys(messageMap.value[roomId] ?? {}))
       const visible = chatMessageListByRoomId
         .value(roomId)
         .map((m) => ({ id: String(m.message.id), sendTime: m.message.sendTime ?? 0 }))
@@ -1293,7 +1295,7 @@ export const useChatStore = defineStore(
       if (!accountCurrent(binding, epoch) || (browseSeq[roomId] ?? 0) !== requestBrowseSeq) {
         return { roomId, ok: false, status: state.status, error: '窗口代次已失效' }
       }
-      if (!messageMap[roomId]) messageMap[roomId] = {}
+      if (!messageMap.value[roomId]) messageMap.value[roomId] = {}
       const wsTouched = (roomMsgSeq[roomId] ?? 0) !== requestMsgSeq
       for (const msg of (data.items ?? []) as MessageType[]) {
         if (binding) Object.assign(msg, { _sessionBinding: binding })
@@ -1301,7 +1303,7 @@ export const useChatStore = defineStore(
       }
       // 原地合并：请求期间被 WS 更新过的 ID 不被旧快照覆盖，发送中占位永不覆盖
       const merged = mergeWindowResult(
-        messageMap[roomId],
+        messageMap.value[roomId],
         { items: (data.items ?? []) as WindowMergeMsg[], unavailableIds: data.unavailableIds ?? [] },
         { existedIds, wsTouched, isTransient: (m) => shouldKeepTransientMessage(m as MessageType) },
         anchorId
@@ -1333,7 +1335,7 @@ export const useChatStore = defineStore(
         } else {
           if (tauriThinkingAccess === true) deniedThinkingRooms.delete(denyKeyOf(binding, roomId))
           try {
-            const cached = Object.values(messageMap[roomId] ?? {}) as MessageType[]
+            const cached = Object.values(messageMap.value[roomId] ?? {}) as MessageType[]
             await loadLocalThinkingForMessages(roomId, cached, binding)
             const savedTriggers = (data as { thinkingTriggers?: unknown }).thinkingTriggers
             if (Array.isArray(savedTriggers)) {
@@ -1661,10 +1663,10 @@ export const useChatStore = defineStore(
       }
       const messageKey = msg.message.id
 
-      let roomMessages = messageMap[msg.message.roomId]
+      let roomMessages = messageMap.value[msg.message.roomId]
       if (!roomMessages) {
         roomMessages = {}
-        messageMap[msg.message.roomId] = roomMessages
+        messageMap.value[msg.message.roomId] = roomMessages
       }
 
       const existedMsg = roomMessages[messageKey]
@@ -1761,7 +1763,7 @@ export const useChatStore = defineStore(
     }
 
     const checkMsgExist = (roomId: string, msgId: string) => {
-      const current = messageMap[roomId]
+      const current = messageMap.value[roomId]
       return current && msgId in current
     }
 
@@ -1777,7 +1779,7 @@ export const useChatStore = defineStore(
       const roomId = data?.message?.roomId
       if (!roomId) return null
 
-      const roomMessages = messageMap[roomId]
+      const roomMessages = messageMap.value[roomId]
       if (!roomMessages) return null
 
       const serverMsgId = data.message.id
@@ -1988,7 +1990,7 @@ export const useChatStore = defineStore(
       // 存储撤回的消息内容和时间
       const recallTime = Date.now()
       // 优先使用传入的 originalType 和 originalContent，避免竞态条件导致类型已被修改
-      recalledMessages[data.msg.message.id] = {
+      recalledMessages.value[data.msg.message.id] = {
         messageId: data.msg.message.id,
         content: data.originalContent ?? data.msg.message.body.content,
         recallTime,
@@ -2018,7 +2020,7 @@ export const useChatStore = defineStore(
       const resolvedRoomId = roomIdFromPayload || findRoomIdByMsgId(msgId)
       const session = resolvedRoomId ? resolveSessionByRoomId(resolvedRoomId) : undefined
       const sessionType = session?.type ?? RoomTypeEnum.SINGLE
-      const roomMessages = resolvedRoomId ? messageMap[resolvedRoomId] : undefined
+      const roomMessages = resolvedRoomId ? messageMap.value[resolvedRoomId] : undefined
       const message = roomMessages?.[msgId] || currentMessageMap.value?.[msgId]
       let recallMessageBody = ''
 
@@ -2114,7 +2116,7 @@ export const useChatStore = defineStore(
 
     // 获取撤回消息
     const getRecalledMessage = (msgId: string): RecalledMessage | undefined => {
-      return recalledMessages[msgId]
+      return recalledMessages.value[msgId]
     }
 
     // 删除消息
@@ -2126,20 +2128,20 @@ export const useChatStore = defineStore(
       thinkingByTrigger.get(roomId)?.delete(msgId)
       for (const [key, state] of thinkingStreams)
         if (state.roomId === roomId && state.triggerMsgId === msgId) thinkingStreams.delete(key)
-      if (messageMap[roomId]) delete messageMap[roomId][msgId]
+      if (messageMap.value[roomId]) delete messageMap.value[roomId][msgId]
     }
 
     const clearRoomMessages = (roomId: string) => {
       if (!roomId) return
       browseSeq[roomId] = (browseSeq[roomId] ?? 0) + 1
       const deleted = deletedThinkingTriggers.get(roomId) ?? new Set<string>()
-      for (const id of Object.keys(messageMap[roomId] ?? {})) deleted.add(id)
+      for (const id of Object.keys(messageMap.value[roomId] ?? {})) deleted.add(id)
       for (const id of thinkingByTrigger.get(roomId)?.keys() ?? []) deleted.add(id)
       deletedThinkingTriggers.set(roomId, deleted)
       clearThinking(roomId)
 
-      if (messageMap[roomId]) {
-        messageMap[roomId] = {}
+      if (messageMap.value[roomId]) {
+        messageMap.value[roomId] = {}
       }
 
       if (replyMapping[roomId]) {
@@ -2165,7 +2167,7 @@ export const useChatStore = defineStore(
         messageOptions[roomId] = defaultOptions
       }
 
-      newMsgCount[roomId] = { count: 0, isStart: false }
+      newMsgCount.value[roomId] = { count: 0, isStart: false }
     }
 
     // 更新消息
@@ -2187,13 +2189,13 @@ export const useChatStore = defineStore(
       roomId?: string
     }) => {
       const resolvedRoomId =
-        (roomId && messageMap[roomId]?.[msgId] ? roomId : undefined) ??
-        (messageMap[globalStore.currentSessionRoomId]?.[msgId] ? globalStore.currentSessionRoomId : undefined) ??
+        (roomId && messageMap.value[roomId]?.[msgId] ? roomId : undefined) ??
+        (messageMap.value[globalStore.currentSessionRoomId]?.[msgId] ? globalStore.currentSessionRoomId : undefined) ??
         findRoomIdByMsgId(msgId)
 
       if (!resolvedRoomId) return
 
-      const roomMessages = messageMap[resolvedRoomId]
+      const roomMessages = messageMap.value[resolvedRoomId]
       if (!roomMessages) return
 
       const msg = roomMessages[msgId]
@@ -2216,14 +2218,14 @@ export const useChatStore = defineStore(
       if (uploadProgress !== undefined) {
         console.log(`更新消息进度: ${uploadProgress}% (消息ID: ${msgId})`)
         roomMessages[nextMsgId] = { ...msg, uploadProgress }
-        messageMap[resolvedRoomId] = { ...roomMessages }
+        messageMap.value[resolvedRoomId] = { ...roomMessages }
       } else {
         roomMessages[nextMsgId] = msg
       }
 
       if (newMsgId && msgId !== newMsgId) {
         delete roomMessages[msgId]
-        messageMap[resolvedRoomId] = { ...roomMessages }
+        messageMap.value[resolvedRoomId] = { ...roomMessages }
       }
     }
 
@@ -2355,7 +2357,7 @@ export const useChatStore = defineStore(
 
       if (type === 'timeout') {
         console.log(`[Timeout] 消息ID: ${msgId} 已过期`)
-        delete recalledMessages[msgId]
+        delete recalledMessages.value[msgId]
         delete expirationTimers[msgId]
       } else if (type === 'allTimersCompleted') {
         // 所有定时器都完成了，可以安全地清理资源
@@ -2383,18 +2385,18 @@ export const useChatStore = defineStore(
         delete expirationTimers[msgId]
       }
       // 同时清理 recalledMessages，避免内存累积
-      for (const msgId in recalledMessages) {
-        delete recalledMessages[msgId]
+      for (const msgId in recalledMessages.value) {
+        delete recalledMessages.value[msgId]
       }
     }
 
     // 清理过期的撤回消息（超过2分钟的）
     const cleanupExpiredRecalledMessages = () => {
       const now = Date.now()
-      for (const msgId in recalledMessages) {
-        const msg = recalledMessages[msgId]
+      for (const msgId in recalledMessages.value) {
+        const msg = recalledMessages.value[msgId]
         if (now - msg.recallTime > RECALL_EXPIRATION_TIME) {
-          delete recalledMessages[msgId]
+          delete recalledMessages.value[msgId]
           if (expirationTimers[msgId]) {
             timerWorker.postMessage({ type: 'clearTimer', msgId })
             delete expirationTimers[msgId]
@@ -2430,7 +2432,7 @@ export const useChatStore = defineStore(
     }
 
     const clearRedundantMessages = (roomId: string, limit: number = pageSize) => {
-      const currentMessages = messageMap[roomId]
+      const currentMessages = messageMap.value[roomId]
       if (!currentMessages) return
 
       // 将消息转换为数组并按 sendTime 倒序排序，前面的元素代表最新的消息
@@ -2493,8 +2495,8 @@ export const useChatStore = defineStore(
 
       try {
         // 1. 清空消息数据 避免竞态条件
-        if (messageMap[requestRoomId]) {
-          messageMap[requestRoomId] = {}
+        if (messageMap.value[requestRoomId]) {
+          messageMap.value[requestRoomId] = {}
         }
 
         // 2. 重置双游标浏览进度，强制cursor为空以获取最新消息；就地重置保持对象身份，
@@ -2602,7 +2604,7 @@ export const useChatStore = defineStore(
 
     /** 追加流式内容（stream_delta 时调用，已由 rAF 节流后的批量数据） */
     const appendStreamContent = (roomId: string, msgId: string, delta: string) => {
-      const msg = messageMap[roomId]?.[msgId]
+      const msg = messageMap.value[roomId]?.[msgId]
       if (msg) {
         msg.message.body.content += delta
       }
@@ -2614,8 +2616,8 @@ export const useChatStore = defineStore(
       streamingMessages.delete(msgId)
 
       // 在所有 room 中找到这条占位消息，更新内容并记录待替换
-      for (const roomId of Object.keys(messageMap)) {
-        const msg = messageMap[roomId]?.[msgId]
+      for (const roomId of Object.keys(messageMap.value)) {
+        const msg = messageMap.value[roomId]?.[msgId]
         if (msg) {
           msg.message.body.content = payload.fullContent
           // 记录：当同 room 的 receiveMessage 到达时，用真实消息替换此占位
@@ -2640,7 +2642,9 @@ export const useChatStore = defineStore(
       if (!pendingIds || pendingIds.length === 0) return false
 
       // 过滤出仍存在于 messageMap 中的占位消息
-      const candidates = pendingIds.map((id) => ({ id, msg: messageMap[roomId]?.[id] })).filter((c) => !!c.msg) as {
+      const candidates = pendingIds
+        .map((id) => ({ id, msg: messageMap.value[roomId]?.[id] }))
+        .filter((c) => !!c.msg) as {
         id: string
         msg: MessageType
       }[]
@@ -2663,8 +2667,8 @@ export const useChatStore = defineStore(
       }
 
       // 从 messageMap 中删除选中的占位消息，插入真实消息
-      if (messageMap[roomId]?.[bestId]) {
-        delete messageMap[roomId][bestId]
+      if (messageMap.value[roomId]?.[bestId]) {
+        delete messageMap.value[roomId][bestId]
       }
 
       // 从 pending 数组中移除该 id
@@ -2676,10 +2680,10 @@ export const useChatStore = defineStore(
       }
 
       // 插入真实消息
-      if (!messageMap[roomId]) {
-        messageMap[roomId] = {}
+      if (!messageMap.value[roomId]) {
+        messageMap.value[roomId] = {}
       }
-      messageMap[roomId][String(realMsg.message.id)] = realMsg
+      messageMap.value[roomId][String(realMsg.message.id)] = realMsg
       return true
     }
 
@@ -3694,7 +3698,7 @@ export const useChatStore = defineStore(
         sessionMap.value = {}
         sessionOptions.value = { isLast: false, isLoading: false, isError: false, cursor: '' }
         syncLoading.value = false
-        for (const key of Object.keys(messageMap)) delete messageMap[key]
+        for (const key of Object.keys(messageMap.value)) delete messageMap.value[key]
         for (const key of Object.keys(replyMapping)) delete replyMapping[key]
         clearHistoryProgress()
         clearThinking()
