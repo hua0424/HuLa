@@ -833,12 +833,17 @@ const repinReadingAnchor = (): void => {
 // aichatoverview#352 warm 重登：恢复未决（armed/pending）时不上报——
 // 此时首条可见只是最新页顶部/底部闪现，上报会覆盖尚未恢复的有效锚点。
 const reportVisibleAnchor = (container: HTMLElement): void => {
-  if (restoringRef.value || isLoadingMore.value || isAutoScrolling.value) return
+  if (!chatStore.readingSnapshotLoaded) return
   const roomId = currentRoomId.value
   if (!roomId) return
+  // aichatoverview#483：真实阅读窗口（视口相交行）与锚点分开采集。
+  // 相交条件含跨屏高卡片（rect.bottom > viewport.top && rect.top < viewport.bottom），
+  // 且不受「程序化滚动/恢复未决」影响——恢复期间视图里真实可见的行同样是恢复依据；
+  // 但范围上报带浏览代次，切房后旧上报不会再被当作新范围。
+  reportReadingWindow(container, roomId)
+  if (restoringRef.value || isLoadingMore.value || isAutoScrolling.value) return
   // aichatoverview#352 R4：快照未从盘读回不上报——此时首条可见只是最新页闪现，
   // 上报会以更新鲜的 updatedAt 覆盖有效锚点（合并丢弃盘上有效）。
-  if (!chatStore.readingSnapshotLoaded) return
   if (restoreArmedRef.value || chatStore.pendingScrollRestore?.roomId === roomId) return
   const containerRect = container.getBoundingClientRect()
   const nodes = container.querySelectorAll('[data-message-id]')
@@ -864,6 +869,37 @@ const reportVisibleAnchor = (container: HTMLElement): void => {
     wasAtBottom: distanceFromBottom <= 20
   })
   lastAnchorRef.value = { id: anchorId, offsetPx }
+}
+
+// aichatoverview#483：把「当前阅读范围」按 DOM 事实上报（相交行 ID，按文档顺序，有限条数）。
+// 只上报当前范围，绝不复制全房消息；未布局/无相交行时上报空范围（校准退回 tail 快照）。
+const READING_WINDOW_LIMIT = 100
+const reportReadingWindow = (container: HTMLElement, roomId: string): void => {
+  const containerRect = container.getBoundingClientRect()
+  const viewportTop = containerRect.top
+  const viewportBottom = containerRect.bottom
+  const ids: string[] = []
+  let anchorId = ''
+  for (const node of container.querySelectorAll('[data-message-id]')) {
+    if (!(node instanceof HTMLElement)) continue
+    const rect = node.getBoundingClientRect()
+    if (rect.height <= 0) continue
+    if (rect.bottom > viewportTop && rect.top < viewportBottom) {
+      const id = node.dataset.messageId ?? ''
+      if (!id) continue
+      if (!anchorId) anchorId = id
+      ids.push(id)
+      if (ids.length >= READING_WINDOW_LIMIT) break
+    }
+  }
+  const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+  const raw = anchorId ? chatStore.messageMap[roomId]?.[anchorId] : undefined
+  chatStore.reportReadingWindow(roomId, {
+    ids,
+    anchorId,
+    anchorSendTime: Number(raw?.message?.sendTime ?? raw?.sendTime ?? 0) || 0,
+    atBottom: distanceFromBottom <= 20
+  })
 }
 
 // 滚动到底部（aichatoverview#352：恢复稳定窗口内同房间的程序化到底一律让位，
@@ -914,6 +950,8 @@ useResizeObserver(messageListRef, () => {
   }
   // aichatoverview#352：历史阅读中内容变高后按锚点回 pin，保持阅读位置不漂移。
   repinReadingAnchor()
+  // aichatoverview#483：尺寸变化改变了可见行（跨屏高卡片/详情展开），补报一次真实范围。
+  if (currentRoomId.value) reportReadingWindow(container, currentRoomId.value)
 })
 
 // 处理悬浮按钮点击 - 重置消息列表并滚动到底部
@@ -971,7 +1009,12 @@ const debouncedScrollOperations = useDebounceFn(async (container: HTMLElement) =
   // 处理触顶加载更多
   if (scrollTop.value < 60) {
     // 如果正在加载或已经触发了加载，或已到达最后一页，则不重复触发
-    if (suppressTopLoadMore.value || chatStore.currentMessageOptions?.isLast) return
+    if (suppressTopLoadMore.value || chatStore.currentMessageOptions?.isLast) {
+      // aichatoverview#483：即使不能再加载，也要按当前 DOM 上报阅读范围——
+      // 否则停留在历史顶部的持续阅读永远不参与校准。
+      if (currentRoomId.value) reportReadingWindow(container, currentRoomId.value)
+      return
+    }
 
     await handleLoadMore()
   }
@@ -1109,6 +1152,11 @@ const handleLoadMore = async (): Promise<void> => {
     isLoadingMore.value = false
 
     scrollIntent.value = ScrollIntentEnum.NONE
+    // aichatoverview#483：历史加载完成后，DOM 已含新增的旧消息，按新的真实阅读范围补报一次
+    // （不能只在滚动事件里报，否则停在顶部不动的持续阅读不会参与校准）。
+    await nextTick()
+    const current = scrollContainerRef.value
+    if (current && currentRoomId.value) reportReadingWindow(current, currentRoomId.value)
   }
 }
 
@@ -1198,6 +1246,13 @@ onMounted(() => {
   } else {
     scrollToBottom()
   }
+
+  // aichatoverview#483：首屏 DOM 完成后再采一次真实阅读范围——挂载时布局尚未稳定，
+  // 只依赖滚动事件会让「打开后不再滚动」的持续阅读永远没有范围可校准。
+  nextTick(() => {
+    const container = scrollContainerRef.value
+    if (container && currentRoomId.value) reportReadingWindow(container, currentRoomId.value)
+  })
 })
 
 onUnmounted(() => {

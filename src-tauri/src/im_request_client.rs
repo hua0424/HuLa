@@ -17,6 +17,32 @@ use crate::{
 /// 在应用启动时由 `init_network_log_dir` 解析 AppHandle 后写入一次。
 static NETWORK_LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// aichatoverview#483：普通 IM 请求的真实期限。
+///
+/// 之前 `request()` 没有超时：一旦服务端不回包，await 会一直持着
+/// `Mutex<ImRequestClient>`（`request_bound` 在锁内 await），恢复类请求会不断堆积悬挂任务。
+/// 这里在 Rust 侧给出真实期限——超时即丢弃 future、中断连接、释放锁与任务。
+/// 30s 覆盖正常 IM 往返（含弱网重传），不作为本票测得的新 SLA；
+/// 测试可用 `HULA_IM_REQUEST_TIMEOUT_MS` 覆盖以真实断言超时路径。
+const DEFAULT_REQUEST_TIMEOUT_MS: u64 = 30_000;
+
+fn request_timeout() -> std::time::Duration {
+    static TIMEOUT: OnceLock<std::time::Duration> = OnceLock::new();
+    *TIMEOUT.get_or_init(|| {
+        let millis = std::env::var("HULA_IM_REQUEST_TIMEOUT_MS")
+            .ok()
+            .and_then(|raw| raw.parse::<u64>().ok())
+            .filter(|millis| *millis > 0)
+            .unwrap_or(DEFAULT_REQUEST_TIMEOUT_MS);
+        std::time::Duration::from_millis(millis)
+    })
+}
+
+/// 响应体读取期限（连接已建立但 body 挂起时同样要能释放）。
+fn response_body_timeout() -> std::time::Duration {
+    request_timeout()
+}
+
 /// 在应用启动阶段（持有 AppHandle 时）初始化 network.log 的写入目录。
 /// 仅设置一次；重复调用无副作用。
 pub fn init_network_log_dir(dir: PathBuf) {
@@ -166,7 +192,26 @@ impl ImRequestClient {
 
             // 发送请求，区分网络错误和业务错误
             let started = std::time::Instant::now();
-            let response = match request_builder.send().await {
+            // aichatoverview#483：恢复类请求需要真实期限——超时丢弃 future 会真正中断底层连接，
+            // 从而释放共享 ImRequestClient 锁；仅 JS 侧 Promise.race 放弃等待不会释放任何资源。
+            let sent = match tokio::time::timeout(request_timeout(), request_builder.send()).await {
+                Ok(sent) => sent,
+                Err(_) => {
+                    let err = anyhow::anyhow!(
+                        "network_error: timeout after {}ms",
+                        request_timeout().as_millis()
+                    );
+                    log_network(
+                        method.as_str(),
+                        path,
+                        None,
+                        started.elapsed().as_millis() as u64,
+                        Some(&err.to_string()),
+                    );
+                    return Err(err);
+                }
+            };
+            let response = match sent {
                 Ok(resp) => {
                     log_network(
                         method.as_str(),
@@ -189,10 +234,17 @@ impl ImRequestClient {
                     return Err(err);
                 }
             };
-            let result: ApiResult<T> = response
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("network_error: {}", e))?;
+            // 读响应体同样设期限：连接建立后挂起的 body 一样占着锁与任务。
+            let result: ApiResult<T> =
+                match tokio::time::timeout(response_body_timeout(), response.json()).await {
+                    Ok(parsed) => parsed.map_err(|e| anyhow::anyhow!("network_error: {}", e))?,
+                    Err(_) => {
+                        return Err(anyhow::anyhow!(
+                            "network_error: timeout reading body after {}ms",
+                            response_body_timeout().as_millis()
+                        ));
+                    }
+                };
 
             let url = format!("{}/{}", self.base_url, path);
 

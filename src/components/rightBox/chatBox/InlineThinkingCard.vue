@@ -46,8 +46,9 @@
       <!-- 内容区：仅在“显示思考过程”开启，或当前是 thinking 单行占位时渲染 -->
       <Transition name="thinking-collapse">
         <div v-if="showContent" class="px-12px pb-8px">
-          <!-- 已完成：入视野自动拉取完整思考内容 -->
-          <template v-if="thinking.status === 'complete'">
+          <!-- aichatoverview#483：终态（成功 1/4 与失败 2/3）都可按需读取服务端已保存正文；
+               读到正文不等于执行成功——失败终态仍由头部错误徽章与错误说明表达。 -->
+          <template v-if="isTerminal">
             <div v-if="reviewLoading" class="text-(12px #999)">
               {{ t('aiclaw.thinking.review_loading') }}
             </div>
@@ -78,7 +79,7 @@
               </div>
             </template>
           </template>
-          <!-- 思考中 / 错误：仅显示占位，不展示流式内容 -->
+          <!-- 思考中 / 待确认：仅显示占位，不展示流式内容 -->
           <div v-else class="thinking-content select-text text-(12px #666 dark:#aaa) whitespace-pre-wrap break-words">
             <template v-if="thinking.status === 'thinking'">
               {{ t('aiclaw.thinking.waiting') }}
@@ -151,6 +152,13 @@ const displayContent = computed(() =>
 
 const thinking = toRef(props, 'thinking')
 
+/**
+ * aichatoverview#483：终态判定。成功（1/4）与失败（2/3）都可能已有服务端持久正文，
+ * 都可按需读取；读到正文不等于执行成功，头部仍按真实状态显示错误/超时说明。
+ * 未终态（thinking/pending）不展示正文。
+ */
+const isTerminal = computed(() => thinking.value.status === 'complete' || thinking.value.status === 'error')
+
 // 格式化耗时
 const formattedDuration = computed(() => {
   if (!thinking.value.durationMs) return ''
@@ -180,7 +188,7 @@ const useCachedBody = () => {
 useCachedBody()
 
 const loadReview = async () => {
-  if (reviewLoading.value || reviewLoaded.value || !showContent.value || thinking.value.status !== 'complete') return
+  if (reviewLoading.value || reviewLoaded.value || !showContent.value || !isTerminal.value) return
   const state = thinking.value
   if (!state.thinkingId) return
   const version = ++requestVersion
@@ -206,14 +214,7 @@ const cardRoot = ref<HTMLElement | null>(null)
 let visibilityObserver: IntersectionObserver | null = null
 
 const setupVisibilityFetch = () => {
-  if (
-    !showContent.value ||
-    thinking.value.status !== 'complete' ||
-    reviewLoaded.value ||
-    reviewLoading.value ||
-    visibilityObserver
-  )
-    return
+  if (!showContent.value || !isTerminal.value || reviewLoaded.value || reviewLoading.value || visibilityObserver) return
   // 环境不支持 IntersectionObserver 时降级为立即拉取
   if (typeof IntersectionObserver === 'undefined') {
     void loadReview()
@@ -232,7 +233,7 @@ const setupVisibilityFetch = () => {
 }
 
 onMounted(() => {
-  if (thinking.value.status === 'complete') {
+  if (isTerminal.value) {
     setupVisibilityFetch()
   }
 })

@@ -59,9 +59,15 @@ import {
 import {
   buildThinkingKnownIds,
   buildWindowRange,
+  isDecimalId,
   isWindowUnsupported,
   mergeWindowResult,
+  resolveWindowStatus,
+  selectRotatingBatch,
   validateThinkingEnvelope,
+  validateWindowEnvelope,
+  type ReadingWindow,
+  type WindowCalibFacets,
   type WindowCalibOutcome as WindowOutcome,
   type WindowMergeMsg
 } from '@/utils/windowCalibrate'
@@ -362,6 +368,81 @@ export const useChatStore = defineStore(
     const roomMsgSeq = reactive<Record<string, number>>({})
     const bumpRoomMsgSeq = (roomId: string) => {
       roomMsgSeq[roomId] = (roomMsgSeq[roomId] ?? 0) + 1
+    }
+
+    // aichatoverview#483：逐 ID 触及代次。旧实现只有一个房间级序号，任何无关新消息都会
+    // 让整批已存在行被跳过（持续 partial + 后批饿死）；这里记录每个 ID 最近一次本地事实
+    // 变化对应的房间序号，校准时按「请求开始后的序号」逐 ID 判断，无限制增长由
+    // messageMap 现有键裁剪（只跟踪仍在房间里的行）。
+    const roomTouchSeq = reactive<Record<string, Record<string, number>>>({})
+    const bumpRoomTouch = (roomId: string, msgId: string) => {
+      if (!roomId || !msgId) return
+      bumpRoomMsgSeq(roomId)
+      const room = roomTouchSeq[roomId] ?? (roomTouchSeq[roomId] = {})
+      room[msgId] = roomMsgSeq[roomId] ?? 0
+    }
+    const touchedSince = (roomId: string, msgSeq: number, ids: Iterable<string>): Set<string> => {
+      const room = roomTouchSeq[roomId] ?? {}
+      const touched = new Set<string>()
+      for (const id of ids) {
+        const seq = room[id]
+        if (seq !== undefined && seq > msgSeq) touched.add(id)
+      }
+      return touched
+    }
+
+    // aichatoverview#483：真实阅读窗口（视口相交行）由 ChatMain 的 DOM 接缝上报。
+    // 只存当前范围 + 有限续片 cursor，绝不复制全房消息；未布局时保持空（退回 tail 快照）。
+    const readingWindows = reactive<Record<string, ReadingWindow>>({})
+    const readingWindowOf = (roomId: string): ReadingWindow | null => readingWindows[roomId] ?? null
+    type ReadingWindowReport = Pick<ReadingWindow, 'ids' | 'anchorId' | 'anchorSendTime' | 'atBottom'>
+    const reportReadingWindow = (roomId: string, window: ReadingWindowReport) => {
+      if (!roomId) return
+      const prev = readingWindows[roomId]
+      const ids = window.ids.filter(isDecimalId)
+      readingWindows[roomId] = {
+        roomId,
+        browseSeq: browseSeq[roomId] ?? 0,
+        rangeSeq: (prev?.rangeSeq ?? 0) + 1,
+        ids,
+        firstId: ids[0] ?? '',
+        lastId: ids[ids.length - 1] ?? '',
+        anchorId: window.anchorId || ids[0] || '',
+        anchorSendTime: Number.isFinite(window.anchorSendTime) ? window.anchorSendTime : 0,
+        atBottom: window.atBottom === true,
+        capturedAt: Date.now()
+      }
+      // 范围真的变了才触发（滚动抖动/同范围重复上报不重复请求）
+      const changed =
+        !prev ||
+        prev.firstId !== (ids[0] ?? '') ||
+        prev.lastId !== (ids[ids.length - 1] ?? '') ||
+        prev.anchorId !== (window.anchorId || ids[0] || '')
+      if (changed) scheduleReadingWindowRecovery()
+    }
+    const clearReadingWindow = (roomId: string) => {
+      delete readingWindows[roomId]
+    }
+    // aichatoverview#483：真实阅读范围变化是恢复触发之一（防抖合并，避免滚动每帧发请求）。
+    // 只报告变化，具体单飞/预算/代次由既有校准与恢复接缝统一决定。
+    let readingWindowTimer: ReturnType<typeof setTimeout> | null = null
+    // 范围触发的最小间隔：滚动是高频行为，防抖之外再加一层节流，保证每房间请求数有界。
+    const READING_RANGE_MIN_INTERVAL_MS = 10_000
+    let lastReadingRangeCalibAt = 0
+    const scheduleReadingWindowRecovery = () => {
+      if (readingWindowTimer) clearTimeout(readingWindowTimer)
+      const wait = Math.max(0, READING_RANGE_MIN_INTERVAL_MS - (Date.now() - lastReadingRangeCalibAt))
+      readingWindowTimer = setTimeout(() => {
+        readingWindowTimer = null
+        // hidden/offline 不启动新的自动请求（恢复后由 online/foreground 触发补跑）
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+        const roomId = globalStore.currentSessionRoomId
+        if (!roomId) return
+        lastReadingRangeCalibAt = Date.now()
+        void calibrateWindow(roomId)
+        requestRecovery('reading-range')
+      }, 400 + wait)
     }
 
     // 切换会话时保留本地临时消息（例如上传中的文件消息），避免 reload 消息列表时丢失
@@ -912,7 +993,11 @@ export const useChatStore = defineStore(
       }
 
       const list = Array.isArray(data.list) ? data.list : []
-      const wsTouched = (roomMsgSeq[roomId] ?? 0) !== requestMsgSeq
+      // aichatoverview#483：逐 ID 触及判断，无关流量不再让整页已存在行被跳过。
+      const touchedIds = touchedSince(roomId, requestMsgSeq, [
+        ...existedIds,
+        ...list.map((m: MessageType) => String(m.message.id ?? ''))
+      ])
       let merged = 0
       for (const msg of list) {
         if (binding) Object.assign(msg, { _sessionBinding: binding })
@@ -922,7 +1007,7 @@ export const useChatStore = defineStore(
         const existedBefore = existedIds.has(String(msgId))
         if (existedBefore) {
           // 已更新的保留当前对象：请求期间被 WS 更新过的 ID 不被旧页覆盖
-          if (wsTouched) continue
+          if (touchedIds.has(String(msgId))) continue
           const current = messageMap.value[roomId][String(msgId)]
           if (shouldKeepTransientMessage(current)) continue
         }
@@ -1178,23 +1263,26 @@ export const useChatStore = defineStore(
       const requestBrowseSeq = browseSeq[roomId] ?? 0
       const requestMsgSeq = roomMsgSeq[roomId] ?? 0
       const existedIds = new Set(Object.keys(messageMap.value[roomId] ?? {}))
+      // aichatoverview#483：范围来自真实视口相交行（ChatMain 上报），不再拿「全房已加载列表末段」
+      // 冒充当前页——否则距末尾超过 pageSize 的旧可见消息永远进不了范围。
+      const reading = readingWindowOf(roomId)
+      const windowIds = reading && reading.browseSeq === requestBrowseSeq ? reading.ids : []
       const visible = chatMessageListByRoomId
         .value(roomId)
         .map((m) => ({ id: String(m.message.id), sendTime: m.message.sendTime ?? 0 }))
-      const anchorId = visible.length ? visible[0].id : ''
+      const anchorId = (reading?.anchorId || visible[0]?.id) ?? ''
       // aichatoverview#351：附带已知思考 ID，逐条回执（十进制，上限 100）。
       const knownThinkingIds = buildThinkingKnownIds(
         [...(thinkingByTrigger.get(roomId)?.values() ?? [])].flatMap((list) => list.map((s) => s.thinkingId))
       )
-      const range = buildWindowRange(visible, pageSize, reqId, knownThinkingIds)
+      const range = buildWindowRange({ loadedAsc: visible, windowIds, pageSize, requestId: reqId, knownThinkingIds })
 
       let data: {
         items?: unknown[]
         unavailableIds?: Array<string | number>
         complete?: boolean
-        knownReceipts?: Array<{ id?: string; available?: boolean }>
-        knownComplete?: boolean
-        schemaVersion?: string
+        receiptMessages?: WindowMergeMsg[]
+        thinkingAccess?: unknown
       }
       // aichatoverview#351：Web 直调的思考 envelope 暂存，消息合并后独立消费。
       let webEnvelope: {
@@ -1207,30 +1295,32 @@ export const useChatStore = defineStore(
       } | null = null
       try {
         if (isWeb()) {
-          // Web 直调服务端 envelope：同口径严格校验，不推测旧服务端能力
+          // Web 直调服务端 envelope：与 Rust 同口径严格校验，不推测旧服务端能力
           const { imRequest } = await import('@/utils/ImRequestUtils')
           const { ImUrlEnum } = await import('@/enums')
           const envelope = (await imRequest({
             url: ImUrlEnum.GET_MSG_WINDOW,
             body: { roomId, ...range }
-          })) as {
-            requestId?: unknown
-            schemaVersion?: string
-            capabilities?: string[]
-            items?: unknown[]
-            complete?: boolean
-            knownReceipts?: Array<{ id?: string; available?: boolean }>
-            knownComplete?: boolean
-            thinkingAccess?: unknown
-            thinkingTriggers?: unknown
-            thinkingItems?: unknown
-            thinkingComplete?: unknown
-            thinkingKnownReceipts?: unknown
-            thinkingKnownComplete?: unknown
-          }
+          })) as
+            | {
+                requestId?: unknown
+                schemaVersion?: string
+                capabilities?: string[]
+                items?: unknown
+                complete?: unknown
+                knownReceipts?: unknown
+                knownComplete?: unknown
+                thinkingAccess?: unknown
+                thinkingTriggers?: unknown
+                thinkingItems?: unknown
+                thinkingComplete?: unknown
+                thinkingKnownReceipts?: unknown
+                thinkingKnownComplete?: unknown
+              }
+            | null
+            | undefined
           // aichatoverview#351 N2：迟到/乱序旧包整包丢弃——应答 requestId 回显与本轮
           // 发送不一致即重放旧授权，不写消息、不碰思考缓存（已清零不得复活）。
-          // 缺回显按旧服务端形状放行（下方 strict 校验走 unsupported，不写缓存）。
           if (envelope?.requestId != null && String(envelope.requestId) !== reqId) {
             return finish({
               roomId,
@@ -1239,29 +1329,25 @@ export const useChatStore = defineStore(
               error: 'window_error: 窗口校准应答已过期'
             })
           }
-          if (
-            !envelope ||
-            envelope.schemaVersion !== 'msg-window-v1' ||
-            !envelope.capabilities?.includes('messages') ||
-            !envelope.capabilities?.includes('known-receipts') ||
-            !Array.isArray(envelope.items) ||
-            typeof envelope.complete !== 'boolean' ||
-            !Array.isArray(envelope.knownReceipts) ||
-            typeof envelope.knownComplete !== 'boolean'
-          ) {
+          // aichatoverview#483：回执数量/顺序/available 内容全部严格校验，
+          // 权威集合 = items ∪ available receipts.message（与 Rust 一致）；
+          // 缺字段/版本未知 → unsupported，保持缓存、不删消息、可重试。
+          const validated = validateWindowEnvelope(envelope, range.knownMsgIds, reqId)
+          if (!validated) {
             return finish({
               roomId,
               ok: false,
               status: 'unsupported',
-              error: 'window_unsupported: envelope 缺字段或版本未知'
+              error: 'window_unsupported: envelope 缺字段、版本未知或回执不对齐'
             })
           }
           data = {
-            items: envelope.items,
-            unavailableIds: envelope.knownReceipts.filter((r) => !r.available).map((r) => String(r.id)),
-            complete: envelope.complete && envelope.knownComplete
+            items: [...validated.items, ...validated.receiptMessages],
+            unavailableIds: validated.unavailableIds,
+            complete: validated.complete && validated.knownComplete,
+            thinkingAccess: envelope?.thinkingAccess
           }
-          webEnvelope = envelope
+          webEnvelope = envelope ?? null
         } else {
           data = (await invokeWithErrorHandler(
             TauriCommand.CALIBRATE_WINDOW,
@@ -1296,31 +1382,52 @@ export const useChatStore = defineStore(
         return { roomId, ok: false, status: state.status, error: '窗口代次已失效' }
       }
       if (!messageMap.value[roomId]) messageMap.value[roomId] = {}
-      const wsTouched = (roomMsgSeq[roomId] ?? 0) !== requestMsgSeq
+      // aichatoverview#483：逐 ID 触及保护——只有请求期间真的被本地更新过的行保留本地事实，
+      // 无关流量不再让整批跳过，也不再让整轮状态被降级：本地更新比服务端快照新，
+      // 保留本地即已收敛（`keptLocal` 只作为明细计数）。
       for (const msg of (data.items ?? []) as MessageType[]) {
         if (binding) Object.assign(msg, { _sessionBinding: binding })
         normalizeMsgSendTime(msg)
       }
-      // 原地合并：请求期间被 WS 更新过的 ID 不被旧快照覆盖，发送中占位永不覆盖
+      const mergeIds = (data.items ?? [])
+        .map((m) => String((m as WindowMergeMsg)?.message?.id ?? ''))
+        .filter((id) => id !== '')
+      // 原地合并：被本地更新过的 ID 不被旧快照覆盖，发送中占位永不覆盖，撤回单向收敛
       const merged = mergeWindowResult(
         messageMap.value[roomId],
         { items: (data.items ?? []) as WindowMergeMsg[], unavailableIds: data.unavailableIds ?? [] },
-        { existedIds, wsTouched, isTransient: (m) => shouldKeepTransientMessage(m as MessageType) },
+        {
+          existedIds,
+          touchedIds: touchedSince(roomId, requestMsgSeq, [...existedIds, ...mergeIds]),
+          isTransient: (m) => shouldKeepTransientMessage(m as MessageType)
+        },
         anchorId
       )
-      // 在途触及导致部分跳过时不假称已校准
-      const status = data.complete && !wsTouched ? 'ok' : 'partial'
+      // aichatoverview#483：分面完成语义——消息覆盖、思考元数据/授权、已知实例终态、后续缺口
+      // 各有完成条件；任一未确认整轮只能是 partial（partial 的 ok 不驱动「已校准」）。
+      const facets: WindowCalibFacets = {
+        messages: data.complete === true,
+        thinkingMeta: false,
+        thinkingTerminal: false,
+        settled: false
+      }
       // aichatoverview#351：思考 envelope 独立消费——缺失/非法保持缓存，
       // 明确无权隐藏本房卡片与正文，均不影响消息结果。
       if (isWeb() && webEnvelope) {
         const thinking = validateThinkingEnvelope(webEnvelope, knownThinkingIds)
         if (thinking?.access) {
+          facets.thinkingMeta = true
           deniedThinkingRooms.delete(denyKeyOf(binding, roomId))
           mergeThinkingMetadata(roomId, thinking.items)
           const loaded = metadataSet(roomId)
           for (const t of thinking.triggers) loaded.add(t)
           if (thinkingCacheErrors.value[roomId]) delete thinkingCacheErrors.value[roomId]
+          // 已知实例是否已有终态：本轮回执里已无 pending/运行中即为确认
+          facets.thinkingTerminal = thinking.items.every((item) => item.status !== 0)
         } else if (thinking && !thinking.access) {
+          // 明确无权是可信结论（不是网络错误），分面记为已确认
+          facets.thinkingMeta = true
+          facets.thinkingTerminal = true
           deniedThinkingRooms.add(denyKeyOf(binding, roomId))
           clearThinking(roomId)
         }
@@ -1330,10 +1437,15 @@ export const useChatStore = defineStore(
         // 重进房不复活）；缺字段/失败（undefined）保持既有缓存。
         const tauriThinkingAccess = (data as { thinkingAccess?: unknown }).thinkingAccess
         if (tauriThinkingAccess === false) {
+          facets.thinkingMeta = true
+          facets.thinkingTerminal = true
           deniedThinkingRooms.add(denyKeyOf(binding, roomId))
           clearThinking(roomId)
         } else {
-          if (tauriThinkingAccess === true) deniedThinkingRooms.delete(denyKeyOf(binding, roomId))
+          if (tauriThinkingAccess === true) {
+            facets.thinkingMeta = true
+            deniedThinkingRooms.delete(denyKeyOf(binding, roomId))
+          }
           try {
             const cached = Object.values(messageMap.value[roomId] ?? {}) as MessageType[]
             await loadLocalThinkingForMessages(roomId, cached, binding)
@@ -1342,14 +1454,19 @@ export const useChatStore = defineStore(
               const loaded = metadataSet(roomId)
               for (const t of savedTriggers) if (typeof t === 'string') loaded.add(t)
             }
+            // Rust 已提交本房元数据；本地是否仍有未终态实例决定该分面
+            facets.thinkingTerminal = !hasPendingThinking(roomId)
           } catch {
             // 保持缓存，消息结果不受影响。
           }
         }
       }
+      // 后续缺口：本次未覆盖的思考候选（轮转游标之外）或消息范围未完整 → 保留机会
+      facets.settled = facets.messages && !hasPendingThinking(roomId)
+      const status = resolveWindowStatus(facets, data.complete === true)
       !isWeb() &&
         (await info(
-          `[window-calibrate] roomId=${roomId} merged=${merged.merged} deleted=${merged.deleted} anchorKept=${merged.anchorKept} status=${status}`
+          `[window-calibrate] roomId=${roomId} merged=${merged.merged} deleted=${merged.deleted} anchorKept=${merged.anchorKept} keptLocal=${merged.keptLocal} windowRows=${windowIds.length} status=${status}`
         ))
       return finish({
         roomId,
@@ -1357,7 +1474,8 @@ export const useChatStore = defineStore(
         status,
         merged: merged.merged,
         deleted: merged.deleted,
-        anchorKept: merged.anchorKept
+        anchorKept: merged.anchorKept,
+        facets
       })
     }
 
@@ -1383,6 +1501,14 @@ export const useChatStore = defineStore(
       }
       for (const roomId of Object.keys(roomMsgSeq)) {
         delete roomMsgSeq[roomId]
+      }
+      // aichatoverview#483：逐 ID 触及代次与真实阅读窗口都是账号/浏览态运行态，
+      // 换账号或清进度后必须归零，否则旧事实会保护新账号的行。
+      for (const roomId of Object.keys(roomTouchSeq)) {
+        delete roomTouchSeq[roomId]
+      }
+      for (const roomId of Object.keys(readingWindows)) {
+        delete readingWindows[roomId]
       }
       for (const roomId of Object.keys(windowCalib)) {
         delete windowCalib[roomId]
@@ -1657,11 +1783,13 @@ export const useChatStore = defineStore(
       const epoch = accountEpoch
       if (origin && !isSessionCurrent(origin)) return
       normalizeMsgSendTime(msg)
-      if (msg.message.roomId) bumpRoomMsgSeq(msg.message.roomId)
       if (!msg.message.id) {
         msg.message.id = `${msg.message.roomId}_${msg.message.sendTime}_${msg.fromUser.uid}`
       }
       const messageKey = msg.message.id
+      // aichatoverview#483：按 ID 记录本地触及代次（含新到达消息），
+      // 供窗口校准/分页回填逐 ID 判断，而不是让整批被一个房间级序号跳过。
+      if (msg.message.roomId) bumpRoomTouch(msg.message.roomId, messageKey)
 
       let roomMessages = messageMap.value[msg.message.roomId]
       if (!roomMessages) {
@@ -2125,6 +2253,8 @@ export const useChatStore = defineStore(
       deleted.add(msgId)
       deletedThinkingTriggers.set(roomId, deleted)
       browseSeq[roomId] = (browseSeq[roomId] ?? 0) + 1
+      // aichatoverview#483：用户删除是权威本地事实，记触及代次防止旧校准快照复活
+      bumpRoomTouch(roomId, msgId)
       thinkingByTrigger.get(roomId)?.delete(msgId)
       for (const [key, state] of thinkingStreams)
         if (state.roomId === roomId && state.triggerMsgId === msgId) thinkingStreams.delete(key)
@@ -2135,10 +2265,15 @@ export const useChatStore = defineStore(
       if (!roomId) return
       browseSeq[roomId] = (browseSeq[roomId] ?? 0) + 1
       const deleted = deletedThinkingTriggers.get(roomId) ?? new Set<string>()
-      for (const id of Object.keys(messageMap.value[roomId] ?? {})) deleted.add(id)
+      for (const id of Object.keys(messageMap.value[roomId] ?? {})) {
+        deleted.add(id)
+        // aichatoverview#483：整房清空同样是权威本地事实，逐 ID 记触及防止后台下载复活
+        bumpRoomTouch(roomId, id)
+      }
       for (const id of thinkingByTrigger.get(roomId)?.keys() ?? []) deleted.add(id)
       deletedThinkingTriggers.set(roomId, deleted)
       clearThinking(roomId)
+      clearReadingWindow(roomId)
 
       if (messageMap.value[roomId]) {
         messageMap.value[roomId] = {}
@@ -2200,6 +2335,9 @@ export const useChatStore = defineStore(
 
       const msg = roomMessages[msgId]
       if (!msg) return
+
+      // aichatoverview#483：本地状态/正文变更是较新事实，记触及代次防止旧校准快照覆盖
+      bumpRoomTouch(resolvedRoomId, msgId)
 
       msg.message.status = status
       // 只在 timeBlock 有值时才更新，避免覆盖原有值
@@ -3048,6 +3186,17 @@ export const useChatStore = defineStore(
       }
       return [...thinkingStreams.values()].find((state) => state.thinkingId === thinkingId)
     }
+    /** aichatoverview#483：本房是否仍有未终态实例——决定「终态确认」分面是否完成。 */
+    const hasPendingThinking = (roomId: string): boolean => {
+      const bucket = thinkingByTrigger.get(roomId)
+      for (const list of bucket?.values() ?? []) {
+        if (list.some((state) => state.status === 'pending' || state.status === 'thinking')) return true
+      }
+      for (const state of thinkingStreams.values()) {
+        if (state.roomId === roomId && (state.status === 'pending' || state.status === 'thinking')) return true
+      }
+      return false
+    }
     const matchesEnd = (state: ThinkingState, end: ThinkingEndPayload) =>
       state.thinkingId === end.thinkingId &&
       state.roomId === String(end.roomId) &&
@@ -3412,20 +3561,34 @@ export const useChatStore = defineStore(
 
     /** Reconnect: repair a dropped END from authenticated exact-ID server state, never from latest room/run. */
     const reconcileThinkingAfterReconnect = async () => {
-      // ponytail: at most 64 sequential GETs per reconnect; paginate only if >64 concurrent AI turns become real.
       const binding = await captureAccount()
       const epoch = accountEpoch
       const pending = [...thinkingByTrigger.values()]
         .flatMap((room) => [...room.values()].flat())
         .filter((state) => state.status === 'pending')
-      const active = uniqBy([...thinkingStreams.values(), ...pending], (state) => state.thinkingId).slice(0, 64)
-      await reconcileThinkingStates(active, binding, epoch)
+      // aichatoverview#483：候选不再 `.slice(0, 64)` 取头部（前批长期未终态会让后批永久饿死），
+      // 改按稳定键轮转，游标跨触发保留。轮转只搬运引用——reconcileThinkingStates 依赖对象同一性。
+      const active = uniqBy([...thinkingStreams.values(), ...pending], (state) => state.thinkingId).map((state) => ({
+        key: state.thinkingId,
+        state
+      }))
+      const rotated = selectRotatingBatch(active, recoverCursor.reconnect, ONLINE_CALIBRATION_MAX_IDS)
+      recoverCursor.reconnect = rotated.nextCursor
+      await reconcileThinkingStates(
+        rotated.batch.map((c) => c.state),
+        binding,
+        epoch
+      )
       for (const id of [...pendingThinkingStarts.keys()]) await resolveCollidingStart(id, true)
     }
 
-    // ponytail: one 30s timer + one in-flight cap reuse the exact-ID core; no per-card timers or new state machine.
+    // aichatoverview#483：单一有界恢复调度接缝。周期、前台/在线/重连、阅读范围变化与显式重试
+    // 都汇入这里：同 scope 单飞、hidden/offline 不启新自动请求、只有 owner 窗口发起物理请求。
+    // ponytail: 复用既有 30s 周期与既有 exact-ID 核心，不新建 RecoveryCoordinator/状态机。
     const ONLINE_CALIBRATION_MS = 30_000
     const ONLINE_CALIBRATION_MAX_IDS = 64
+    // 轮转游标：只进不出、按实际服务条数推进；不重置为 0，候选增删不会饿死尾部实例。
+    const recoverCursor = { online: 0, reconnect: 0 }
     let calibrationTimer: ReturnType<typeof setInterval> | null = null
     let calibrationInFlight = false
     /** Visible-room online calibration: converges a dropped END while staying online. */
@@ -3436,6 +3599,8 @@ export const useChatStore = defineStore(
       const roomId = globalStore.currentSessionRoomId
       if (!roomId) return 0
       const bucket = thinkingByTrigger.get(roomId)
+      const reading = readingWindowOf(roomId)
+      const visibleIds = new Set(reading?.browseSeq === (browseSeq[roomId] ?? 0) ? reading.ids : [])
       const candidates = uniqBy(
         [
           ...(bucket ? [...bucket.values()].flat() : []),
@@ -3444,17 +3609,29 @@ export const useChatStore = defineStore(
         (state) => state.thinkingId
       )
         .filter((state) => state.status === 'pending' || state.status === 'thinking')
-        .slice(0, ONLINE_CALIBRATION_MAX_IDS)
+        .map((state) => ({ key: state.thinkingId, state }))
       if (!candidates.length) return 0
+      // A 类 = 当前阅读范围内真实可见（优先），B 类 = 同房其他已知实例；两类轮转共享一份许可。
+      const rotated = selectRotatingBatch(
+        candidates,
+        recoverCursor.online,
+        ONLINE_CALIBRATION_MAX_IDS,
+        (c) => !!c.state.triggerMsgId && visibleIds.has(c.state.triggerMsgId)
+      )
+      recoverCursor.online = rotated.nextCursor
       calibrationInFlight = true
       try {
         const binding = await captureAccount().catch(() => null)
         const epoch = accountEpoch
         if (!binding && !isWeb()) return 0
         if (!accountCurrent(binding, epoch) || globalStore.currentSessionRoomId !== roomId) return 0
-        const completed = await reconcileThinkingStates(candidates, binding, epoch)
+        const completed = await reconcileThinkingStates(
+          rotated.batch.map((c) => c.state),
+          binding,
+          epoch
+        )
         console.debug(
-          `[thinking-calibration] phase=online-tick trigger=${trigger} roomId=${roomId} checked=${candidates.length} completed=${completed}`
+          `[thinking-calibration] phase=online-tick trigger=${trigger} roomId=${roomId} checked=${rotated.batch.length} completed=${completed} cursor=${recoverCursor.online}`
         )
         return completed
       } finally {
@@ -3470,6 +3647,14 @@ export const useChatStore = defineStore(
     const stopOnlineThinkingCalibration = () => {
       if (calibrationTimer) clearInterval(calibrationTimer)
       calibrationTimer = null
+    }
+    /**
+     * aichatoverview#483：恢复请求的统一入口（前台/在线恢复/阅读范围变化/显式重试）。
+     * 与周期 tick 共用同一 `calibrationInFlight` 许可，不叠加第二条循环。
+     */
+    const requestRecovery = (trigger: string) => {
+      if (!isChatHomeWindow() && !isWeb()) return
+      void reconcileVisibleRoomThinking(trigger)
     }
 
     /** 把 ThinkingState 归位到 thinkingByTrigger 的对应 triggerMsgId 桶 */
@@ -3814,6 +3999,9 @@ export const useChatStore = defineStore(
       finalizeThinking,
       reconcileThinkingAfterReconnect,
       reconcileVisibleRoomThinking,
+      requestRecovery,
+      reportReadingWindow,
+      readingWindowOf,
       startOnlineThinkingCalibration,
       stopOnlineThinkingCalibration,
       clearThinking,

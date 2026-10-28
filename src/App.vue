@@ -648,6 +648,9 @@ const handleWebsocketEvent = async (event: any) => {
     await chatStore.getSessionList(true)
     await chatStore.reconcileThinkingAfterReconnect()
     chatStore.startOnlineThinkingCalibration()
+    // aichatoverview#483：重连也进入同一恢复接缝（当前阅读范围 + 已知 thinking），
+    // 与本票的消息窗口校准共用单飞许可与代次校验。
+    chatStore.requestRecovery('reconnect')
 
     // 重连后同步当前/首个群聊成员信息，避免展示断网前的旧数据
     await refreshActiveGroupMembers()
@@ -673,11 +676,19 @@ const handleWebsocketEvent = async (event: any) => {
 }
 
 // 在线思考校准：回前台立即按可见房间补一次，30s 节拍由 store 内单 timer 驱动
+// aichatoverview#483：前台/网络恢复/重连都汇入 store 的同一有界恢复接缝（单飞、代次、预算），
+// 不再各自维护独立遍历。
 const handleVisibilityForThinkingCalibration = () => {
   if (document.visibilityState === 'visible') {
     chatStore.startOnlineThinkingCalibration()
-    void chatStore.reconcileVisibleRoomThinking('foreground')
+    chatStore.requestRecovery('foreground')
   }
+}
+// 网络恢复：断网期间不排队的恢复请求在这里补一次（离线/hidden 不启新自动请求）。
+const handleOnlineForRecovery = () => {
+  if (document.visibilityState === 'hidden') return
+  chatStore.startOnlineThinkingCalibration()
+  chatStore.requestRecovery('online')
 }
 /**
  * iOS网络权限预请求
@@ -718,6 +729,7 @@ onMounted(() => {
   window.addEventListener('dragstart', preventDrag)
   // 在线思考校准：回前台立即按可见房间补一次，30s 节拍由 store 内单 timer 驱动
   window.addEventListener('visibilitychange', handleVisibilityForThinkingCalibration)
+  window.addEventListener('online', handleOnlineForRecovery)
 
   if (!isWeb()) {
     addListener(listenBound('websocket-event', handleWebsocketEvent), 'websocket-event')
@@ -768,6 +780,7 @@ onUnmounted(async () => {
   window.removeEventListener('contextmenu', preventGlobalContextMenu, false)
   window.removeEventListener('dragstart', preventDrag)
   window.removeEventListener('visibilitychange', handleVisibilityForThinkingCalibration)
+  window.removeEventListener('online', handleOnlineForRecovery)
 
   // 只在桌面端的主窗口中清理全局快捷键
   if (isDesktop() && !isWeb() && appWindow.value?.label === 'home') {
