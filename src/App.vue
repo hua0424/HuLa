@@ -177,14 +177,16 @@ useMitt.on(WsResponseMessageType.NOTIFY_EVENT, async () => {
   await Promise.all([contactStore.getApplyPage('friend', true), contactStore.getApplyPage('group', true)])
 })
 
-// 处理自己被移除
+// #484：成员变更通知只作失效提示，真正事实以一次「当前读」为准（设计 §4.2）。
+// 旧实现直接按通知载荷增删成员/改人数，晚到的旧包会把已撤销的管理员或已退出的成员写回去。
 const handleSelfRemove = async (roomId: string) => {
-  info('本人退出群聊，移除会话数据')
-
-  // 移除会话和群成员数据
+  info('本人退出群聊提示，按服务端当前事实校准')
+  groupStore.invalidateGroupUse(roomId, 'self-remove-hint')
+  const state = await groupStore.ensureGroupUse(roomId)
+  // 只有可信「不可访问」才清理；读失败保留可读缓存（不假称已校准）
+  if (state?.outcome !== 'NOT_ACCESSIBLE') return
   chatStore.removeSession(roomId)
   groupStore.removeAllUsers(roomId)
-
   // 如果当前会话就是被移除的群聊，切换到其他会话
   if (globalStore.currentSessionRoomId === roomId) {
     globalStore.updateCurrentSessionRoomId(chatStore.sessionList[0]?.roomId ?? '')
@@ -192,9 +194,12 @@ const handleSelfRemove = async (roomId: string) => {
 }
 
 // 处理其他成员被移除
-const handleOtherMemberRemove = async (uid: string, roomId: string) => {
-  info('群成员退出群聊，移除群内的成员数据')
-  groupStore.removeUserItem(uid, roomId)
+const handleOtherMemberRemove = async (_uid: string, roomId: string) => {
+  info('群成员退出群聊提示，按服务端当前事实校准')
+  groupStore.invalidateGroupUse(roomId, 'member-remove-hint')
+  // 展示列表按当前事实重拉（旧包不再直接增删成员）；失败不阻塞校准
+  await groupStore.getGroupUserList(roomId, true).catch(() => undefined)
+  await groupStore.ensureGroupUse(roomId)
 }
 
 // 处理群成员移除
@@ -209,9 +214,12 @@ const handleMemberRemove = async (userList: UserItem[], roomId: string) => {
 }
 
 // 处理其他成员加入群聊
-const handleOtherMemberAdd = async (user: UserItem, roomId: string) => {
-  info('群成员加入群聊，添加群成员数据')
-  groupStore.addUserItem(user, roomId)
+const handleOtherMemberAdd = async (_user: UserItem, roomId: string) => {
+  info('群成员加入群聊提示，按服务端当前事实校准')
+  groupStore.invalidateGroupUse(roomId, 'member-add-hint')
+  // 新人可能不在本地列表里：重拉展示列表后，再由当前读覆盖角色/人数等权威字段
+  await groupStore.getGroupUserList(roomId, true).catch(() => undefined)
+  await groupStore.ensureGroupUse(roomId)
 }
 
 // 检查是否为当前用户
@@ -221,13 +229,15 @@ const isSelfUser = (uid: string): boolean => {
 
 // 处理自己加入群聊
 const handleSelfAdd = async (roomId: string) => {
-  info('本人加入群聊，加载该群聊的会话数据')
+  info('本人加入群聊提示，加载会话并按当前事实校准')
   await chatStore.addSession(roomId)
+  groupStore.invalidateGroupUse(roomId, 'self-add-hint')
   try {
     await groupStore.getGroupUserList(roomId, true)
   } catch (error) {
     console.error('初始化群成员失败:', error)
   }
+  await groupStore.ensureGroupUse(roomId)
 }
 
 // 处理群成员添加
@@ -260,10 +270,6 @@ useMitt.on(
 
     // #210 二期：跨窗直驱广播（#239 PR2 后与活同步按 #67 P1 互斥——防双写，见 memberChangeBroadcast.ts）
     void broadcastMemberChange(param)
-
-    groupStore.addGroupDetail(param.roomId)
-    // 更新群内的总人数
-    groupStore.updateGroupNumber(param.roomId, param.totalNum, param.onlineNum)
   }
 )
 
@@ -408,6 +414,11 @@ useMitt.on(WsResponseMessageType.ONLINE, async (onStatusChangeType: OnStatusChan
 
 useMitt.on(WsResponseMessageType.ROOM_DISSOLUTION, async (roomId: string) => {
   console.log('收到群解散通知', roomId)
+  // #484：解散通知也只作失效提示——先按当前事实确认不可访问，再退场；
+  // 读失败时保留合法本地聊天历史（不物理删），不假称已确认解散。
+  groupStore.invalidateGroupUse(roomId, 'dissolution-hint')
+  const state = await groupStore.ensureGroupUse(roomId)
+  if (state?.outcome !== 'NOT_ACCESSIBLE') return
   chatStore.removeDissolvedSession(roomId)
   // #210 二期：跨窗直驱广播（管理窗群设置 tab 移除该群卡片）
   void broadcastRoomDissolution(roomId)
@@ -525,7 +536,9 @@ useMitt.on(WsResponseMessageType.FEED_NOTIFY, async (data: any) => {
 
 useMitt.on(WsResponseMessageType.GROUP_SET_ADMIN_SUCCESS, (event) => {
   console.log('设置群管理员---> ', event)
-  groupStore.updateAdminStatus(event.roomId, event.uids, event.status)
+  // #484：管理员变更通知只作失效提示，角色以当前读为准（旧包不能直接改本地 roleId）
+  groupStore.invalidateGroupUse(event.roomId, 'admin-change-hint')
+  void groupStore.ensureGroupUse(event.roomId)
 })
 
 useMitt.on(WsResponseMessageType.OFFLINE, async (onStatusChangeType: OnStatusChangeType) => {

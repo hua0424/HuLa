@@ -506,6 +506,8 @@ pub enum ImUrl {
     GroupListMember,
     GroupDetail,
     GroupInfo,
+    /// #484：群成员/权限当前事实（绕缓存一致读）
+    GroupUseState,
     RevokeAdmin,
     AddAdmin,
     ExitGroup,
@@ -723,6 +725,8 @@ pub enum ImUrl {
     AiclawSetRelation,
     AiclawGroupConfigList,
     AiclawGroupConfigUpdate,
+    /// #484：aiclaw 群配置当前事实（绕缓存一致读）
+    AiclawGroupConfigCurrent,
     AiclawThinkingDetail,
     AiclawThinkingByTrigger,
 
@@ -773,6 +777,7 @@ impl ImUrl {
             ImUrl::GroupListMember => (http::Method::GET, "im/room/group/listMember"),
             ImUrl::GroupDetail => (http::Method::GET, "im/room/group/detail"),
             ImUrl::GroupInfo => (http::Method::GET, "im/room/group/info"),
+            ImUrl::GroupUseState => (http::Method::GET, "im/room/group/use-state"),
 
             // 群聊管理员
             ImUrl::RevokeAdmin => (http::Method::DELETE, "im/room/group/admin"),
@@ -1065,6 +1070,9 @@ impl ImUrl {
             ),
             ImUrl::AiclawGroupConfigList => (http::Method::GET, "im/aiclaw/group/config"),
             ImUrl::AiclawGroupConfigUpdate => (http::Method::PUT, "im/aiclaw/group/config"),
+            ImUrl::AiclawGroupConfigCurrent => {
+                (http::Method::GET, "im/aiclaw/group/config/current")
+            }
             ImUrl::AiclawThinkingDetail => (http::Method::GET, "im/aiclaw/thinking/{thinkingId}"),
             ImUrl::AiclawThinkingByTrigger => (http::Method::POST, "im/aiclaw/thinking/by-trigger"),
 
@@ -1197,6 +1205,7 @@ impl ImUrl {
             "getFriendPage" => Ok(ImUrl::GetFriendPage),
             "markMsgRead" => Ok(ImUrl::MarkMsgRead),
             "groupListMember" => Ok(ImUrl::GroupListMember),
+            "groupUseState" => Ok(ImUrl::GroupUseState),
             "checkEmail" => Ok(ImUrl::CheckEmail),
             "mergeMsg" => Ok(ImUrl::MergeMsg),
             "getUserByIds" => Ok(ImUrl::GetUserByIds),
@@ -1368,6 +1377,7 @@ impl ImUrl {
             "aiclawSetRelation" => Ok(ImUrl::AiclawSetRelation),
             "aiclawGroupConfigList" => Ok(ImUrl::AiclawGroupConfigList),
             "aiclawGroupConfigUpdate" => Ok(ImUrl::AiclawGroupConfigUpdate),
+            "aiclawGroupConfigCurrent" => Ok(ImUrl::AiclawGroupConfigCurrent),
             "aiclawThinkingDetail" => Ok(ImUrl::AiclawThinkingDetail),
             "aiclawThinkingByTrigger" => Ok(ImUrl::AiclawThinkingByTrigger),
 
