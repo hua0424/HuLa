@@ -11,7 +11,7 @@ import {
 } from '@/utils/errorToastSuppression'
 import { useChatStore } from './chat'
 import { scopedChatStorage } from './persistHomeWindowOnly'
-import { SessionExpiredError, isSessionCurrent, sessionBinding } from '@/services/sessionBinding'
+import { SessionExpiredError, type SessionIdentity, sameSession, sessionBinding } from '@/services/sessionBinding'
 import {
   GROUP_USE_MAX_MEMBER_UIDS,
   type GroupUseMemberProjection,
@@ -19,7 +19,6 @@ import {
   normalizeRequestedUids,
   parseGroupUseState
 } from '@/services/groupUseState'
-import { isWeb } from '@/utils/PlatformConstants'
 
 export const useGroupStore = defineStore(
   StoresEnum.GROUP,
@@ -136,9 +135,32 @@ export const useGroupStore = defineStore(
     const groupUseInFlight = new Map<string, Promise<GroupUseState | null>>()
     const groupUseDirty = new Set<string>()
 
+    /**
+     * #484：账号/后端切换轮次。**单调且不复位**——`resetGroupUseState` 只推进它，
+     * 不清零。房间代次在切换后回落到 0，若只比「房间代次」旧会话的 0 号在飞读
+     * 会与新会话的 0 号混淆；这一层保证旧轮次永远拿不到新轮次的提交资格。
+     */
+    let groupUseSessionSeq = 0
+
     const groupUseGenerationOf = (roomId: string) => groupUseGenerations.get(roomId) ?? 0
 
+    /** 发起当前读时冻结的提交资格：房间代次 + 账号/后端轮次 + 当时的会话绑定 */
+    type GroupUseTicket = Readonly<{
+      roomId: string
+      generation: number
+      sessionSeq: number
+      session: SessionIdentity | null
+    }>
+
+    const captureGroupUseTicket = (roomId: string): GroupUseTicket => ({
+      roomId,
+      generation: groupUseGenerationOf(roomId),
+      sessionSeq: groupUseSessionSeq,
+      session: sessionBinding.value
+    })
+
     const resetGroupUseState = () => {
+      groupUseSessionSeq += 1
       groupUseStates.value = {}
       groupUseGenerations.clear()
       groupUseInFlight.clear()
@@ -176,10 +198,15 @@ export const useGroupStore = defineStore(
       setRoomMemberList(roomId, next)
     }
 
-    const applyGroupUseResult = (roomId: string, result: GroupUseState | null, expectedGeneration: number): boolean => {
-      // 晚到结果：代次已推进或账号代次已变，一律丢弃（设计 §4.1）
-      if (expectedGeneration !== groupUseGenerationOf(roomId)) return false
-      if (!isWeb() && !isSessionCurrent(sessionBinding.value)) return false
+    const applyGroupUseResult = (ticket: GroupUseTicket, result: GroupUseState | null): boolean => {
+      const { roomId } = ticket
+      // 晚到结果：房间代次或账号/后端轮次已变，一律丢弃（设计 §4.1）。
+      // 用发起时冻结的 ticket 比对，而不是「此刻的 current」，否则旧会话的
+      // 0 号房间代次会与新会话回落到 0 的代次混淆。
+      if (ticket.sessionSeq !== groupUseSessionSeq) return false
+      if (ticket.generation !== groupUseGenerationOf(roomId)) return false
+      // 会话绑定本身也必须是同一次（同上：发起时的绑定，不是此刻的引用）
+      if (!sameSession(ticket.session, sessionBinding.value)) return false
 
       if (!result) {
         // 传输/格式失败不是「不可访问」：保留上次可信快照并标记未校准（设计 §3.3）
@@ -206,8 +233,8 @@ export const useGroupStore = defineStore(
       return true
     }
 
-    const readGroupUseOnce = (roomId: string): Promise<GroupUseState | null> => {
-      const generation = groupUseGenerationOf(roomId)
+    const readGroupUseOnce = (ticket: GroupUseTicket): Promise<GroupUseState | null> => {
+      const { roomId } = ticket
       // 只把当前阅读范围内的成员放进有界投影；页外成员保持 unknown
       const memberUids = normalizeRequestedUids(
         (userListMap.value[roomId] ?? []).map((member) => String(member.uid))
@@ -232,8 +259,13 @@ export const useGroupStore = defineStore(
       void request.finally(() => {
         // 旧 finally 不得清掉新请求（设计 §4.1）
         if (groupUseInFlight.get(roomId) === request) groupUseInFlight.delete(roomId)
-        // 本轮期间又收到 hint：有界补跑一次，避免永久停在未校准
-        if (groupUseDirty.has(roomId) && groupUseGenerationOf(roomId) === generation + 1) {
+        // 本轮期间又收到 hint：有界补跑一次，避免永久停在未校准。
+        // 账号/后端轮次变化时不在旧轮次里补跑，交给新一轮的 ensureGroupUse。
+        if (
+          ticket.sessionSeq === groupUseSessionSeq &&
+          groupUseDirty.has(roomId) &&
+          groupUseGenerationOf(roomId) === ticket.generation + 1
+        ) {
           void ensureGroupUse(roomId).catch(() => undefined)
         }
       })
@@ -252,9 +284,11 @@ export const useGroupStore = defineStore(
       const inFlight = groupUseInFlight.get(roomId)
       if (inFlight) return await inFlight
 
-      const generation = groupUseGenerationOf(roomId)
-      const result = await readGroupUseOnce(roomId)
-      applyGroupUseResult(roomId, result, generation)
+      const ticket = captureGroupUseTicket(roomId)
+      const result = await readGroupUseOnce(ticket)
+      applyGroupUseResult(ticket, result)
+      // 旧轮次的结果已被丢弃，不能把新会话的快照当成「本次校准结果」返回
+      if (ticket.sessionSeq !== groupUseSessionSeq) return null
       return groupUseStates.value[roomId] ?? null
     }
 
@@ -1106,8 +1140,7 @@ export const useGroupStore = defineStore(
       isRoomDissolved,
       groupUseStates,
       ensureGroupUse,
-      invalidateGroupUse,
-      applyGroupUseResult
+      invalidateGroupUse
     }
   },
   {

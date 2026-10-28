@@ -252,4 +252,46 @@ describe('groupStore 当前读校准（#484）', () => {
     expect(options).toMatchObject({ showError: false })
     expect(groupListMemberMock).not.toHaveBeenCalled()
   })
+
+  it('账号/后端切换时在飞的 MEMBER 结果不得写入新会话（ticket 作废）', async () => {
+    const groupStore = useGroupStore()
+    seedMembers(groupStore)
+    let release!: (v: unknown) => void
+    const pending = new Promise((resolve) => (release = resolve))
+    groupUseStateMock.mockReturnValueOnce(pending).mockResolvedValue(memberEnvelope())
+
+    const inflight = groupStore.ensureGroupUse(ROOM)
+    // 旧会话（sessionBinding=null，房间代次 0）首次校准读在飞时切换账号/后端
+    sessionBinding.value = { backendKey: 'backend-b', uid: '9', sessionEpoch: 7 }
+    release(memberEnvelope())
+    await inflight
+
+    // 旧结果被丢弃：既没有留下「已校准」快照，也没有按旧 coverage 移除成员或改人数
+    expect((groupStore as unknown as { groupUseStates: Record<string, unknown> }).groupUseStates[ROOM]).toBeUndefined()
+    expect((groupStore.userListMap[ROOM] ?? []).map((m) => m.uid).sort()).toEqual(['1', '2', '3'])
+    expect(groupStore.getGroupDetailByRoomId(ROOM)?.memberNum).toBe(3)
+
+    // 新会话仍有有效校准机会（不会被 existing && !dirty 短路挡住）
+    const state = await groupStore.ensureGroupUse(ROOM)
+    expect(state?.outcome).toBe('MEMBER')
+    expect(groupStore.getGroupDetailByRoomId(ROOM)?.memberNum).toBe(40)
+  })
+
+  it('账号/后端切换时在飞的 NOT_ACCESSIBLE 结果不得清新会话的合法房间事实', async () => {
+    const groupStore = useGroupStore()
+    seedMembers(groupStore)
+    let release!: (v: unknown) => void
+    const pending = new Promise((resolve) => (release = resolve))
+    groupUseStateMock.mockReturnValueOnce(pending)
+
+    const inflight = groupStore.ensureGroupUse(ROOM)
+    sessionBinding.value = { backendKey: 'backend-b', uid: '9', sessionEpoch: 7 }
+    release({ outcome: 'NOT_ACCESSIBLE', roomId: ROOM, requestedMembers: [] })
+    await inflight
+
+    // 旧会话的「不可访问」不得触发 removeAllUsers/removeGroupDetail
+    expect((groupStore.userListMap[ROOM] ?? []).length).toBe(3)
+    expect(groupStore.getGroupDetailByRoomId(ROOM)?.roomId).toBe(ROOM)
+    expect((groupStore as unknown as { groupUseStates: Record<string, unknown> }).groupUseStates[ROOM]).toBeUndefined()
+  })
 })
