@@ -31,7 +31,7 @@ describe('windowCalibrate', () => {
     expect(range.toId).toBe('129')
     expect(range.fromTimeMs).toBe(1010)
     expect(range.toTimeMs).toBe(1029)
-    expect(range.knownIds).toHaveLength(30)
+    expect(range.knownMsgIds).toHaveLength(30)
     expect(range.pageSize).toBe(20)
   })
 
@@ -39,7 +39,7 @@ describe('windowCalibrate', () => {
     const range = buildWindowRange([], 20, 'req-2')
     expect(range.mode).toBe('tail')
     expect(range.toId).toBeUndefined()
-    expect(range.knownIds).toEqual([])
+    expect(range.knownMsgIds).toEqual([])
   })
 
   it('mergeWindowResult 原地合并：新增插入、已知未触及更新、在途触及保留', () => {
@@ -56,7 +56,7 @@ describe('windowCalibrate', () => {
         ],
         unavailableIds: []
       },
-      { existedIds: new Set(['1', '2']), wsTouched: false, isTransient: () => false },
+      { existedIds: new Set(['1', '2']), touchedIds: new Set<string>(), isTransient: () => false },
       '2'
     )
     expect(result.merged).toBe(2)
@@ -73,7 +73,7 @@ describe('windowCalibrate', () => {
     const result = mergeWindowResult(
       room,
       { items: [{ message: { id: '1', sendTime: 1, body: { content: 'stale' } } }], unavailableIds: ['1'] },
-      { existedIds: new Set(['1']), wsTouched: true, isTransient: () => false },
+      { existedIds: new Set(['1']), touchedIds: new Set(['1']), isTransient: () => false },
       '1'
     )
     expect(result.merged).toBe(0)
@@ -90,7 +90,7 @@ describe('windowCalibrate', () => {
     const result = mergeWindowResult(
       room,
       { items: [], unavailableIds: ['1'] },
-      { existedIds: new Set(['1', '2']), wsTouched: false, isTransient: () => false },
+      { existedIds: new Set(['1', '2']), touchedIds: new Set<string>(), isTransient: () => false },
       '1'
     )
     expect(result.deleted).toBe(1)
@@ -108,7 +108,7 @@ describe('windowCalibrate', () => {
       { items: [{ message: { id: 'T1', sendTime: 5 } }], unavailableIds: ['T1'] },
       {
         existedIds: new Set(['T1']),
-        wsTouched: false,
+        touchedIds: new Set<string>(),
         isTransient: (m: any) => m?.message?.status === 'sending'
       },
       'T1'

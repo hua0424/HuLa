@@ -159,6 +159,15 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
 const BASIC_AUTH = btoa('luohuo_web:luohuo_web_secret')
 
 /**
+ * aichatoverview#483：Web 请求的真实期限（毫秒）。
+ *
+ * 之前这里没有任何 signal/超时：单飞只是不再发起新请求，已悬挂的连接与任务永不释放，
+ * 恢复周期会把悬挂请求越堆越多。用 AbortController 真正中断底层 fetch。
+ * 30s 覆盖正常 IM 往返（含弱网重传），不作为本票测得的新 SLA。
+ */
+const WEB_IM_REQUEST_TIMEOUT_MS = 30_000
+
+/**
  * Web 模式 IM HTTP 请求工具，替代 invoke('im_request_command')
  */
 export async function webImRequest<T = any>(url: ImUrlEnum, body?: any, params?: Record<string, any>): Promise<T> {
@@ -247,7 +256,24 @@ async function webImRequestRaw(url: ImUrlEnum, body?: any, params?: Record<strin
     fetchOptions.body = JSON.stringify(body)
   }
 
-  const response = await fetch(fullUrl, fetchOptions)
+  // aichatoverview#483：Web 侧同样需要真实期限。没有 signal 时 fetch 永不结束，
+  // 单飞只是不再发起新请求，悬挂的连接/任务并不释放。AbortSignal.timeout 会真正中断底层请求。
+  // 30s 覆盖正常 IM 往返（含弱网重传），不作为本票测得的新 SLA。
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), WEB_IM_REQUEST_TIMEOUT_MS)
+  fetchOptions.signal = controller.signal
+
+  let response: Response
+  try {
+    response = await fetch(fullUrl, fetchOptions)
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`[webImRequest] 请求超时（${WEB_IM_REQUEST_TIMEOUT_MS}ms）: ${resolvedPath}`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
 
   if (!response.ok) {
     throw new Error(`[webImRequest] HTTP ${response.status}: ${response.statusText}`)

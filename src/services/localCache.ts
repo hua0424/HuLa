@@ -146,7 +146,10 @@ const readThinkingBody = async (
       idString(detail.roomId) !== thinking.roomId ||
       idString(detail.aiclawUid) !== String(thinking.aiclawId) ||
       idString(detail.triggerMsgId) !== (thinking.triggerMsgId ?? '') ||
-      ![1, 4].includes(detail.status)
+      // aichatoverview#483：终态包含失败终态（2 失败 / 3 超时）——服务端 finalize 已把
+      // 已保存正文与失败状态一起持久化，读到正文不等于执行成功，卡片仍按真实状态展示。
+      // status 0（运行中）/未知值依旧拒绝：未提交内容不得当作可读正文。
+      ![1, 2, 3, 4].includes(detail.status)
     )
       throw new Error('思考正文归属或结束状态未确认')
     if (!thinking.triggerMsgId) throw new Error('思考正文缺少可读触发消息')
