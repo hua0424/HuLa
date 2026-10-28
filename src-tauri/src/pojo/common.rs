@@ -36,12 +36,21 @@ pub struct LoginParam {
 
 #[derive(Deserialize, Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct NotificationSync {
+    pub state: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiResult<T> {
     pub success: bool,
     pub code: Option<i32>,
     pub msg: Option<String>,
     pub version: Option<String>,
     pub data: Option<T>,
+    /// 仅在部分在线设备未收到通知（如变更同步未完成）时下发，全部送达时字段缺省。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification_sync: Option<NotificationSync>,
 }
 
 #[derive(serde::Deserialize, Debug, Serialize)]

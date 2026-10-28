@@ -23,6 +23,11 @@ const groupStoreMock = vi.hoisted(() => ({
   updateGroupDetail: vi.fn()
 }))
 vi.mock('@/stores/group', () => ({ useGroupStore: () => groupStoreMock }))
+// #482：updateRoomInfo 读取请求前账号与当前房间，用于丢弃过期反馈
+const userStoreMock = vi.hoisted(() => ({ userInfo: { token: 't0' } as { token?: string } }))
+vi.mock('@/stores/user', () => ({ useUserStore: () => userStoreMock }))
+const globalStoreMock = vi.hoisted(() => ({ currentSessionRoomId: 'r1' }))
+vi.mock('@/stores/global', () => ({ useGlobalStore: () => globalStoreMock }))
 
 import {
   addAdmin,
@@ -61,8 +66,9 @@ describe('ImRequestUtils mutation wrapper #200 showError 透传', () => {
   for (const [name, call] of cases) {
     it(`${name}：options.showError=false 透传到 invokeWithErrorHandler`, async () => {
       await call()
+      // #482：addAdmin/revokeAdmin/updateRoomInfo 走带同步回执的命令，其余仍走 im_request_command
       expect(invokeWithErrorHandlerMock).toHaveBeenCalledWith(
-        'im_request_command',
+        expect.stringMatching(/^im_(sync_)?request_command$/),
         expect.anything(),
         expect.objectContaining({ showError: false })
       )
