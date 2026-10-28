@@ -37,7 +37,12 @@ import { saveFileAttachmentAs, saveVideoAttachmentAs } from '@/utils/AttachmentS
 import { isDiffNow } from '@/utils/ComputedTime.ts'
 import { extractFileName, removeTag } from '@/utils/Formatting'
 import { detectImageFormat, imageUrlToUint8Array, isImageUrl } from '@/utils/ImageUtils'
-import { recallMsg, removeGroupMember, updateMyRoomInfo } from '@/utils/ImRequestUtils'
+import {
+  NOTIFICATION_SYNC_INCOMPLETE_MESSAGE,
+  recallMsg,
+  removeGroupMember,
+  updateMyRoomInfo
+} from '@/utils/ImRequestUtils'
 import { detectRemoteFileType, getFilesMeta } from '@/utils/PathUtil'
 import { isMac, isMobile, isWeb } from '@/utils/PlatformConstants'
 import { eventSession, isSessionCurrent, sessionBinding, type SessionIdentity } from '@/services/sessionBinding'
@@ -972,8 +977,13 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
         if (!roomId) return
 
         try {
-          await groupStore.addAdmin([targetUid])
-          window.$message.success(t('menu.set_admin_success'))
+          const result = await groupStore.addAdmin([targetUid])
+          // 单次反馈：同步未完成时用警告替代成功提示，不叠加第二条 toast
+          if (result?.notificationSync?.state === 'INCOMPLETE') {
+            window.$message.warning(NOTIFICATION_SYNC_INCOMPLETE_MESSAGE)
+          } else {
+            window.$message.success(t('menu.set_admin_success'))
+          }
         } catch (_error) {
           window.$message.error(t('menu.set_admin_fail'))
         }
@@ -1017,8 +1027,13 @@ export const useChatMain = (isHistoryMode = false, options: UseChatMainOptions =
         if (!roomId) return
 
         try {
-          await groupStore.revokeAdmin([targetUid])
-          window.$message.success(t('menu.revoke_admin_success'))
+          const result = await groupStore.revokeAdmin([targetUid])
+          // 单次反馈：同步未完成时用警告替代成功提示，不叠加第二条 toast
+          if (result?.notificationSync?.state === 'INCOMPLETE') {
+            window.$message.warning(NOTIFICATION_SYNC_INCOMPLETE_MESSAGE)
+          } else {
+            window.$message.success(t('menu.revoke_admin_success'))
+          }
         } catch (_error) {
           window.$message.error(t('menu.revoke_admin_fail'))
         }

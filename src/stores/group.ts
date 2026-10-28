@@ -740,10 +740,13 @@ export const useGroupStore = defineStore(
      */
     const addAdmin = async (uidList: string[]) => {
       // REQ-017 #200：showError:false 静默底层 network_error——调用方（右键设管理）有领域失败 toast
-      await ImRequestUtils.addAdmin({ roomId: globalStore.currentSessionRoomId, uidList }, { showError: false })
+      const result = await ImRequestUtils.addAdmin(
+        { roomId: globalStore.currentSessionRoomId, uidList },
+        { showError: false }
+      )
       // 更新本地群成员列表中的角色信息
       const targetRoomId = globalStore.currentSessionRoomId
-      if (!targetRoomId) return
+      if (!targetRoomId) return result
 
       const currentUserList = userListMap.value[targetRoomId] || []
       const updatedList = currentUserList.map((user: UserItem) => {
@@ -753,6 +756,7 @@ export const useGroupStore = defineStore(
         return user
       })
       setRoomMemberList(targetRoomId, updatedList)
+      return result
     }
 
     /**
@@ -761,10 +765,13 @@ export const useGroupStore = defineStore(
      */
     const revokeAdmin = async (uidList: string[]) => {
       // REQ-017 #200：showError:false 静默底层 network_error——调用方（右键撤管理）有领域失败 toast
-      await ImRequestUtils.revokeAdmin({ roomId: globalStore.currentSessionRoomId, uidList }, { showError: false })
+      const result = await ImRequestUtils.revokeAdmin(
+        { roomId: globalStore.currentSessionRoomId, uidList },
+        { showError: false }
+      )
       // 更新本地群成员列表中的角色信息
       const targetRoomId = globalStore.currentSessionRoomId
-      if (!targetRoomId) return
+      if (!targetRoomId) return result
 
       const currentUserList = userListMap.value[targetRoomId] || []
       const updatedList = currentUserList.map((user: UserItem) => {
@@ -774,6 +781,7 @@ export const useGroupStore = defineStore(
         return user
       })
       setRoomMemberList(targetRoomId, updatedList)
+      return result
     }
 
     /**

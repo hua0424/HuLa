@@ -138,10 +138,13 @@ const publicRoutes = new Set([
   'initConfig'
 ])
 
+/** 走 IM HTTP 通道的命令：public 路由之外都必须带上发起请求时的账号绑定。 */
+const imRequestCommands = new Set(['im_request_command', 'im_sync_request_command'])
+
 export const prepareScopedArgs = async (command: string, args?: InvokeArgs): Promise<InvokeArgs | undefined> => {
   const record = args as Record<string, any> | undefined
   const protectedCommand =
-    scopedCommands.has(command) || (command === 'im_request_command' && !publicRoutes.has(record?.url))
+    scopedCommands.has(command) || (imRequestCommands.has(command) && !publicRoutes.has(record?.url))
   if (!protectedCommand) return args
   const supplied: SessionIdentity | undefined = record?.binding ?? record?.data?._sessionBinding
   const binding = supplied ?? (await captureSessionBinding())

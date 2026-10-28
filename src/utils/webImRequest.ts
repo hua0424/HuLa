@@ -162,6 +162,28 @@ const BASIC_AUTH = btoa('luohuo_web:luohuo_web_secret')
  * Web 模式 IM HTTP 请求工具，替代 invoke('im_request_command')
  */
 export async function webImRequest<T = any>(url: ImUrlEnum, body?: any, params?: Record<string, any>): Promise<T> {
+  const result = await webImRequestRaw(url, body, params)
+  return (result && typeof result === 'object' && 'code' in result ? result.data : result) as T
+}
+
+/**
+ * 与 webImRequest 同一请求路径，但返回归一化后的 { data, notificationSync }，
+ * 用于需要读取顶层 notificationSync（部分端同步未完成）的写操作。
+ */
+export async function webImRequestWithSync<T = any>(
+  url: ImUrlEnum,
+  body?: any,
+  params?: Record<string, any>
+): Promise<{ data: T; notificationSync?: { state?: string } | null }> {
+  const result = await webImRequestRaw(url, body, params)
+  const isEnvelope = result && typeof result === 'object' && 'code' in result
+  return {
+    data: (isEnvelope ? result.data : result) as T,
+    notificationSync: isEnvelope ? (result.notificationSync ?? null) : null
+  }
+}
+
+async function webImRequestRaw(url: ImUrlEnum, body?: any, params?: Record<string, any>): Promise<any> {
   const baseUrl = import.meta.env.VITE_WEB_API_URL
   if (!baseUrl) {
     throw new Error('[webImRequest] VITE_WEB_API_URL 未配置')
@@ -243,8 +265,8 @@ export async function webImRequest<T = any>(url: ImUrlEnum, body?: any, params?:
     if (result.code !== 200 && result.code !== 0) {
       throw new Error(`[webImRequest] 业务错误 ${result.code}: ${result.msg || '未知错误'}`)
     }
-    return result.data as T
+    return result
   }
 
-  return result as T
+  return result
 }

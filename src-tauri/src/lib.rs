@@ -41,7 +41,7 @@ pub mod websocket;
 mod webview_helper;
 
 use crate::command::app_state_command::is_app_state_ready;
-use crate::command::request_command::{im_request_command, login_command};
+use crate::command::request_command::{im_request_command, im_sync_request_command, login_command};
 use crate::command::room_member_command::{
     cursor_page_room_members, get_room_members, page_room, update_my_room_info,
 };
@@ -475,6 +475,7 @@ fn get_invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         ws_get_app_background_state,
         login_command,
         im_request_command,
+        im_sync_request_command,
         get_settings,
         update_settings,
         // OAuth

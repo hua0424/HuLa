@@ -608,6 +608,7 @@ const handleGroupInfoUpdate = async () => {
     return
   }
 
+  // #482：成功/同步未完成的反馈统一由 updateRoomInfo 给出，这里不再叠加第二条 toast
   await updateRoomInfo({
     id: currentSessionRoomId.value,
     name: nameValue.value,
@@ -617,7 +618,6 @@ const handleGroupInfoUpdate = async () => {
 
   // 更新初始值
   initialNameValue.value = nameValue.value
-  window.$message.success(t('mobile_chat_setting.group_name_updated'))
 }
 
 // 获取群组详情和成员信息

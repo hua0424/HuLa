@@ -1,4 +1,5 @@
 use crate::command::database_command::{bind_user_database, prepare_scoped_database};
+use crate::pojo::common::ApiResult;
 use crate::session::{SessionBinding, SessionIdentity, normalize_backend_key};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -230,6 +231,37 @@ pub async fn im_request_command(
     app_handle: tauri::AppHandle,
     binding: Option<SessionIdentity>,
 ) -> Result<Option<serde_json::Value>, String> {
+    let result = im_request_core(state.inner(), url, body, params, &app_handle, binding).await?;
+    Ok(result.data)
+}
+
+/// 与 im_request_command 完全相同的认证/代次/token 处理，但保留完整响应体，
+/// 以便调用方读取顶层 notificationSync 字段。
+#[tauri::command]
+#[cfg_attr(mobile, allow(unused_variables))]
+pub async fn im_sync_request_command(
+    state: State<'_, AppData>,
+    url: String,
+    body: Option<serde_json::Value>,
+    params: Option<serde_json::Value>,
+    app_handle: tauri::AppHandle,
+    binding: Option<SessionIdentity>,
+) -> Result<Option<serde_json::Value>, String> {
+    let result = im_request_core(state.inner(), url, body, params, &app_handle, binding).await?;
+    Ok(Some(serde_json::json!({
+        "data": result.data,
+        "notificationSync": result.notification_sync,
+    })))
+}
+
+async fn im_request_core(
+    state: &AppData,
+    url: String,
+    body: Option<serde_json::Value>,
+    params: Option<serde_json::Value>,
+    app_handle: &tauri::AppHandle,
+    binding: Option<SessionIdentity>,
+) -> Result<ApiResult<serde_json::Value>, String> {
     let parsed = url.parse::<ImUrl>().map_err(|_| "无效HTTP路由")?;
     let public = matches!(
         parsed,
@@ -267,97 +299,81 @@ pub async fn im_request_command(
     // 记录请求前的 token，用于检测是否被刷新
     let old_tokens = capture_token_snapshot_direct(&rc);
 
-    if let Ok(parsed_url) = url.parse::<ImUrl>() {
-        let (method, base_path) = parsed_url.get_url();
+    let (method, base_path) = parsed.get_url();
 
-        // 支持路径变量替换（如 {uid}、{friendUid}）
-        let mut resolved_path = base_path.to_string();
-        let mut clean_params = params.clone();
-        if let Some(serde_json::Value::Object(ref mut map)) = clean_params {
-            let mut keys_to_remove = Vec::new();
-            for (key, value) in map.iter() {
-                let placeholder = format!("{{{}}}", key);
-                if resolved_path.contains(&placeholder) {
-                    let replacement = value
-                        .as_str()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| value.to_string().trim_matches('"').to_string());
-                    resolved_path = resolved_path.replace(&placeholder, &replacement);
-                    keys_to_remove.push(key.clone());
-                }
-            }
-            for key in keys_to_remove {
-                map.remove(&key);
+    // 支持路径变量替换（如 {uid}、{friendUid}）
+    let mut resolved_path = base_path.to_string();
+    let mut clean_params = params.clone();
+    if let Some(serde_json::Value::Object(ref mut map)) = clean_params {
+        let mut keys_to_remove = Vec::new();
+        for (key, value) in map.iter() {
+            let placeholder = format!("{{{}}}", key);
+            if resolved_path.contains(&placeholder) {
+                let replacement = value
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| value.to_string().trim_matches('"').to_string());
+                resolved_path = resolved_path.replace(&placeholder, &replacement);
+                keys_to_remove.push(key.clone());
             }
         }
+        for key in keys_to_remove {
+            map.remove(&key);
+        }
+    }
 
-        let result: Result<Option<serde_json::Value>, anyhow::Error> = if resolved_path != base_path
-        {
-            // 路径有变量替换，直接使用 request 方法
-            match rc
-                .request::<serde_json::Value, _, _>(method, &resolved_path, body, clean_params)
+    // 无占位符时 clean_params 与 params 等价，故统一走 request 以保留完整响应体
+    let result: Result<ApiResult<serde_json::Value>, anyhow::Error> = rc
+        .request::<serde_json::Value, _, _>(method, &resolved_path, body, clean_params)
+        .await;
+
+    if !state.session.is_epoch(request_epoch) {
+        return Err("预认证响应代次已失效".into());
+    }
+    let _response_gate = match &binding {
+        Some(binding) => Some(state.session.commit(binding).await?),
+        None => None,
+    };
+    // 无论请求成功还是失败，都检查 token 是否被刷新，如果是则保存到数据库
+    // 这确保了即使请求重试后失败，刷新后的 token 也能被持久化
+    if let (Some(new_token), Some(new_refresh_token)) = (rc.token.clone(), rc.refresh_token.clone())
+    {
+        if old_tokens.token != rc.token || old_tokens.refresh_token != rc.refresh_token {
+            if let Some(binding) = &binding {
+                im_user_repository::save_user_tokens(
+                    &binding.db,
+                    &user_uid,
+                    &new_token,
+                    &new_refresh_token,
+                )
                 .await
-            {
-                Ok(api_result) => Ok(api_result.data),
-                Err(e) => Err(e),
-            }
-        } else {
-            rc.im_request(parsed_url, body, params).await
-        };
-
-        if !state.session.is_epoch(request_epoch) {
-            return Err("预认证响应代次已失效".into());
-        }
-        let _response_gate = match &binding {
-            Some(binding) => Some(state.session.commit(binding).await?),
-            None => None,
-        };
-        // 无论请求成功还是失败，都检查 token 是否被刷新，如果是则保存到数据库
-        // 这确保了即使请求重试后失败，刷新后的 token 也能被持久化
-        if let (Some(new_token), Some(new_refresh_token)) =
-            (rc.token.clone(), rc.refresh_token.clone())
-        {
-            if old_tokens.token != rc.token || old_tokens.refresh_token != rc.refresh_token {
-                if let Some(binding) = &binding {
-                    im_user_repository::save_user_tokens(
-                        &binding.db,
-                        &user_uid,
-                        &new_token,
-                        &new_refresh_token,
-                    )
-                    .await
-                    .ok();
-                }
+                .ok();
             }
         }
+    }
 
-        match result {
-            Ok(data) => {
-                return Ok(data);
-            }
-            Err(e) => {
-                if e.to_string().contains("请重新登录") {
-                    if user_uid.is_empty() {
+    match result {
+        Ok(api_result) => Ok(api_result),
+        Err(e) => {
+            if e.to_string().contains("请重新登录") {
+                if user_uid.is_empty() {
+                } else {
+                    if app_handle.get_webview_window("home").is_some() {
+                        if let Err(err) = app_handle.emit_to("home", "relogin", ()) {
+                            let _ = err;
+                        }
+                    } else if app_handle.get_webview_window("mobile-home").is_some() {
+                        if let Err(err) = app_handle.emit_to("mobile-home", "relogin", ()) {
+                            let _ = err;
+                        }
                     } else {
-                        if app_handle.get_webview_window("home").is_some() {
-                            if let Err(err) = app_handle.emit_to("home", "relogin", ()) {
-                                let _ = err;
-                            }
-                        } else if app_handle.get_webview_window("mobile-home").is_some() {
-                            if let Err(err) = app_handle.emit_to("mobile-home", "relogin", ()) {
-                                let _ = err;
-                            }
-                        } else {
-                            if let Err(err) = app_handle.emit("relogin", ()) {
-                                let _ = err;
-                            }
+                        if let Err(err) = app_handle.emit("relogin", ()) {
+                            let _ = err;
                         }
                     }
                 }
-                return Err(e.to_string());
             }
+            Err(e.to_string())
         }
-    } else {
-        return Err(format!("Invalid URL: {}", url));
     }
 }
