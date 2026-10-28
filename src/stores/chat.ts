@@ -2928,7 +2928,9 @@ export const useChatStore = defineStore(
       roomId: string
       guard: AiclawConfigGuard
       version: number
-      /** 归一化后的配置项；读取失败/空响应为 null */
+      /** #484：当前读的 typed 结果——不可访问与传输/格式失败必须分开（设计 §3.3） */
+      outcome: 'PRESENT' | 'NOT_ACCESSIBLE' | 'ERROR'
+      /** 归一化后的配置项；不可访问/读取失败/空响应为 null */
       item: AiclawGroupConfigItem | null
       error: unknown
     }
@@ -2956,6 +2958,10 @@ export const useChatStore = defineStore(
     /**
      * 底层配置读取（同键合并 + 静默）：只取数/归一化，失败不弹 toast（#456 A12 后台静默），
      * 提示由各入口按场景决定。
+     *
+     * #484：改用 `aiclaw/group/config/current` 当前读——服务端绕开 Redis 配置缓存直读事实表，
+     * 并把「可信不可访问」与「传输/格式失败」分成两种 typed 结果；
+     * 旧的 list 接口读到的是缓存值，且空 data 无法区分「无配置行」与「读失败」。
      */
     const readAiclawGroupConfig = (aiclawUid: number, roomId: string | number): Promise<AiclawConfigRead> => {
       const key = aiclawConfigKey(aiclawUid, roomId)
@@ -2967,30 +2973,41 @@ export const useChatStore = defineStore(
         const version = aiclawConfigVersionOf(key)
         let item: AiclawGroupConfigItem | null = null
         let error: unknown = null
+        let outcome: AiclawConfigRead['outcome'] = 'ERROR'
         if (guard.live) {
           try {
             // REQ-016 #196 F5：单房间失败静默（陈旧房间 server 校验必炸，弹全局 toast = 误报）
             const raw = await imRequest<Record<string, unknown>>(
               {
-                url: ImUrlEnum.AICLAW_GROUP_CONFIG_LIST,
+                url: ImUrlEnum.AICLAW_GROUP_CONFIG_CURRENT,
                 params: { aiclawUid, roomId: Number(roomId) }
               },
               { showError: false }
             )
-            // A11：空响应不是「默认配置」，按读取失败处理（server 契约见 #456 证据）
-            if (raw) {
+            const state = typeof raw?.outcome === 'string' ? raw.outcome : ''
+            if (state === 'NOT_ACCESSIBLE') {
+              // 可信不可访问：该键不再可用（设计 §3.3），不当作失败重试
+              outcome = 'NOT_ACCESSIBLE'
+            } else if (state === 'PRESENT') {
+              const config = raw?.config as Record<string, unknown> | null | undefined
+              // 无配置行也返回 PRESENT(configured=false + 默认值)，不是「删除」
+              const source = config && typeof config === 'object' ? config : {}
               item = {
-                ...normalizeAiclawGroupConfig(raw),
-                roomId: String(raw.roomId ?? roomId),
-                roomName: typeof raw.roomName === 'string' ? raw.roomName : undefined
+                ...normalizeAiclawGroupConfig(source),
+                roomId: String(source.roomId ?? roomId),
+                roomName: typeof source.roomName === 'string' ? source.roomName : undefined
               }
+              outcome = 'PRESENT'
+            } else {
+              // 形状不符：按读失败处理，保留上次可信值，绝不当成不可访问
+              error = new Error('aiclaw 群配置当前读响应格式不符')
             }
           } catch (e) {
             error = e
             console.error(`[ChatStore] Failed to load aiclaw group config: ${key}`, e)
           }
         }
-        return { key, roomId: String(roomId), guard, version, item, error }
+        return { key, roomId: String(roomId), guard, version, outcome, item, error }
       })()
       aiclawConfigInFlight.set(key, request)
       const settle = () => {
@@ -3006,9 +3023,15 @@ export const useChatStore = defineStore(
      * 补全期间守卫失效同样放弃写入。返回是否写入缓存。
      */
     const commitAiclawConfigRead = async (read: AiclawConfigRead): Promise<boolean> => {
-      if (!read.item) return false
       const stale = () => !aiclawConfigGuardCurrent(read.guard) || aiclawConfigVersionOf(read.key) !== read.version
       if (stale()) return false
+      if (read.outcome === 'NOT_ACCESSIBLE') {
+        // #484：可信不可访问——精准移除该键（不波及其它群），并作废在途旧读取
+        invalidateAiclawGroupConfig(read.key)
+        aiclawGroupConfigs.delete(read.key)
+        return true
+      }
+      if (!read.item) return false
       const existing = aiclawGroupConfigs.get(read.key)
       const item: AiclawGroupConfigItem = {
         ...read.item,
@@ -3041,17 +3064,20 @@ export const useChatStore = defineStore(
       const groupStore = useGroupStore()
       let allSuccess = true
       try {
-        // 清除旧缓存
-        const keysToDelete: string[] = []
-        for (const key of aiclawGroupConfigs.keys()) {
-          if (key.startsWith(`${aiclawUid}:`)) keysToDelete.push(key)
-        }
-        keysToDelete.forEach((k) => aiclawGroupConfigs.delete(k))
         // A3：账号失效/切换后不得继续用旧会话把后续群写进新账号缓存
         const guard = await captureAiclawConfigGuard()
         if (!guard.live) return false
         // 获取 aiclaw 所在的所有群 roomId
         const roomIds = groupStore.getRoomIdsByUid(String(aiclawUid))
+        // #484：不再「先清全集」——读取失败时保留上次可信值（否则一次网络抖动就把整列表清空）。
+        // 只移除已确认不在该助理房间集合里的陈旧键。
+        const staleKeys: string[] = []
+        for (const key of aiclawGroupConfigs.keys()) {
+          if (!key.startsWith(`${aiclawUid}:`)) continue
+          const keyRoomId = key.slice(`${aiclawUid}:`.length)
+          if (!roomIds.includes(keyRoomId)) staleKeys.push(key)
+        }
+        staleKeys.forEach((k) => aiclawGroupConfigs.delete(k))
         for (const roomId of roomIds) {
           if (!aiclawConfigGuardCurrent(guard)) return false
           // 单个群配置获取失败不影响其他群，但需让调用方知道本次加载不完整
@@ -3098,19 +3124,19 @@ export const useChatStore = defineStore(
       return aiclawGroupConfigs.get(`${aiclawUid}:${roomId}`)
     }
 
-    /** 更新 aiclaw 群配置（本地缓存，WS 通知时调用；#456 A5/A6：新数据到达即作废在途旧读取） */
-    const updateAiclawGroupConfig = (aiclawUid: number, roomId: number, config: AiclawGroupConfig) => {
+    /**
+     * #484：aiclaw 群配置的 WS 通知只作失效提示，不再应用载荷。
+     *
+     * 旧实现把 broadcast 里的 config 原样写进缓存：晚到的旧包会把已批准的 approved
+     * 或已撤销的 workspaceDir 覆盖回去。现在改为「作废该键 + 立刻按当前读取一次事实」，
+     * 取不到就保留上次可信值（不假称已校准）。
+     * #456 A5/A6：新数据到达即作废在途旧读取。
+     */
+    const updateAiclawGroupConfig = (aiclawUid: number, roomId: number, _config: AiclawGroupConfig) => {
       const key = aiclawConfigKey(aiclawUid, roomId)
-      const existing = aiclawGroupConfigs.get(key)
-      // WS 广播的 boolean 字段可能是 1/0 integer，统一经 normalizeAiclawGroupConfig 归一化
-      const raw = config as Record<string, unknown>
-      const normalized: AiclawGroupConfig = normalizeAiclawGroupConfig(raw)
       invalidateAiclawGroupConfig(key)
-      aiclawGroupConfigs.set(key, {
-        ...normalized,
-        roomId: String(roomId),
-        roomName: existing?.roomName,
-        account: existing?.account
+      void loadAiclawGroupConfigDetail(aiclawUid, roomId).catch((error) => {
+        console.warn(`[ChatStore] aiclaw 群配置提示后当前读失败: ${key}`, error)
       })
     }
 

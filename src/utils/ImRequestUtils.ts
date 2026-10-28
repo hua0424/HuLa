@@ -345,6 +345,26 @@ export async function groupListMember(roomId: string, options?: { showError?: bo
   })
 }
 
+/**
+ * #484：群成员/权限当前事实（server 绕缓存一致读）。
+ * 走 imRequest 而非 GET_ROOM_MEMBERS：后者是旧的整表成员列表（无调用者权限校验、profile 缺失即丢成员）。
+ */
+export async function groupUseState(
+  params: { roomId: string | number; memberUids?: Array<string | number> },
+  options?: { showError?: boolean }
+) {
+  return await imRequest<unknown>(
+    {
+      url: ImUrlEnum.GROUP_USE_STATE,
+      params: {
+        roomId: Number(params.roomId),
+        ...(params.memberUids?.length ? { memberUids: params.memberUids.map((uid) => String(uid)) } : {})
+      }
+    },
+    { showError: options?.showError }
+  )
+}
+
 export async function getMsgList(body: { msgIds?: string[]; async?: boolean }) {
   return await imRequest({
     url: ImUrlEnum.GET_MSG_LIST,

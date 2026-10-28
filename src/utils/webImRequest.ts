@@ -45,6 +45,8 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   groupListMember: { method: 'GET', path: 'im/room/group/listMember' },
   groupDetail: { method: 'GET', path: 'im/room/group/detail' },
   groupInfo: { method: 'GET', path: 'im/room/group/info' },
+  // #484：群成员/权限当前事实（绕缓存一致读）
+  groupUseState: { method: 'GET', path: 'im/room/group/use-state' },
 
   // 群聊管理员
   revokeAdmin: { method: 'DELETE', path: 'im/room/group/admin' },
@@ -150,6 +152,8 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   aiclawSetRelation: { method: 'PUT', path: 'im/aiclaw/{uid}/friends/{friendUid}/relation' },
   aiclawGroupConfigList: { method: 'GET', path: 'im/aiclaw/group/config' },
   aiclawGroupConfigUpdate: { method: 'PUT', path: 'im/aiclaw/group/config' },
+  // #484：aiclaw 群配置当前事实（绕缓存一致读，PRESENT/NOT_ACCESSIBLE）
+  aiclawGroupConfigCurrent: { method: 'GET', path: 'im/aiclaw/group/config/current' },
   aiclawThinkingDetail: { method: 'GET', path: 'im/aiclaw/thinking/{thinkingId}' },
   aiclawThinkingByTrigger: { method: 'POST', path: 'im/aiclaw/thinking/by-trigger' }
 }

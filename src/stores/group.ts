@@ -11,7 +11,14 @@ import {
 } from '@/utils/errorToastSuppression'
 import { useChatStore } from './chat'
 import { scopedChatStorage } from './persistHomeWindowOnly'
-import { sessionBinding } from '@/services/sessionBinding'
+import { SessionExpiredError, type SessionIdentity, sameSession, sessionBinding } from '@/services/sessionBinding'
+import {
+  GROUP_USE_MAX_MEMBER_UIDS,
+  type GroupUseMemberProjection,
+  type GroupUseState,
+  normalizeRequestedUids,
+  parseGroupUseState
+} from '@/services/groupUseState'
 
 export const useGroupStore = defineStore(
   StoresEnum.GROUP,
@@ -114,6 +121,196 @@ export const useGroupStore = defineStore(
       userListMap.value[roomId] = sortedMembers
       onlineCountMap.value[roomId] = sortedMembers.filter((m) => m.activeStatus === OnlineEnum.ONLINE).length
     }
+    /**
+     * #484：群「使用事实」当前读快照（本人角色/可访问性/人数/有界 UID 投影）。
+     *
+     * 只有当前读结果能授予/收回本群管理能力；`userListMap` 只是展示快照，
+     * 可能来自旧 WS 载荷（`memberList` 还会用 adminUidList 覆盖 roleId），
+     * 不能单独作为权限依据（设计 §2/§6）。放 $state 供辅窗只读收敛，不各自发 HTTP。
+     */
+    const groupUseStates = ref<Record<string, GroupUseState>>({})
+
+    /** 运行态（不进 $state、不广播不持久化）：hint/切房/账号代次变化都会推进代次 */
+    const groupUseGenerations = new Map<string, number>()
+    const groupUseInFlight = new Map<string, Promise<GroupUseState | null>>()
+    const groupUseDirty = new Set<string>()
+
+    /**
+     * #484：账号/后端切换轮次。**单调且不复位**——`resetGroupUseState` 只推进它，
+     * 不清零。房间代次在切换后回落到 0，若只比「房间代次」旧会话的 0 号在飞读
+     * 会与新会话的 0 号混淆；这一层保证旧轮次永远拿不到新轮次的提交资格。
+     */
+    let groupUseSessionSeq = 0
+
+    const groupUseGenerationOf = (roomId: string) => groupUseGenerations.get(roomId) ?? 0
+
+    /** 发起当前读时冻结的提交资格：房间代次 + 账号/后端轮次 + 当时的会话绑定 */
+    type GroupUseTicket = Readonly<{
+      roomId: string
+      generation: number
+      sessionSeq: number
+      session: SessionIdentity | null
+    }>
+
+    const captureGroupUseTicket = (roomId: string): GroupUseTicket => ({
+      roomId,
+      generation: groupUseGenerationOf(roomId),
+      sessionSeq: groupUseSessionSeq,
+      session: sessionBinding.value
+    })
+
+    const resetGroupUseState = () => {
+      groupUseSessionSeq += 1
+      groupUseStates.value = {}
+      groupUseGenerations.clear()
+      groupUseInFlight.clear()
+      groupUseDirty.clear()
+    }
+
+    /**
+     * 只按 census 覆盖到的 UID 收敛：未请求/页外的成员保持现状（unknown），
+     * 不当成「不存在」，也不整表替换（设计 §4.1「按 coverage 更新」）。
+     */
+    const applyMemberProjections = (roomId: string, projections: GroupUseMemberProjection[]) => {
+      if (!Array.isArray(projections) || projections.length === 0) return
+      const current = userListMap.value[roomId]
+      if (!Array.isArray(current) || current.length === 0) return
+
+      const byUid = new Map(projections.map((item) => [item.uid, item]))
+      let changed = false
+      const next: UserItem[] = []
+      current.forEach((member) => {
+        const projection = byUid.get(String(member.uid))
+        if (projection && projection.exists === false) {
+          // 权威判定「已不在群」才移除；网络失败/未覆盖都不走到这里
+          changed = true
+          return
+        }
+        if (projection && typeof projection.roleId === 'number' && projection.roleId !== member.roleId) {
+          changed = true
+          next.push({ ...member, roleId: projection.roleId })
+          return
+        }
+        next.push(member)
+      })
+
+      if (!changed) return
+      setRoomMemberList(roomId, next)
+    }
+
+    const applyGroupUseResult = (ticket: GroupUseTicket, result: GroupUseState | null): boolean => {
+      const { roomId } = ticket
+      // 晚到结果：房间代次或账号/后端轮次已变，一律丢弃（设计 §4.1）。
+      // 用发起时冻结的 ticket 比对，而不是「此刻的 current」，否则旧会话的
+      // 0 号房间代次会与新会话回落到 0 的代次混淆。
+      if (ticket.sessionSeq !== groupUseSessionSeq) return false
+      if (ticket.generation !== groupUseGenerationOf(roomId)) return false
+      // 会话绑定本身也必须是同一次（同上：发起时的绑定，不是此刻的引用）
+      if (!sameSession(ticket.session, sessionBinding.value)) return false
+
+      if (!result) {
+        // 传输/格式失败不是「不可访问」：保留上次可信快照并标记未校准（设计 §3.3）
+        groupUseDirty.add(roomId)
+        return false
+      }
+
+      groupUseStates.value[roomId] = result
+      groupUseDirty.delete(roomId)
+
+      if (result.outcome === 'NOT_ACCESSIBLE') {
+        // 可信不可访问：停用该房间成员能力与派生状态，保留合法本地聊天历史
+        removeAllUsers(roomId)
+        removeGroupDetail(roomId)
+        delete groupDetailsCache.value[roomId]
+        return true
+      }
+
+      applyMemberProjections(roomId, result.requestedMembers)
+      const detail = groupDetails.value.find((item) => item.roomId === roomId)
+      if (detail && typeof result.memberCount === 'number') {
+        detail.memberNum = result.memberCount
+      }
+      return true
+    }
+
+    const readGroupUseOnce = (ticket: GroupUseTicket): Promise<GroupUseState | null> => {
+      const { roomId } = ticket
+      // 只把当前阅读范围内的成员放进有界投影；页外成员保持 unknown
+      const memberUids = normalizeRequestedUids(
+        (userListMap.value[roomId] ?? []).map((member) => String(member.uid))
+      ).slice(0, GROUP_USE_MAX_MEMBER_UIDS)
+
+      const request = (async () => {
+        try {
+          const raw = await ImRequestUtils.groupUseState({ roomId, memberUids }, { showError: false })
+          const parsed = parseGroupUseState(raw)
+          if (!parsed) {
+            console.warn(`[group-use] room=${roomId} 当前读响应格式不符，保留上次可信快照`)
+          }
+          return parsed
+        } catch (error) {
+          if (error instanceof SessionExpiredError) return null
+          console.warn(`[group-use] room=${roomId} 当前读失败:`, error)
+          return null
+        }
+      })()
+
+      groupUseInFlight.set(roomId, request)
+      void request.finally(() => {
+        // 旧 finally 不得清掉新请求（设计 §4.1）
+        if (groupUseInFlight.get(roomId) === request) groupUseInFlight.delete(roomId)
+        // 本轮期间又收到 hint：有界补跑一次，避免永久停在未校准。
+        // 账号/后端轮次变化时不在旧轮次里补跑，交给新一轮的 ensureGroupUse。
+        if (
+          ticket.sessionSeq === groupUseSessionSeq &&
+          groupUseDirty.has(roomId) &&
+          groupUseGenerationOf(roomId) === ticket.generation + 1
+        ) {
+          void ensureGroupUse(roomId).catch(() => undefined)
+        }
+      })
+      return request
+    }
+
+    /**
+     * 取得该房间当前使用事实（有界、单飞、可被 hint 作废）。
+     * 有同代次可信快照直接返回；有在飞请求则合并复用；否则发起一次当前读。
+     */
+    const ensureGroupUse = async (roomId: string): Promise<GroupUseState | null> => {
+      if (!roomId) return null
+      const existing = groupUseStates.value[roomId]
+      if (existing && !groupUseDirty.has(roomId)) return existing
+
+      const inFlight = groupUseInFlight.get(roomId)
+      if (inFlight) return await inFlight
+
+      const ticket = captureGroupUseTicket(roomId)
+      const result = await readGroupUseOnce(ticket)
+      applyGroupUseResult(ticket, result)
+      // 旧轮次的结果已被丢弃，不能把新会话的快照当成「本次校准结果」返回
+      if (ticket.sessionSeq !== groupUseSessionSeq) return null
+      return groupUseStates.value[roomId] ?? null
+    }
+
+    /**
+     * 通知只作失效提示：不应用载荷、不直接改权限；推进代次让在飞结果作废。
+     * 活跃房间立即补一次当前读；非活跃房间等下次进入/读取时校准（设计 §2/§6）。
+     */
+    const invalidateGroupUse = (roomId: string, reason = 'hint') => {
+      if (!roomId) return
+      groupUseGenerations.set(roomId, groupUseGenerationOf(roomId) + 1)
+      groupUseDirty.add(roomId)
+      // 不在这里清空成员表：提示只是「可能过期」，清空会把可读缓存变成空白，
+      // 且让本次校准失去 coverage 依据（不知道该请求哪些 UID）。
+      // 过期由 groupUseDirty 标记，下一次当前读按 coverage 覆盖。
+      delete groupDetailsCache.value[roomId]
+      console.info(`[group-use] room=${roomId} 收到失效提示(${reason})，等待当前读校准`)
+
+      if (globalStore.currentSessionRoomId !== roomId) return
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      void ensureGroupUse(roomId).catch(() => undefined)
+    }
+
     const groupDetails = ref<GroupDetailReq[]>([])
     const userListOptions = ref({ isLast: false, loading: true, cursor: '' }) // 分页加载相关状态（#239 PR2：A 类键 ref 化）
     const myNameInCurrentGroup = computed({
@@ -132,6 +329,9 @@ export const useGroupStore = defineStore(
 
     const myRoleIdInCurrentGroup = computed({
       get() {
+        // #484：本人角色以当前读 selfRole 为准，未校准时才回落到成员列表快照
+        const authoritative = groupUseStates.value[globalStore.currentSessionRoomId]?.selfRoleId
+        if (typeof authoritative === 'number') return authoritative
         return getCurrentUser()?.roleId || RoleEnum.NORMAL
       },
       set(value: number) {
@@ -168,39 +368,45 @@ export const useGroupStore = defineStore(
         return
       }
 
+      const roomId: string = newSession.roomId
       // 设置当前加载的房间ID
-      currentSessionState.value.roomId = newSession.roomId
+      currentSessionState.value.roomId = roomId
       currentSessionState.value.loading = true
 
       try {
-        // 优先显示缓存
-        const cachedMembers = getCachedMembers(newSession.roomId)
-        if (cachedMembers && Array.isArray(cachedMembers)) {
-          // 先设置缓存数据避免空白
-          setRoomMemberList(newSession.roomId, cachedMembers)
+        // 缓存只用于首屏占位，不再是「已校准」的依据（设计 §4.2）
+        const cachedMembers = getCachedMembers(roomId)
+        if (cachedMembers && Array.isArray(cachedMembers) && cachedMembers.length > 0) {
+          setRoomMemberList(roomId, cachedMembers)
         }
 
         // 重置群组并加载新的群成员数据
         resetGroupData()
-        await getGroupUserList(newSession.roomId, true)
+        await getGroupUserList(roomId, true)
+        // 进入房间即触发一次当前读：非活跃期间漏掉的通知在这里追平（AC2）
+        await ensureGroupUse(roomId)
 
-        // 更新缓存
-        const currentMembers = userListMap.value[newSession.roomId] || []
-        updateMemberCache(newSession.roomId, currentMembers)
-        currentSessionState.value.lastLoadedRoomId = newSession.roomId
+        // 切房后旧响应不得写回新房间（设计 §4.1）
+        if (currentSessionState.value.roomId !== roomId) return undefined
+
+        const currentMembers = userListMap.value[roomId] || []
+        updateMemberCache(roomId, currentMembers)
+        currentSessionState.value.lastLoadedRoomId = roomId
 
         // 返回处理后的数据
         return {
           success: true,
           members: currentMembers,
-          roomId: newSession.roomId
+          roomId
         }
       } catch (error) {
         console.error('切换会话失败:', error)
         currentSessionState.value.loading = false
         throw error
       } finally {
-        currentSessionState.value.loading = false
+        if (currentSessionState.value.roomId === roomId) {
+          currentSessionState.value.loading = false
+        }
       }
     }
 
@@ -379,26 +585,12 @@ export const useGroupStore = defineStore(
      * @param uids 被设置、取消管理员的用户ID列表
      * @param isAdmin 是否为管理员
      */
-    const updateAdminStatus = (roomId: string, uids: string[], isAdmin: boolean) => {
-      const currentUserList = userListMap.value[roomId]
-      if (!currentUserList) {
-        console.warn(`未找到房间 ${roomId} 的用户列表`)
-        return
-      }
-
-      // 更新用户角色
-      const updatedUserList = currentUserList.map((user) => {
-        if (uids.includes(user.uid)) {
-          return {
-            ...user,
-            roleId: isAdmin ? RoleEnum.ADMIN : RoleEnum.NORMAL
-          }
-        }
-        return user
-      })
-
-      // 更新用户列表
-      setRoomMemberList(roomId, updatedUserList)
+    /**
+     * #484：管理员变更提示——不再按旧载荷写 roleId（旧 grant 会盖回已撤销的权限）。
+     */
+    const updateAdminStatus = (roomId: string, _uids: string[], _isAdmin: boolean) => {
+      if (!roomId) return
+      invalidateGroupUse(roomId, 'admin-change')
     }
 
     /**
@@ -531,15 +723,13 @@ export const useGroupStore = defineStore(
       }
     }
 
-    const updateGroupNumber = (roomId: string, totalNum: number, onlineNum: number) => {
-      const group = groupDetails.value.find((item) => item.roomId === roomId)
-      if (group) {
-        group.memberNum = totalNum
-        group.onlineNum = onlineNum
-        if (typeof onlineNum === 'number') {
-          onlineCountMap.value[roomId] = onlineNum
-        }
-      }
+    /**
+     * #484：人数/在线数只作提示——WS 载荷可能晚于更新事实，不能直接覆盖。
+     * 活跃房间由当前读（memberCount 用 DB 口径）接管；这里仅作失效提示。
+     */
+    const updateGroupNumber = (roomId: string, _totalNum: number, _onlineNum: number) => {
+      if (!roomId) return
+      invalidateGroupUse(roomId, 'member-count')
     }
 
     /**
@@ -739,23 +929,15 @@ export const useGroupStore = defineStore(
      * @param uidList 要添加为管理员的用户ID列表
      */
     const addAdmin = async (uidList: string[]) => {
-      // REQ-017 #200：showError:false 静默底层 network_error——调用方（右键设管理）有领域失败 toast
-      const result = await ImRequestUtils.addAdmin(
-        { roomId: globalStore.currentSessionRoomId, uidList },
-        { showError: false }
-      )
-      // 更新本地群成员列表中的角色信息
+      // #484：冻结发起时的房间，await 之后不得再读 currentSessionRoomId（会把结果写进新房间）
       const targetRoomId = globalStore.currentSessionRoomId
+      // REQ-017 #200：showError:false 静默底层 network_error——调用方（右键设管理）有领域失败 toast
+      const result = await ImRequestUtils.addAdmin({ roomId: targetRoomId, uidList }, { showError: false })
       if (!targetRoomId) return result
 
-      const currentUserList = userListMap.value[targetRoomId] || []
-      const updatedList = currentUserList.map((user: UserItem) => {
-        if (uidList.includes(user.uid)) {
-          return { ...user, roleId: RoleEnum.ADMIN }
-        }
-        return user
-      })
-      setRoomMemberList(targetRoomId, updatedList)
+      // 业务已提交：结果以服务端当前事实为准，旧在飞响应不得把角色改回去（设计 §4.2）
+      invalidateGroupUse(targetRoomId, 'admin-set')
+      await ensureGroupUse(targetRoomId)
       return result
     }
 
@@ -764,23 +946,13 @@ export const useGroupStore = defineStore(
      * @param uidList 要撤销的管理员ID列表
      */
     const revokeAdmin = async (uidList: string[]) => {
-      // REQ-017 #200：showError:false 静默底层 network_error——调用方（右键撤管理）有领域失败 toast
-      const result = await ImRequestUtils.revokeAdmin(
-        { roomId: globalStore.currentSessionRoomId, uidList },
-        { showError: false }
-      )
-      // 更新本地群成员列表中的角色信息
       const targetRoomId = globalStore.currentSessionRoomId
+      // REQ-017 #200：showError:false 静默底层 network_error——调用方（右键撤管理）有领域失败 toast
+      const result = await ImRequestUtils.revokeAdmin({ roomId: targetRoomId, uidList }, { showError: false })
       if (!targetRoomId) return result
 
-      const currentUserList = userListMap.value[targetRoomId] || []
-      const updatedList = currentUserList.map((user: UserItem) => {
-        if (uidList.includes(user.uid)) {
-          return { ...user, roleId: RoleEnum.NORMAL }
-        }
-        return user
-      })
-      setRoomMemberList(targetRoomId, updatedList)
+      invalidateGroupUse(targetRoomId, 'admin-revoke')
+      await ensureGroupUse(targetRoomId)
       return result
     }
 
@@ -798,10 +970,9 @@ export const useGroupStore = defineStore(
       // 调用踢人接口（REQ-017 #200：showError:false 静默底层——踢人弹窗有领域失败 toast）
       await ImRequestUtils.removeGroupMember({ roomId: targetRoomId, uidList }, { showError: false })
 
-      // 更新本地群成员列表，移除被踢出的成员
-      const currentUserList = userListMap.value[targetRoomId] || []
-      const updatedList = currentUserList.filter((user: UserItem) => !uidList.includes(user.uid))
-      setRoomMemberList(targetRoomId, updatedList)
+      // #484：踢人已提交，成员事实以服务端当前读为准（旧 WS 载荷不得再写回）
+      invalidateGroupUse(targetRoomId, 'member-remove')
+      await ensureGroupUse(targetRoomId)
     }
 
     /**
@@ -904,6 +1075,8 @@ export const useGroupStore = defineStore(
         loadingGroups.value.clear()
         dissolvedRoomIds.clear()
         friendInfoCache.clear()
+        // #484：账号/后端代次变化，旧群事实与在飞请求全部作废（设计 §4.1）
+        resetGroupUseState()
         for (const key of Object.keys(memberOrderCounters)) delete memberOrderCounters[key]
       },
       { flush: 'sync' }
@@ -964,7 +1137,10 @@ export const useGroupStore = defineStore(
       suppressMemberFetchError,
       releaseMemberFetchError,
       markRoomDissolved,
-      isRoomDissolved
+      isRoomDissolved,
+      groupUseStates,
+      ensureGroupUse,
+      invalidateGroupUse
     }
   },
   {
