@@ -39,8 +39,19 @@ vi.mock('vue-router', () => ({
 }))
 
 const imRequestMock = vi.hoisted(() => vi.fn())
+/**
+ * #484：单房间配置读取改用 `aiclaw/group/config/current`，服务端返回
+ * `{ outcome: 'PRESENT' | 'NOT_ACCESSIBLE', configured, config }`。
+ * 本文件的既有夹具仍写扁平配置对象（等价于 PRESENT + config），这里统一包一层，
+ * 让用例保持「响应内容」而不是「响应信封」的关注点；需要信封语义的用例如下单独返回 outcome。
+ */
+const asCurrentReadEnvelope = (raw: unknown): unknown => {
+  if (!raw || typeof raw !== 'object') return raw
+  if ('outcome' in (raw as Record<string, unknown>)) return raw
+  return { outcome: 'PRESENT', configured: true, config: raw }
+}
 vi.mock('@/utils/ImRequestUtils', () => ({
-  imRequest: (...args: unknown[]) => imRequestMock(...args),
+  imRequest: (...args: unknown[]) => Promise.resolve(imRequestMock(...args)).then(asCurrentReadEnvelope),
   markMsgRead: vi.fn().mockResolvedValue(undefined),
   getSessionDetail: vi.fn().mockResolvedValue({
     roomId: 'room-1',
@@ -268,24 +279,27 @@ describe('chatStore 群配置读取收敛（#456）', () => {
     expect(chatStore.getAiclawGroupConfig(1001, '1')).toMatchObject({ rateLimitPerMinute: 9 })
   })
 
-  it('A5：WS 更新后，先前发起的旧读取不得覆盖新状态', async () => {
-    const response = deferred<Record<string, unknown>>()
-    imRequestMock.mockReturnValue(response.promise)
+  it('A5：WS 提示后，先前发起的旧读取不得覆盖新状态（#484：提示只失效，值来自当前读）', async () => {
+    const staleResponse = deferred<Record<string, unknown>>()
+    const freshResponse = deferred<Record<string, unknown>>()
+    imRequestMock.mockReturnValueOnce(staleResponse.promise).mockReturnValueOnce(freshResponse.promise)
 
     const chatStore = useChatStore()
     const stale = chatStore.loadAiclawGroupConfigDetail(1001, '1')
     await waitForRequest(1)
 
-    // WS 广播先到：缓存换成新值
+    // WS 广播先到：只作失效提示，并立刻按当前事实读一次（不带载荷值）
     chatStore.updateAiclawGroupConfig(1001, 1, {
       rateLimitPerMinute: 99,
       dailyLimit: 990,
       respondToAi: false,
       mentionRequired: true
     } as never)
+    await waitForRequest(2)
+    freshResponse.resolve({ roomId: '1', rateLimitPerMinute: 99, dailyLimit: 990 })
 
     // 旧读取后到，带着旧数据
-    response.resolve({ roomId: '1', rateLimitPerMinute: 7 })
+    staleResponse.resolve({ roomId: '1', rateLimitPerMinute: 7 })
     await expect(stale).resolves.toBe(false)
     expect(chatStore.getAiclawGroupConfig(1001, '1')).toMatchObject({ rateLimitPerMinute: 99, dailyLimit: 990 })
   })
@@ -314,10 +328,10 @@ describe('chatStore 群配置读取收敛（#456）', () => {
     const oldRead = chatStore.loadAiclawGroupConfigDetail(1001, '1')
     await waitForRequest(1)
 
-    // 新数据到达 → 旧读取失去提交资格并解除合并
+    // 新数据提示到达 → 旧读取失去提交资格并解除合并，同时触发一次当前读（请求 2）
     chatStore.updateAiclawGroupConfig(1001, 1, { rateLimitPerMinute: 99 } as never)
-    const newRead = chatStore.loadAiclawGroupConfigDetail(1001, '1')
     await waitForRequest(2)
+    const newRead = chatStore.loadAiclawGroupConfigDetail(1001, '1')
 
     first.resolve({ roomId: '1', rateLimitPerMinute: 7 })
     await expect(oldRead).resolves.toBe(false)

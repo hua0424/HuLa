@@ -3,15 +3,45 @@ import type { CacheBadgeReq, LoginUserReq, ModifyUserInfoType, RegisterUserReq, 
 import { ErrorType, invokeSilently, invokeWithErrorHandler } from '@/utils/TauriInvokeHandler'
 import { isWeb } from '@/utils/PlatformConstants'
 import type { SessionIdentity } from '@/services/sessionBinding'
+import { sessionBinding } from '@/services/sessionBinding'
 import { useChatStore } from '../stores/chat'
 import { useGroupStore } from '../stores/group'
 
 let _webImRequest: (<T = any>(url: ImUrlEnum, body?: any, params?: any) => Promise<T>) | null = null
+let _webImRequestWithSync:
+  | (<T = any>(
+      url: ImUrlEnum,
+      body?: any,
+      params?: any
+    ) => Promise<{ data: T; notificationSync?: NotificationSyncState | null }>)
+  | null = null
 const getWebImRequest = async () => {
   if (!_webImRequest) {
     _webImRequest = (await import('@/utils/webImRequest')).webImRequest
   }
   return _webImRequest
+}
+
+const getWebImRequestWithSync = async () => {
+  if (!_webImRequestWithSync) {
+    _webImRequestWithSync = (await import('@/utils/webImRequest')).webImRequestWithSync
+  }
+  return _webImRequestWithSync
+}
+
+/**
+ * 通知同步状态：后端仅在“部分在线设备未收到通知”时下发该字段
+ */
+export interface NotificationSyncState {
+  state?: string | null
+}
+
+/**
+ * 带同步状态的请求结果
+ */
+export interface SyncResult<T> {
+  data: T
+  notificationSync?: NotificationSyncState | null
 }
 
 /**
@@ -143,6 +173,38 @@ export async function imRequestWithRetry<T = any>(
     showError: retryOptions?.showError,
     customErrorMessage: retryOptions?.customErrorMessage
   })
+}
+
+/**
+ * 带 notificationSync 的 IM 请求（仅写操作需要读取“其他端同步未完成”时使用）
+ *
+ * @example
+ * ```typescript
+ * const result = await imRequestWithSync({ url: ImUrlEnum.UPDATE_ROOM_INFO, body })
+ * if (result.notificationSync?.state === 'INCOMPLETE') { ... }
+ * ```
+ */
+export async function imRequestWithSync<T = any>(
+  requestParams: ImRequestParams,
+  options?: Omit<ImRequestOptions, 'silent'>
+): Promise<SyncResult<T>> {
+  if (isWeb()) {
+    const webReq = await getWebImRequestWithSync()
+    const result = await webReq<T>(requestParams.url, requestParams.body, requestParams.params)
+    return { data: result?.data as T, notificationSync: result?.notificationSync ?? null }
+  }
+
+  const args = {
+    url: requestParams.url,
+    binding: requestParams.binding,
+    body: requestParams.body || null,
+    params: requestParams.params || null
+  }
+  const result = await invokeWithErrorHandler<SyncResult<T> | null>('im_sync_request_command', args, {
+    ...options,
+    errorType: options?.errorType || ErrorType.Network
+  })
+  return { data: result?.data as T, notificationSync: result?.notificationSync ?? null }
 }
 
 /**
@@ -281,6 +343,26 @@ export async function groupListMember(roomId: string, options?: { showError?: bo
     errorType: ErrorType.Network,
     showError: options?.showError
   })
+}
+
+/**
+ * #484：群成员/权限当前事实（server 绕缓存一致读）。
+ * 走 imRequest 而非 GET_ROOM_MEMBERS：后者是旧的整表成员列表（无调用者权限校验、profile 缺失即丢成员）。
+ */
+export async function groupUseState(
+  params: { roomId: string | number; memberUids?: Array<string | number> },
+  options?: { showError?: boolean }
+) {
+  return await imRequest<unknown>(
+    {
+      url: ImUrlEnum.GROUP_USE_STATE,
+      params: {
+        roomId: Number(params.roomId),
+        ...(params.memberUids?.length ? { memberUids: params.memberUids.map((uid) => String(uid)) } : {})
+      }
+    },
+    { showError: options?.showError }
+  )
 }
 
 export async function getMsgList(body: { msgIds?: string[]; async?: boolean }) {
@@ -518,8 +600,11 @@ export async function exitGroup(body: { roomId: string }, options?: { showError?
   )
 }
 
-export async function addAdmin(body: { roomId: string; uidList: string[] }, options?: { showError?: boolean }) {
-  return await imRequest(
+export async function addAdmin(
+  body: { roomId: string; uidList: string[] },
+  options?: { showError?: boolean }
+): Promise<SyncResult<any>> {
+  return await imRequestWithSync(
     {
       url: ImUrlEnum.ADD_ADMIN,
       body
@@ -528,8 +613,11 @@ export async function addAdmin(body: { roomId: string; uidList: string[] }, opti
   )
 }
 
-export async function revokeAdmin(body: { roomId: string; uidList: string[] }, options?: { showError?: boolean }) {
-  return await imRequest(
+export async function revokeAdmin(
+  body: { roomId: string; uidList: string[] },
+  options?: { showError?: boolean }
+): Promise<SyncResult<any>> {
+  return await imRequestWithSync(
     {
       url: ImUrlEnum.REVOKE_ADMIN,
       body
@@ -544,18 +632,31 @@ export async function groupList() {
   })
 }
 
+/**
+ * 业务成功但部分在线端未收到通知时的统一提示文案
+ */
+export const NOTIFICATION_SYNC_INCOMPLETE_MESSAGE = '变更已保存，其他端同步尚未完成'
+
 export async function updateRoomInfo(
   body: { id: string; name?: string; avatar?: string; allowScanEnter?: boolean },
   options?: { showError?: boolean }
-) {
+): Promise<SyncResult<boolean>> {
   const chatStore = useChatStore()
   const groupStore = useGroupStore()
+  const { useUserStore } = await import('@/stores/user')
+  const { useGlobalStore } = await import('@/stores/global')
+  const userStore = useUserStore()
+  const globalStore = useGlobalStore()
 
   body.name = body.name ?? groupStore.countInfo!.groupName
   body.avatar = body.avatar ?? groupStore.countInfo!.avatar
   body.allowScanEnter = body.allowScanEnter ?? groupStore.countInfo!.allowScanEnter
 
-  await imRequest(
+  const roomId = body.id
+  // 请求发出前的账号代次与当前会话，用于丢弃过期反馈（切换账号/切换房间后不再提示旧结果）
+  const accountEpoch = `${userStore.userInfo?.uid ?? ''}#${sessionBinding.value?.sessionEpoch ?? -1}`
+
+  const result = await imRequestWithSync<boolean>(
     {
       url: ImUrlEnum.UPDATE_ROOM_INFO,
       body
@@ -563,10 +664,21 @@ export async function updateRoomInfo(
     options
   )
 
-  chatStore.updateSession(body.id, body)
-  groupStore.updateGroupDetail(body.id, body)
+  chatStore.updateSession(roomId, body)
+  groupStore.updateGroupDetail(roomId, body)
 
-  window.$message.success('更新成功')
+  const currentEpoch = `${userStore.userInfo?.uid ?? ''}#${sessionBinding.value?.sessionEpoch ?? -1}`
+  if (currentEpoch !== accountEpoch || globalStore.currentSessionRoomId !== roomId) {
+    return result
+  }
+
+  if (result.notificationSync?.state === 'INCOMPLETE') {
+    window.$message.warning(NOTIFICATION_SYNC_INCOMPLETE_MESSAGE)
+  } else {
+    window.$message.success('更新成功')
+  }
+
+  return result
 }
 
 export async function updateMyRoomInfo(

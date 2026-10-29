@@ -825,6 +825,8 @@ export enum ImUrlEnum {
   GET_ALL_USER_BASE_INFO = 'getAllUserBaseInfo',
 
   GROUP_LIST_MEMBER = 'groupListMember',
+  /** #484：群成员/权限当前事实（绕缓存一致读；本次快照不是执行授权） */
+  GROUP_USE_STATE = 'groupUseState',
   SEND_MSG = 'sendMsg',
   SET_HIDE = 'setHide',
   GET_FRIEND_PAGE = 'getFriendPage',
@@ -870,6 +872,8 @@ export enum ImUrlEnum {
   AICLAW_GROUP_CONFIG_LIST = 'aiclawGroupConfigList',
   /** 更新 aiclaw 群聊配置 */
   AICLAW_GROUP_CONFIG_UPDATE = 'aiclawGroupConfigUpdate',
+  /** #484：aiclaw 群配置当前事实（绕缓存一致读，PRESENT/NOT_ACCESSIBLE） */
+  AICLAW_GROUP_CONFIG_CURRENT = 'aiclawGroupConfigCurrent',
   /** 获取 aiclaw 思考完整内容（S7：思考全文不再走 WS，改为按需 REST 拉取） */
   AICLAW_THINKING_DETAIL = 'aiclawThinkingDetail',
   /** 按触发消息批量反查 aiclaw thinking 元数据（REQ-014 / ADR-0007） */
