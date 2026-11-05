@@ -15,6 +15,20 @@ const model = {
   scope: 'instance' as const,
   parameters: []
 }
+const skill = {
+  ...model,
+  id: 'skill:native/name',
+  kind: 'skill' as const,
+  parameters: [{ name: 'arguments', type: 'string', required: false }]
+}
+const setModel = {
+  ...model,
+  id: 'model.set',
+  parameters: [
+    { name: 'providerId', type: 'string', required: true },
+    { name: 'modelId', type: 'string', required: true }
+  ]
+}
 const catalog = { version: 'v1', framework: 'opencode', runtimeVersion: '1', capabilities: [model] }
 const scopes: ReturnType<typeof effectScope>[] = []
 function setup(group = false) {
@@ -41,6 +55,260 @@ afterEach(() => {
   vi.clearAllMocks()
   vi.useRealTimers()
 })
+it.each(['session.reset', 'session.compact', 'skill:native/name'])(
+  'explicitly invokes native capability %s with its own parameters',
+  async (id) => {
+    const { editor, commands } = setup()
+    const capability = id.startsWith('skill:') ? skill : { ...model, id }
+    api.postAgentCommand.mockImplementation(async (body) => ({
+      ...body,
+      status: 'completed',
+      catalog: { ...catalog, capabilities: [capability] }
+    }))
+    editor.value.textContent = '/'
+    await commands.input()
+    commands.select(commands.capabilities.value[0])
+    commands.arguments.value = '  https://example.test/<literal>\n keep whitespace '
+    expect(await commands.send()).toBe(true)
+    expect(api.postAgentCommand.mock.calls[1][0]).toMatchObject({
+      capabilityId: id,
+      parameters: id.startsWith('skill:') ? { arguments: '  https://example.test/<literal>\n keep whitespace ' } : {}
+    })
+  }
+)
+
+it('blocks missing model parameters then sends the exact disconnected native pair, without splitting IDs', async () => {
+  const { editor, commands } = setup()
+  const nativeModel = { providerId: 'provider/a', modelId: 'models/b:c', label: 'Native model', connected: false }
+  api.postAgentCommand.mockImplementation(async (body) => ({
+    ...body,
+    status: 'completed',
+    catalog: {
+      ...catalog,
+      capabilities: [setModel],
+      models: { items: [nativeModel], total: 8944, offset: 0, nextOffset: 100 }
+    }
+  }))
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  expect(await commands.send()).toBe(true)
+  expect(commands.status.value).toBe('parameters_invalid')
+  expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(0)
+  await commands.searchModels()
+  commands.chooseModel(commands.models.value!.items[0])
+  await commands.send()
+  expect(api.postAgentCommand.mock.calls.at(-1)![0]).toMatchObject({
+    capabilityId: 'model.set',
+    parameters: { providerId: 'provider/a', modelId: 'models/b:c' }
+  })
+})
+
+it.each(['budget', 'network'])(
+  'retains verified native acceptance after %s and explicitly reconciles without POST',
+  async (failure) => {
+    vi.useFakeTimers()
+    const { editor, commands } = setup()
+    editor.value.textContent = '/'
+    await commands.input()
+    commands.select(commands.capabilities.value[0])
+    const nativeRef = { sessionId: 'native-old', inputId: 'input-1' }
+    api.postAgentCommand.mockImplementationOnce(async (body) => ({
+      ...body,
+      status: 'accepted',
+      phase: 'accepted',
+      receiptRevision: 1,
+      nativeRef,
+      generation: '7'
+    }))
+    api.getAgentCommand.mockImplementation(async () => {
+      if (failure === 'network') throw new Error('disconnected')
+      return {
+        ...api.postAgentCommand.mock.calls[1][0],
+        status: 'accepted',
+        phase: 'accepted',
+        receiptRevision: 1,
+        nativeRef,
+        generation: '7'
+      }
+    })
+    const pending = commands.send()
+    await vi.runAllTimersAsync()
+    await pending
+    expect(commands.status.value).toBe('accepted')
+    expect(commands.receipt.value).toMatchObject({ nativeRef, generation: '7', receiptRevision: 1 })
+    api.getAgentCommand.mockResolvedValue({
+      ...api.postAgentCommand.mock.calls[1][0],
+      status: 'noop',
+      phase: 'outcome',
+      receiptRevision: 2,
+      nativeRef,
+      generation: '7'
+    })
+    await commands.reconcile()
+    expect(commands.status.value).toBe('noop')
+    expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+  }
+)
+
+it('rejects a foreign accepted POST before polling and reconciles only the original ID', async () => {
+  const { editor, commands } = setup()
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  api.postAgentCommand.mockImplementationOnce(async (body) => ({
+    ...body,
+    roomId: 'foreign',
+    status: 'accepted',
+    phase: 'accepted'
+  }))
+  await commands.send()
+  expect(commands.status.value).toBe('unknown')
+  expect(api.getAgentCommand).not.toHaveBeenCalled()
+  const body = api.postAgentCommand.mock.calls[1][0]
+  api.getAgentCommand.mockResolvedValue({
+    ...body,
+    status: 'completed',
+    phase: 'outcome',
+    receiptRevision: 2,
+    reconciled: true
+  })
+  await commands.reconcile()
+  expect(api.getAgentCommand).toHaveBeenCalledWith(body.requestId)
+  expect(commands.status.value).toBe('completed')
+  expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+})
+
+it('pages the full inventory, retains explicit selection across pages and resets new search to zero', async () => {
+  vi.useFakeTimers()
+  const { editor, commands } = setup()
+  const first = { providerId: 'p/one', modelId: 'id/one', label: 'One', connected: false }
+  const second = { providerId: 'p/two', modelId: 'id/two', label: 'Two', connected: true }
+  api.postAgentCommand.mockImplementation(async (body) => ({
+    ...body,
+    status: body.capabilityId ? 'accepted' : 'completed',
+    phase: 'dispatch',
+    catalog: { ...catalog, capabilities: [setModel] }
+  }))
+  api.getAgentCommand.mockImplementation(async (requestId) => {
+    const body = api.postAgentCommand.mock.calls.find(([body]) => body.requestId === requestId)![0]
+    return {
+      ...body,
+      status: 'completed',
+      catalog: {
+        ...catalog,
+        models: {
+          items: [body.parameters.offset ? second : first],
+          total: body.parameters.query ? 1 : 8944,
+          offset: body.parameters.offset,
+          nextOffset: body.parameters.offset || body.parameters.query ? undefined : 100
+        }
+      }
+    }
+  })
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  const originalId = commands.requestId.value
+  let pending = commands.searchModels()
+  await vi.runAllTimersAsync()
+  await pending
+  commands.chooseModel(commands.models.value!.items[0])
+  pending = commands.searchModels(100)
+  await vi.runAllTimersAsync()
+  await pending
+  expect(commands.models.value).toMatchObject({ total: 8944, offset: 100, items: [second] })
+  expect(commands.selectedModel.value).toEqual(first)
+  expect(commands.requestId.value).toBe(originalId)
+  commands.modelQuery.value = 'specific'
+  pending = commands.searchModels(100)
+  await vi.runAllTimersAsync()
+  await pending
+  expect(api.postAgentCommand.mock.calls.at(-1)![0].parameters).toEqual({ query: 'specific', offset: 0 })
+  expect(commands.models.value).toMatchObject({ total: 1, offset: 0 })
+  expect(commands.models.value?.nextOffset).toBeUndefined()
+})
+
+it('ignores stale model searches and never silently selects a replacement', async () => {
+  const { editor, commands } = setup()
+  api.postAgentCommand.mockImplementation(async (body) => ({
+    ...body,
+    status: 'completed',
+    catalog: { ...catalog, capabilities: [setModel] }
+  }))
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  let resolve!: (value: unknown) => void
+  api.postAgentCommand.mockImplementationOnce(
+    () =>
+      new Promise((r) => {
+        resolve = r
+      })
+  )
+  const oldSearch = commands.searchModels()
+  const oldBody = api.postAgentCommand.mock.calls.at(-1)![0]
+  commands.modelQuery.value = 'new'
+  api.postAgentCommand.mockImplementationOnce(async (body) => ({
+    ...body,
+    status: 'completed',
+    catalog: { ...catalog, models: { items: [], total: 0, offset: 0 } }
+  }))
+  await commands.searchModels()
+  resolve({
+    ...oldBody,
+    status: 'completed',
+    catalog: {
+      ...catalog,
+      models: { items: [{ providerId: 'p', modelId: 'old', label: 'Old', connected: true }], total: 8944, offset: 0 }
+    }
+  })
+  await oldSearch
+  expect(commands.models.value?.total).toBe(0)
+  expect(commands.selectedModel.value).toBeUndefined()
+})
+
+it('dismisses only local UI, allowing a new command while an old native request still runs', async () => {
+  const { editor, commands } = setup()
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  let resolve!: (value: unknown) => void
+  api.postAgentCommand.mockImplementationOnce(
+    () =>
+      new Promise((r) => {
+        resolve = r
+      })
+  )
+  const old = commands.send()
+  const oldBody = api.postAgentCommand.mock.calls.at(-1)![0]
+  commands.cancel()
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  await commands.send()
+  const newId = commands.requestId.value
+  resolve({ ...oldBody, status: 'failed', phase: 'outcome' })
+  await old
+  expect(commands.requestId.value).toBe(newId)
+  expect(newId).not.toBe(oldBody.requestId)
+  expect(commands.status.value).toBe('completed')
+  expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(2)
+})
+
+it('restores a lost discovery through explicit GET without rediscovering or invoking', async () => {
+  const { editor, commands } = setup()
+  api.postAgentCommand.mockRejectedValueOnce(new Error('lost discovery'))
+  editor.value.textContent = '/'
+  await commands.input()
+  const body = api.postAgentCommand.mock.calls[0][0]
+  api.getAgentCommand.mockResolvedValue({ ...body, status: 'completed', catalog })
+  await commands.reconcile()
+  expect(commands.capabilities.value).toEqual([model])
+  commands.select(commands.capabilities.value[0])
+  expect(commands.status.value).toBe('selected')
+  expect(api.postAgentCommand).toHaveBeenCalledTimes(1)
+})
+
 it('requires one genuine selected group mention, never a pasted data UID', async () => {
   const { editor, commands } = setup(true)
   editor.value.innerHTML = '<span id="aitSpan" data-ait-uid="agent">@Agent</span> /'

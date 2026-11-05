@@ -203,6 +203,166 @@ afterEach(() => {
 const getInputDom = (wrapper: ReturnType<typeof mountInput>) =>
   wrapper.get('[data-testid="message-input"]').element as HTMLElement
 
+describe('#503 native command controls', () => {
+  it('reconciles an uncertain command with GET only and labels dismissal as not stopping native work', async () => {
+    commandApi.postAgentCommand.mockImplementation(async (body) => {
+      if (body.operation === 'invoke') throw new Error('lost response')
+      return {
+        ...body,
+        status: 'completed',
+        catalog: {
+          version: 'v1',
+          capabilities: [
+            {
+              id: 'session.reset',
+              name: 'Reset',
+              kind: 'command',
+              supported: true,
+              executable: true,
+              defaultVisibility: 'public',
+              parameters: []
+            }
+          ]
+        }
+      }
+    })
+    const wrapper = mountInput()
+    getInputDom(wrapper).textContent = '/'
+    await wrapper.get('[data-testid="message-input"]').trigger('input')
+    await flushPromises()
+    await wrapper.get('[data-testid="agent-command-session-reset"]').trigger('click')
+    await wrapper.get('[data-testid="send-button"]').trigger('click')
+    await flushPromises()
+    const body = commandApi.postAgentCommand.mock.calls[1][0]
+    commandApi.getAgentCommand.mockResolvedValue({
+      ...body,
+      status: 'completed',
+      phase: 'outcome',
+      receiptRevision: 2,
+      reconciled: true,
+      effect: { kind: 'reset', sessionId: 'new-session', generation: '2' }
+    })
+    await wrapper.get('[data-testid="agent-command-reconcile"]').trigger('click')
+    await flushPromises()
+    expect(commandApi.getAgentCommand).toHaveBeenCalledExactlyOnceWith(body.requestId)
+    expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-testid="agent-command-status"]').text()).toContain('完成')
+    expect(wrapper.get('[data-testid="agent-command-cancel"]').text()).toContain('不停止')
+    wrapper.unmount()
+  })
+  it.each(['desktop', 'web', 'android'])(
+    '%s searches native models, validates and explicitly selects disconnected entries',
+    async (surface) => {
+      platform.mobile = surface === 'android'
+      platform.web = surface === 'web'
+      const capability = {
+        id: 'model.set',
+        name: 'Switch model',
+        kind: 'model',
+        supported: true,
+        executable: true,
+        defaultVisibility: 'public',
+        parameters: [
+          { name: 'providerId', type: 'string', required: true },
+          { name: 'modelId', type: 'string', required: true }
+        ]
+      }
+      commandApi.postAgentCommand.mockImplementation(async (body) => ({
+        ...body,
+        status: 'completed',
+        catalog: {
+          version: 'v1',
+          capabilities: [capability],
+          models: {
+            items: [{ providerId: 'p/a', modelId: 'm/b', label: 'Native disconnected', connected: false }],
+            total: 8944,
+            offset: 0,
+            nextOffset: 100
+          }
+        }
+      }))
+      const wrapper = mountInput()
+      getInputDom(wrapper).textContent = '/'
+      await wrapper.get('[data-testid="message-input"]').trigger('input')
+      await flushPromises()
+      await wrapper.get('[data-testid="agent-command-model-set"]').trigger('click')
+      const send = wrapper.get(`[data-testid="${platform.mobile ? 'mobile-send-button' : 'send-button'}"]`)
+      await send.trigger('click')
+      await flushPromises()
+      expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(1)
+      expect(sendMock).not.toHaveBeenCalled()
+      expect(wrapper.get('[data-testid="agent-command-status"]').text()).toContain('参数')
+      const search = wrapper.get('[data-testid="agent-command-model-query"] input')
+      await search.setValue('native')
+      await search.trigger('keydown.enter')
+      expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(1)
+      await wrapper.get('[data-testid="agent-command-model-search"]').trigger('click')
+      await flushPromises()
+      expect(commandApi.postAgentCommand.mock.calls[1][0]).toMatchObject({
+        operation: 'discover',
+        capabilityId: 'model.set',
+        parameters: { query: 'native', offset: 0 }
+      })
+      expect(wrapper.get('[data-testid="agent-command-model-total"]').text()).toContain('8944')
+      const option = wrapper.get('[data-testid="agent-command-model-option"]')
+      expect(option.attributes('disabled')).toBeUndefined()
+      await option.trigger('click')
+      expect(wrapper.get('[data-testid="agent-command-model-selected"]').text()).toContain('p/a')
+      await send.trigger('click')
+      await flushPromises()
+      expect(commandApi.postAgentCommand.mock.calls[2][0]).toMatchObject({
+        operation: 'invoke',
+        parameters: { providerId: 'p/a', modelId: 'm/b' }
+      })
+      expect(sendMock).not.toHaveBeenCalled()
+      wrapper.unmount()
+    }
+  )
+  it.each(['desktop', 'web', 'android'])(
+    '%s edits native skill arguments without invoking on Enter or selection',
+    async (surface) => {
+      platform.mobile = surface === 'android'
+      platform.web = surface === 'web'
+      commandApi.postAgentCommand.mockImplementation(async (body) => ({
+        ...body,
+        status: 'completed',
+        catalog: {
+          version: 'v1',
+          capabilities: [
+            {
+              id: 'skill:fixture',
+              name: 'Fixture',
+              kind: 'skill',
+              supported: true,
+              executable: true,
+              defaultVisibility: 'public',
+              parameters: [{ name: 'arguments', type: 'string', required: false }]
+            }
+          ]
+        }
+      }))
+      const wrapper = mountInput()
+      getInputDom(wrapper).textContent = '/'
+      await wrapper.get('[data-testid="message-input"]').trigger('input')
+      await flushPromises()
+      await wrapper.get('[data-testid="agent-command-skill-fixture"]').trigger('click')
+      const field = wrapper.get('[data-testid="agent-command-arguments"] textarea')
+      await field.setValue('  literal <url>\n argument  ')
+      await field.trigger('keydown.enter')
+      expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(1)
+      expect(sendMock).not.toHaveBeenCalled()
+      await wrapper.get(`[data-testid="${platform.mobile ? 'mobile-send-button' : 'send-button'}"]`).trigger('click')
+      await flushPromises()
+      expect(commandApi.postAgentCommand.mock.calls[1][0]).toMatchObject({
+        capabilityId: 'skill:fixture',
+        parameters: { arguments: '  literal <url>\n argument  ' }
+      })
+      expect(sendMock).not.toHaveBeenCalled()
+      wrapper.unmount()
+    }
+  )
+})
+
 describe('#502 shared command menu', () => {
   it.each(['desktop', 'web', 'android'])('%s selects explicitly then uses ordinary Send', async (surface) => {
     platform.mobile = surface === 'android'

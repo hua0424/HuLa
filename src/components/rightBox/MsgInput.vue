@@ -29,12 +29,117 @@
           </small>
         </button>
       </div>
+      <div v-if="agentCommands.selected.value" class="flex flex-col gap-4px" @keydown.enter.stop>
+        <strong>{{ agentCommands.selected.value.capability.name }}</strong>
+        <n-input
+          v-if="agentCommands.selected.value.capability.id.startsWith('skill:')"
+          v-model:value="agentCommands.arguments.value"
+          type="textarea"
+          :rows="2"
+          :maxlength="4096"
+          :disabled="agentCommands.submitted.value"
+          data-testid="agent-command-arguments"
+          :input-props="{ 'aria-label': t('editor.commands.arguments') }"
+          :placeholder="t('editor.commands.arguments')" />
+        <template v-if="agentCommands.selected.value.capability.id === 'model.set'">
+          <n-input
+            v-model:value="agentCommands.modelQuery.value"
+            :maxlength="256"
+            :disabled="agentCommands.submitted.value"
+            data-testid="agent-command-model-query"
+            :input-props="{ 'aria-label': t('editor.commands.model_query') }"
+            :placeholder="t('editor.commands.model_query')" />
+          <button
+            type="button"
+            data-testid="agent-command-model-search"
+            :aria-label="t('editor.commands.search')"
+            :disabled="agentCommands.modelsBusy.value || agentCommands.submitted.value"
+            @click="agentCommands.searchModels()">
+            {{ t('editor.commands.search') }}
+          </button>
+          <small v-if="agentCommands.selectedModel.value" data-testid="agent-command-model-selected">
+            {{ t('editor.commands.model_selected') }}: {{ agentCommands.selectedModel.value.label }} ({{
+              agentCommands.selectedModel.value.providerId
+            }}
+            · {{ agentCommands.selectedModel.value.modelId }})
+          </small>
+          <small>{{ t('editor.commands.model_selection_hint') }}</small>
+          <div v-if="agentCommands.modelsBusy.value" role="status">{{ t('editor.commands.loading') }}</div>
+          <div v-if="agentCommands.modelStatus.value" role="status">
+            {{ t(`editor.commands.${agentCommands.modelStatus.value}`) }}
+          </div>
+          <template v-if="agentCommands.models.value">
+            <small data-testid="agent-command-model-total">
+              {{
+                t('editor.commands.model_total', {
+                  total: agentCommands.models.value.total,
+                  offset: agentCommands.models.value.offset
+                })
+              }}
+            </small>
+            <button
+              v-for="(model, index) in agentCommands.models.value.items"
+              :key="index"
+              type="button"
+              data-testid="agent-command-model-option"
+              :aria-label="`${model.label} (${model.providerId} · ${model.modelId})`"
+              :aria-pressed="
+                agentCommands.selectedModel.value?.providerId === model.providerId &&
+                agentCommands.selectedModel.value?.modelId === model.modelId
+              "
+              :disabled="agentCommands.modelsBusy.value || agentCommands.submitted.value"
+              class="text-left rounded p-6px border border-gray-300 disabled:opacity-50 break-words"
+              @click="agentCommands.chooseModel(model)">
+              {{ model.label }} ({{ model.providerId }} · {{ model.modelId }}) ·
+              {{ t(model.connected ? 'editor.commands.connected' : 'editor.commands.disconnected') }}
+            </button>
+            <div class="flex gap-12px">
+              <button
+                type="button"
+                data-testid="agent-command-model-prev"
+                :aria-label="t('editor.commands.previous')"
+                :disabled="
+                  agentCommands.modelsBusy.value ||
+                  agentCommands.submitted.value ||
+                  agentCommands.models.value.offset === 0
+                "
+                @click="agentCommands.searchModels(Math.max(0, agentCommands.models.value.offset - 100))">
+                {{ t('editor.commands.previous') }}
+              </button>
+              <button
+                type="button"
+                data-testid="agent-command-model-next"
+                :aria-label="t('editor.commands.next')"
+                :disabled="
+                  agentCommands.modelsBusy.value ||
+                  agentCommands.submitted.value ||
+                  agentCommands.models.value.nextOffset === undefined
+                "
+                @click="agentCommands.searchModels(agentCommands.models.value.nextOffset)">
+                {{ t('editor.commands.next') }}
+              </button>
+            </div>
+          </template>
+        </template>
+      </div>
       <div v-if="agentCommands.status.value" role="status" aria-live="polite" data-testid="agent-command-status">
         {{ t(`editor.commands.${agentCommands.status.value}`) }}
       </div>
-      <small v-if="agentCommands.requestId.value && agentCommands.status.value === 'unknown'">
+      <small v-if="agentCommands.requestId.value && ['accepted', 'unknown'].includes(agentCommands.status.value)">
         {{ t('editor.commands.request_id') }}: {{ agentCommands.requestId.value }}
       </small>
+      <small v-if="agentCommands.receipt.value?.error" class="block break-words">
+        {{ agentCommands.receipt.value.error }}
+      </small>
+      <button
+        v-if="agentCommands.requestId.value && ['accepted', 'unknown'].includes(agentCommands.status.value)"
+        type="button"
+        data-testid="agent-command-reconcile"
+        :aria-label="t('editor.commands.reconcile')"
+        :disabled="agentCommands.busy.value"
+        @click="agentCommands.reconcile()">
+        {{ t('editor.commands.reconcile') }}
+      </button>
       <button
         type="button"
         data-testid="agent-command-cancel"

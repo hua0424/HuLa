@@ -5,7 +5,9 @@ import {
   type AgentCapability,
   type AgentCatalog,
   type AgentCommandRequest,
-  type AgentCommandResult
+  type AgentCommandResult,
+  type AgentModel,
+  type ModelPage
 } from '@/services/agentCommands'
 
 type Target = { roomId: string; aiclawUid: string; group: boolean }
@@ -19,10 +21,22 @@ export function useAgentCommands(
 ) {
   const mentions = new WeakMap<Element, string>()
   const catalog = shallowRef<AgentCatalog>()
-  const selected = shallowRef<Intent>()
+  const selected = shallowRef<Intent & { capability: AgentCapability }>()
+  const argumentsText = ref('')
+  const modelQuery = ref('')
+  const models = shallowRef<ModelPage>()
+  const selectedModel = shallowRef<AgentModel>()
+  const modelsBusy = ref(false)
+  const modelStatus = ref('')
+  let modelEpoch = 0
+  let pageQuery = ''
   const status = ref('')
   const requestId = ref('')
+  const receipt = shallowRef<AgentCommandResult>()
+  let trackedRequest: AgentCommandRequest | undefined
+  let trackedIntent: Omit<Intent, 'version'> | undefined
   const busy = ref(false)
+  const submitted = ref(false)
   let epoch = 0
   let blocked = false
   let consumed: Intent | undefined
@@ -56,12 +70,24 @@ export function useAgentCommands(
 
   function invalidate() {
     epoch++
+    receipt.value = undefined
+    trackedRequest = undefined
+    trackedIntent = undefined
+    requestId.value = ''
     if (consumed && consumed.html !== editor.value?.innerHTML) {
       // Submitted-draft dedup must not trap a genuinely new ordinary message.
       consumed = undefined
       blocked = false
     } else if (selected.value || consumed) blocked = true
+    submitted.value = !!consumed
     selected.value = undefined
+    argumentsText.value = ''
+    selectedModel.value = undefined
+    models.value = undefined
+    modelQuery.value = ''
+    modelsBusy.value = false
+    modelStatus.value = ''
+    modelEpoch++
     discovered = undefined
     catalog.value = undefined
     busy.value = false
@@ -79,40 +105,104 @@ export function useAgentCommands(
     epoch++
   })
 
+  const receiptStatus = (result?: AgentCommandResult) =>
+    result?.status === 'accepted' ? (result.phase === 'accepted' ? 'accepted' : 'unknown') : result?.status || 'unknown'
+
   async function request(
     body: AgentCommandRequest,
     generation: number,
-    intent: Omit<Intent, 'version'>
+    intent: Omit<Intent, 'version'>,
+    options: { page?: number; reconcile?: boolean } = {}
   ): Promise<AgentCommandResult | undefined> {
-    requestId.value = body.requestId
-    let result = await postAgentCommand(body)
-    // Bounded reconciliation only; never repeat the POST after an ambiguous transport result.
-    for (let attempt = 0; result?.status === 'accepted' && attempt < 10 && generation === epoch; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      if (generation !== epoch) return
+    const primary = options.page === undefined
+    const current = () => {
+      if (generation !== epoch || (!primary && options.page !== modelEpoch)) return false
       if (!same(intent, target())) {
         invalidate()
-        return
+        return false
       }
-      result = await getAgentCommand(body.requestId)
+      return true
     }
-    if (generation !== epoch) return
-    if (!same(intent, target())) {
-      invalidate()
-      return
+    let confirmed = primary && options.reconcile ? receipt.value : undefined
+    if (primary && !options.reconcile) {
+      requestId.value = body.requestId
+      trackedRequest = body
+      trackedIntent = intent
+      receipt.value = undefined
     }
-    if (
-      !result ||
-      result.requestId !== body.requestId ||
-      String(result.roomId) !== body.roomId ||
-      String(result.aiclawUid) !== body.aiclawUid ||
-      result.operation !== body.operation
-    ) {
-      status.value = 'unknown'
-      return
+    const consume = (result: AgentCommandResult | undefined) => {
+      if (!current()) return false
+      if (
+        !result ||
+        result.requestId !== body.requestId ||
+        String(result.roomId) !== body.roomId ||
+        String(result.aiclawUid) !== body.aiclawUid ||
+        result.operation !== body.operation
+      )
+        return false
+      if (confirmed) {
+        if (confirmed.generation && result.generation !== confirmed.generation) return false
+        for (const key of ['sessionId', 'inputId', 'messageId', 'parentId', 'turnId'] as const) {
+          if (confirmed.nativeRef?.[key] && result.nativeRef?.[key] !== confirmed.nativeRef[key]) return false
+        }
+        if (
+          confirmed.receiptRevision !== undefined &&
+          (result.receiptRevision === undefined || result.receiptRevision < confirmed.receiptRevision)
+        )
+          return false
+        if (confirmed.status === 'unknown' && result.status === 'accepted') return false
+        if (!['accepted', 'unknown'].includes(confirmed.status)) return false
+        // A delayed dispatch observation cannot erase a proven native ACK.
+        if (confirmed.phase === 'accepted' && result.status === 'accepted' && result.phase !== 'accepted') return false
+      }
+      confirmed = result
+      if (primary) {
+        receipt.value = result
+        status.value = receiptStatus(result)
+      }
+      return true
     }
-    status.value = result.status === 'accepted' ? 'unknown' : result.status
-    return result
+    try {
+      let result = options.reconcile ? await getAgentCommand(body.requestId) : await postAgentCommand(body)
+      if (!consume(result)) return
+      // Bounded GET only; native work continues after the UI stops waiting.
+      for (let attempt = 0; !options.reconcile && result?.status === 'accepted' && attempt < 10; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        if (!current()) return
+        result = await getAgentCommand(body.requestId)
+        if (!consume(result)) return
+      }
+      return confirmed
+    } catch {
+      // Preserve the last verified receipt, not the transport failure's guess.
+      return undefined
+    } finally {
+      if (current() && primary) status.value = receiptStatus(confirmed)
+    }
+  }
+
+  async function reconcile() {
+    if (!trackedRequest || !trackedIntent || busy.value || !['accepted', 'unknown'].includes(status.value)) return
+    const generation = epoch
+    busy.value = true
+    try {
+      const body = trackedRequest
+      const intent = trackedIntent
+      const result = await request(body, generation, intent, { reconcile: true })
+      if (
+        generation === epoch &&
+        body.operation === 'discover' &&
+        result?.status === 'completed' &&
+        result.catalog &&
+        Array.isArray(result.catalog.capabilities)
+      ) {
+        catalog.value = result.catalog
+        discovered = { ...intent, version: result.catalog.version }
+        status.value = blocked ? 'changed' : ''
+      }
+    } finally {
+      if (generation === epoch) busy.value = false
+    }
   }
 
   async function input(composing = false) {
@@ -142,11 +232,21 @@ export function useAgentCommands(
     }
   }
   const capabilities = computed(() => catalog.value?.capabilities.filter((c) => c.defaultVisibility === 'public') || [])
-  const executable = (capability: AgentCapability) =>
-    capability.id === 'model.list' &&
-    capability.supported &&
-    capability.executable &&
-    !capability.parameters?.some((p) => p.required)
+  const executable = (capability: AgentCapability) => {
+    const names =
+      capability.id === 'model.set'
+        ? ['providerId', 'modelId']
+        : capability.id.startsWith('skill:')
+          ? ['arguments']
+          : []
+    return (
+      capability.supported &&
+      capability.executable &&
+      (['model.list', 'model.set', 'session.reset', 'session.compact'].includes(capability.id) ||
+        capability.id.startsWith('skill:')) &&
+      !capability.parameters?.some((p) => p.type !== 'string' || !names.includes(p.name))
+    )
+  }
   function select(capability: AgentCapability) {
     if (
       busy.value ||
@@ -156,10 +256,71 @@ export function useAgentCommands(
       !same(discovered, target())
     )
       return
-    selected.value = { ...discovered! }
+    selected.value = { ...discovered!, capability }
+    argumentsText.value = ''
+    selectedModel.value = undefined
+    models.value = undefined
+    modelQuery.value = ''
+    modelStatus.value = ''
+    modelEpoch++
     consumed = undefined
     blocked = false
     status.value = 'selected'
+  }
+  async function searchModels(offset = 0) {
+    const intent = selected.value
+    if (!intent || intent.capability.id !== 'model.set' || consumed || !same(intent, target())) return
+    const query = modelQuery.value
+    if (query.length > 256 || !Number.isSafeInteger(offset) || offset < 0) {
+      modelStatus.value = 'parameters_invalid'
+      return
+    }
+    if (query !== pageQuery) offset = 0
+    const generation = epoch
+    const pageGeneration = ++modelEpoch
+    const body: AgentCommandRequest = {
+      requestId: crypto.randomUUID(),
+      roomId: intent.roomId,
+      aiclawUid: intent.aiclawUid,
+      operation: 'discover',
+      capabilityId: 'model.set',
+      parameters: { query, offset }
+    }
+    modelsBusy.value = true
+    modelStatus.value = ''
+    try {
+      const result = await request(body, generation, intent, { page: pageGeneration })
+      if (
+        generation !== epoch ||
+        pageGeneration !== modelEpoch ||
+        query !== modelQuery.value ||
+        !same(intent, target())
+      )
+        return
+      if (result?.status !== 'completed') {
+        modelStatus.value = 'unknown'
+        return
+      }
+      if (result.catalog?.version !== intent.version) {
+        modelStatus.value = 'catalog_stale'
+        selectedModel.value = undefined
+        return
+      }
+      const page = result.catalog.models
+      if (!page || page.items.length > 100 || page.offset !== offset) {
+        modelStatus.value = 'unknown'
+        return
+      }
+      models.value = page
+      pageQuery = query
+    } catch {
+      if (generation === epoch && pageGeneration === modelEpoch) modelStatus.value = 'unknown'
+    } finally {
+      if (generation === epoch && pageGeneration === modelEpoch) modelsBusy.value = false
+    }
+  }
+  function chooseModel(model: AgentModel) {
+    if (!consumed && models.value?.items.includes(model) && !modelsBusy.value) selectedModel.value = model
   }
   async function send(): Promise<boolean> {
     if (consumed && consumed.html !== editor.value?.innerHTML) invalidate()
@@ -173,7 +334,32 @@ export function useAgentCommands(
       invalidate()
       return true
     }
+    const id = intent.capability.id
+    const parameters: AgentCommandRequest['parameters'] = {}
+    const validId = (value: string) =>
+      value.length > 0 &&
+      value.length <= 256 &&
+      Array.from(value).every((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127)
+    if (id === 'model.set') {
+      const model = selectedModel.value
+      if (!model || !validId(model.providerId) || !validId(model.modelId) || modelStatus.value === 'catalog_stale') {
+        status.value = 'parameters_invalid'
+        return true
+      }
+      parameters.providerId = model.providerId
+      parameters.modelId = model.modelId
+    } else if (id.startsWith('skill:')) {
+      if (
+        argumentsText.value.length > 4096 ||
+        (intent.capability.parameters.some((p) => p.name === 'arguments' && p.required) && !argumentsText.value)
+      ) {
+        status.value = 'parameters_invalid'
+        return true
+      }
+      parameters.arguments = argumentsText.value
+    }
     consumed = intent
+    submitted.value = true
     busy.value = true
     status.value = 'loading'
     const generation = ++epoch
@@ -184,8 +370,8 @@ export function useAgentCommands(
           roomId: intent.roomId,
           aiclawUid: intent.aiclawUid,
           operation: 'invoke',
-          capabilityId: 'model.list',
-          parameters: {},
+          capabilityId: id,
+          parameters,
           catalogVersion: intent.version
         },
         generation,
@@ -201,9 +387,20 @@ export function useAgentCommands(
   return {
     capabilities,
     selected,
+    arguments: argumentsText,
+    modelQuery,
+    models,
+    selectedModel,
+    modelsBusy,
+    modelStatus,
+    searchModels,
+    chooseModel,
     status,
     requestId,
+    receipt,
+    reconcile,
     busy,
+    submitted,
     executable,
     select,
     send,
