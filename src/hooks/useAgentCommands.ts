@@ -74,7 +74,7 @@ export function useAgentCommands(
     invalidate()
     requestId.value = ''
   }
-  watch(() => [session().roomId, session().aiclawUid, session().group], cancel, { flush: 'sync' })
+  watch([() => session().roomId, () => session().aiclawUid, () => session().group], cancel, { flush: 'sync' })
   onScopeDispose(() => {
     epoch++
   })

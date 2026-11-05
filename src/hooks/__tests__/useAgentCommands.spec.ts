@@ -101,6 +101,39 @@ it('releases a submitted draft only after actual content changes', async () => {
   expect(await commands.send()).toBe(false)
   expect(commands.status.value).toBe('')
 })
+it.each(['completed', 'accepted'] as const)(
+  'keeps submitted intent across equal session replacement (%s)',
+  async (status) => {
+    vi.useFakeTimers()
+    const { editor, session, commands } = setup()
+    editor.value.textContent = '/'
+    await commands.input()
+    commands.select(commands.capabilities.value[0])
+    api.postAgentCommand.mockImplementationOnce(async (body) => ({ ...body, status }))
+    api.getAgentCommand.mockImplementation(async () => ({
+      ...api.postAgentCommand.mock.calls[1][0],
+      status: 'completed'
+    }))
+    const pending = commands.send()
+    await Promise.resolve()
+    await Promise.resolve()
+    const previousStatus = commands.status.value
+    const previousId = commands.requestId.value
+    const previousSelected = commands.selected.value
+    session.value = { ...session.value }
+    expect(commands.status.value).toBe(previousStatus)
+    expect(commands.requestId.value).toBe(previousId)
+    expect(commands.selected.value).toBe(previousSelected)
+    expect(commands.capabilities.value).toEqual([model])
+    expect(await commands.send()).toBe(true)
+    expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+    await vi.runAllTimersAsync()
+    await pending
+    expect(commands.status.value).toBe('completed')
+    expect(await commands.send()).toBe(true)
+    expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+  }
+)
 it('does not discover from quotes, attachments, multiple mentions, or IME composition', async () => {
   const { editor, commands } = setup()
   for (const html of [
