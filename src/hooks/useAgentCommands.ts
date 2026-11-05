@@ -25,7 +25,7 @@ export function useAgentCommands(
   const busy = ref(false)
   let epoch = 0
   let blocked = false
-  let consumed = false
+  let consumed: Intent | undefined
   let discovered: Intent | undefined
 
   function target(): Omit<Intent, 'version'> | undefined {
@@ -56,7 +56,11 @@ export function useAgentCommands(
 
   function invalidate() {
     epoch++
-    if (selected.value || consumed) blocked = true
+    if (consumed && consumed.html !== editor.value?.innerHTML) {
+      // Submitted-draft dedup must not trap a genuinely new ordinary message.
+      consumed = undefined
+      blocked = false
+    } else if (selected.value || consumed) blocked = true
     selected.value = undefined
     discovered = undefined
     catalog.value = undefined
@@ -65,12 +69,12 @@ export function useAgentCommands(
   }
   function cancel() {
     blocked = false
-    consumed = false
+    consumed = undefined
     selected.value = undefined
     invalidate()
     requestId.value = ''
   }
-  watch(() => [session().roomId, session().aiclawUid, session().group], invalidate, { flush: 'sync' })
+  watch(() => [session().roomId, session().aiclawUid, session().group], cancel, { flush: 'sync' })
   onScopeDispose(() => {
     epoch++
   })
@@ -153,11 +157,12 @@ export function useAgentCommands(
     )
       return
     selected.value = { ...discovered! }
-    consumed = false
+    consumed = undefined
     blocked = false
     status.value = 'selected'
   }
   async function send(): Promise<boolean> {
+    if (consumed && consumed.html !== editor.value?.innerHTML) invalidate()
     if (consumed || blocked) {
       if (blocked) status.value = 'changed'
       return true
@@ -168,7 +173,7 @@ export function useAgentCommands(
       invalidate()
       return true
     }
-    consumed = true
+    consumed = intent
     busy.value = true
     status.value = 'loading'
     const generation = ++epoch

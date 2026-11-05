@@ -16,7 +16,7 @@
           v-for="capability in agentCommands.capabilities.value"
           :key="capability.id"
           type="button"
-          :data-testid="`agent-command-${capability.id}`"
+          :data-testid="`agent-command-${capability.id.replace(/[^a-z0-9-]/gi, '-').toLowerCase()}`"
           :aria-label="capability.name"
           :disabled="agentCommands.busy.value || !agentCommands.executable(capability)"
           @click="agentCommands.select(capability)"
@@ -35,7 +35,11 @@
       <small v-if="agentCommands.requestId.value && agentCommands.status.value === 'unknown'">
         {{ t('editor.commands.request_id') }}: {{ agentCommands.requestId.value }}
       </small>
-      <button type="button" data-testid="agent-command-cancel" @click="agentCommands.cancel()">
+      <button
+        type="button"
+        data-testid="agent-command-cancel"
+        :aria-label="t('editor.commands.cancel')"
+        @click="agentCommands.cancel()">
         {{ t('editor.commands.cancel') }}
       </button>
     </section>

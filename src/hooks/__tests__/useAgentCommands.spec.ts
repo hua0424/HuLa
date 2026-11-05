@@ -74,6 +74,33 @@ it('synchronously invalidates selected intent on edit and room change', async ()
   await commands.send()
   expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
 })
+it.each([false, true])('releases command intent in a new human room (submitted=%s)', async (submitted) => {
+  const { editor, session, commands } = setup()
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  if (submitted) await commands.send()
+  const count = api.postAgentCommand.mock.calls.length
+  session.value = { roomId: 'human-room', aiclawUid: 'human', group: false }
+  editor.value.textContent = 'normal message'
+  await commands.input()
+  expect(await commands.send()).toBe(false)
+  expect(api.postAgentCommand).toHaveBeenCalledTimes(count)
+})
+it('releases a submitted draft only after actual content changes', async () => {
+  const { editor, commands } = setup()
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  await commands.send()
+  await commands.input() // redundant input event must not release duplicate-send protection
+  expect(await commands.send()).toBe(true)
+  expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(1)
+  editor.value.textContent = 'new ordinary message'
+  await commands.input()
+  expect(await commands.send()).toBe(false)
+  expect(commands.status.value).toBe('')
+})
 it('does not discover from quotes, attachments, multiple mentions, or IME composition', async () => {
   const { editor, commands } = setup()
   for (const html of [
@@ -172,7 +199,8 @@ it('ignores invoke results after a silent editor mutation', async () => {
   editor.value.textContent = 'new draft'
   resolve({ ...body, status: 'completed' })
   await pending
-  expect(commands.status.value).toBe('changed')
+  expect(commands.status.value).toBe('')
+  expect(await commands.send()).toBe(false)
 })
 it('does not discover for human targets or ambiguous group mentions', async () => {
   const { editor, session, commands } = setup()

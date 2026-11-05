@@ -236,9 +236,10 @@ describe('#502 shared command menu', () => {
     getInputDom(wrapper).textContent = '/'
     await wrapper.get('[data-testid="message-input"]').trigger('input')
     await flushPromises()
-    expect(wrapper.get('[data-testid="agent-command-skill.list"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="agent-command-skill-list"]').attributes('disabled')).toBeDefined()
     expect(wrapper.find('[data-testid="agent-command-hidden"]').exists()).toBe(false)
-    await wrapper.get('[data-testid="agent-command-model.list"]').trigger('click')
+    expect(wrapper.get('[data-testid="agent-command-cancel"]').attributes('aria-label')).toBeTruthy()
+    await wrapper.get('[data-testid="agent-command-model-list"]').trigger('click')
     expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-testid="agent-command-status"]').text()).toContain('请点击发送')
     await wrapper.get(`[data-testid="${platform.mobile ? 'mobile-send-button' : 'send-button'}"]`).trigger('click')
