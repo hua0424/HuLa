@@ -7,6 +7,8 @@ import type { Ref } from 'vue'
 import { nextTick } from 'vue'
 import { LimitEnum, MessageStatusEnum, MittEnum, MsgEnum, UploadSceneEnum } from '@/enums'
 import { useMitt } from '@/hooks/useMitt.ts'
+import { useAgentCommands } from '@/hooks/useAgentCommands'
+import { isAiclaw } from '@/utils/AiclawUtils'
 import type { BaseUserItem } from '@/stores/cached.ts'
 import { useChatStore } from '@/stores/chat.ts'
 import { useGlobalStore } from '@/stores/global.ts'
@@ -74,6 +76,15 @@ export const useMsgInput = (messageInputDom: Ref) => {
   const groupStore = useGroupStore()
   const chatStore = useChatStore()
   const globalStore = useGlobalStore()
+  const agentCommands = useAgentCommands(
+    messageInputDom,
+    () => ({
+      roomId: String(globalStore.currentSessionRoomId || ''),
+      aiclawUid: String(globalStore.currentSession?.detailId || ''),
+      group: chatStore.isGroup
+    }),
+    isAiclaw
+  )
   const { getCursorSelectionRange, updateSelectionRange, focusOn } = useCursorManager()
   const { triggerInputEvent, insertNode, getMessageContentType, getEditorRange, imgPaste, reply, userUid } = useCommon()
 
@@ -402,6 +413,8 @@ export const useMsgInput = (messageInputDom: Ref) => {
       window.$message.warning(blockReason === 'no-session' ? '请先选择会话再发送' : '登录身份未就绪，请稍后重试')
       return
     }
+    if (isChinese.value) return
+    if (await agentCommands.send()) return
     const sendAttempt = getCurrentBootAttempt()
     const sendReadyReq = sendAttempt ? createRequestId(sendAttempt, 'send_ready') : ''
     if (sendAttempt) {
@@ -594,7 +607,12 @@ export const useMsgInput = (messageInputDom: Ref) => {
   }
 
   /** 当输入框手动输入值的时候触发input事件(使用vueUse的防抖) */
-  const handleInput = useDebounceFn(async (e: Event) => {
+  const handleInput = (e: Event) => {
+    // Invalidate command intent before the ordinary editor's debounced work.
+    void agentCommands.input(isChinese.value || (e as InputEvent).isComposing)
+    return handleOrdinaryInput(e)
+  }
+  const handleOrdinaryInput = useDebounceFn(async (e: Event) => {
     const inputElement = e.target as HTMLInputElement
 
     // 检查输入框内容，如果只有空白字符、br标签或空元素则清空
@@ -733,6 +751,8 @@ export const useMsgInput = (messageInputDom: Ref) => {
     const userInfo = groupStore.getUserInfo(item.uid)
     const displayName = userInfo?.myName || item.name
 
+    // Trust only nodes actually created by this picker, never pasted data-ait-uid attributes.
+    const previousMentions = new Set(messageInputDom.value.querySelectorAll('[id="aitSpan"]'))
     // 无论是哪种情况，都在当前光标位置插入@提及
     insertNode(
       MsgEnum.AIT,
@@ -742,6 +762,9 @@ export const useMsgInput = (messageInputDom: Ref) => {
       },
       {} as HTMLElement
     )
+    messageInputDom.value.querySelectorAll('[id="aitSpan"]').forEach((node: Element) => {
+      if (!previousMentions.has(node)) agentCommands.registerMention(node, String(item.uid))
+    })
     triggerInputEvent(messageInputDom.value)
     ait.value = false
   }
@@ -971,12 +994,14 @@ export const useMsgInput = (messageInputDom: Ref) => {
       /** 正在输入拼音时触发 */
       messageInputDom.value.addEventListener('compositionstart', () => {
         isChinese.value = true
+        agentCommands.invalidate()
       })
       /** 结束输入拼音时触发 */
       messageInputDom.value.addEventListener('compositionend', (e: CompositionEvent) => {
         setTimeout(() => {
           isChinese.value = false
           aitKey.value = e.data
+          void agentCommands.input()
         }, 10)
       })
     }
@@ -1384,6 +1409,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
   }
 
   return {
+    agentCommands,
     imgPaste,
     inputKeyDown,
     handleAit,

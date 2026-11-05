@@ -155,7 +155,9 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   // #484：aiclaw 群配置当前事实（绕缓存一致读，PRESENT/NOT_ACCESSIBLE）
   aiclawGroupConfigCurrent: { method: 'GET', path: 'im/aiclaw/group/config/current' },
   aiclawThinkingDetail: { method: 'GET', path: 'im/aiclaw/thinking/{thinkingId}' },
-  aiclawThinkingByTrigger: { method: 'POST', path: 'im/aiclaw/thinking/by-trigger' }
+  aiclawThinkingByTrigger: { method: 'POST', path: 'im/aiclaw/thinking/by-trigger' },
+  aiclawCommands: { method: 'POST', path: 'im/aiclaw/commands' },
+  aiclawCommandResult: { method: 'GET', path: 'im/aiclaw/commands/{requestId}' }
 }
 
 // 与联调契约一致：Authorization 头直接使用 base64 值（无 "Basic " 前缀）

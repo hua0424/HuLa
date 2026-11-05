@@ -2,6 +2,12 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
+import { useAgentCommands } from '@/hooks/useAgentCommands'
+import zhEditor from '../../../../locales/zh-CN/editor.json'
+
+const commandApi = vi.hoisted(() => ({ postAgentCommand: vi.fn(), getAgentCommand: vi.fn() }))
+const platform = vi.hoisted(() => ({ mobile: false, web: false }))
+vi.mock('@/services/agentCommands', () => commandApi)
 
 /**
  * #45 空消息内联错误 的单元/组件测试。
@@ -31,9 +37,9 @@ vi.mock('@/stores/chat', () => ({
 
 // --- 平台：固定桌面端（isMobile=false 才渲染桌面发送行 + send-button + composer-error） ---
 vi.mock('@/utils/PlatformConstants', () => ({
-  isMobile: () => false,
+  isMobile: () => platform.mobile,
   isMac: () => false,
-  isWeb: () => false
+  isWeb: () => platform.web
 }))
 
 // --- 路由汇聚点（经自动导入子组件传递引入真实 router -> 大量副作用），与被测逻辑无关 ---
@@ -70,26 +76,40 @@ const sendMock = vi.fn().mockResolvedValue(undefined)
 const disabledSendRef = ref(false)
 const inputKeyDownMock = vi.fn()
 vi.mock('@/hooks/useMsgInput.ts', () => ({
-  useMsgInput: () => ({
-    inputKeyDown: inputKeyDownMock,
-    handleAit: vi.fn(),
-    handleInput: vi.fn(),
-    msgInput: ref(''),
-    send: sendMock,
-    sendLocationDirect: vi.fn(),
-    sendFilesDirect: vi.fn(),
-    sendVoiceDirect: vi.fn(),
-    sendEmojiDirect: vi.fn(),
-    personList: ref([]),
-    disabledSend: disabledSendRef,
-    ait: ref(false),
-    chatKey: ref('Enter'),
-    menuList: ref([]),
-    selectedAitKey: ref(-1),
-    updateSelectionRange: vi.fn(),
-    focusOn: vi.fn(),
-    getCursorSelectionRange: vi.fn()
-  })
+  useMsgInput: (editor: ReturnType<typeof ref<HTMLElement>>) => {
+    const commands = useAgentCommands(
+      editor,
+      () => ({ roomId: 'room-1', aiclawUid: 'agent', group: false }),
+      (uid) => uid === 'agent'
+    )
+    const text = ref('')
+    return {
+      agentCommands: commands,
+      inputKeyDown: inputKeyDownMock,
+      handleAit: vi.fn(),
+      handleInput: (event: InputEvent) => {
+        text.value = editor.value?.innerHTML || ''
+        return commands.input(event.isComposing)
+      },
+      msgInput: text,
+      send: async () => {
+        if (!(await commands.send())) await sendMock()
+      },
+      sendLocationDirect: vi.fn(),
+      sendFilesDirect: vi.fn(),
+      sendVoiceDirect: vi.fn(),
+      sendEmojiDirect: vi.fn(),
+      personList: ref([]),
+      disabledSend: disabledSendRef,
+      ait: ref(false),
+      chatKey: ref('Enter'),
+      menuList: ref([]),
+      selectedAitKey: ref(-1),
+      updateSelectionRange: vi.fn(),
+      focusOn: vi.fn(),
+      getCursorSelectionRange: vi.fn()
+    }
+  }
 }))
 
 // --- useAiclawSession：上传能力 seam；本测试只关心 composer 错误，给默认不限 ---
@@ -132,7 +152,7 @@ const i18n = createI18n({
   legacy: false,
   locale: 'zh-CN',
   messages: {
-    'zh-CN': { editor: { send: '发送', placeholder: '请输入', send_or_newline: '{send} 发送 / {newline} 换行' } }
+    'zh-CN': { editor: zhEditor }
   }
 })
 
@@ -165,6 +185,9 @@ const mountInput = () =>
   })
 
 beforeEach(() => {
+  platform.mobile = false
+  platform.web = false
+  commandApi.postAgentCommand.mockReset()
   sendMock.mockClear()
   inputKeyDownMock.mockClear()
   disabledSendRef.value = false
@@ -179,6 +202,84 @@ afterEach(() => {
 // 取到组件内部输入框 DOM（getInputContent 读它的 textContent）
 const getInputDom = (wrapper: ReturnType<typeof mountInput>) =>
   wrapper.get('[data-testid="message-input"]').element as HTMLElement
+
+describe('#502 shared command menu', () => {
+  it.each(['desktop', 'web', 'android'])('%s selects explicitly then uses ordinary Send', async (surface) => {
+    platform.mobile = surface === 'android'
+    platform.web = surface === 'web'
+    const model = {
+      id: 'model.list',
+      name: 'Models',
+      kind: 'model',
+      description: 'Native models',
+      supported: true,
+      executable: true,
+      defaultVisibility: 'public',
+      scope: 'instance',
+      parameters: []
+    }
+    commandApi.postAgentCommand.mockImplementation(async (body) => ({
+      ...body,
+      status: 'completed',
+      catalog: {
+        version: 'v1',
+        framework: 'opencode',
+        runtimeVersion: '1',
+        capabilities: [
+          model,
+          { ...model, id: 'skill.list', name: 'Skills', executable: false },
+          { ...model, id: 'hidden', defaultVisibility: 'hidden' }
+        ]
+      }
+    }))
+    const wrapper = mountInput()
+    getInputDom(wrapper).textContent = '/'
+    await wrapper.get('[data-testid="message-input"]').trigger('input')
+    await flushPromises()
+    // Happy DOM cannot measure layout; the real-browser check verifies viewport bounds and unchanged composer height.
+    expect(wrapper.get('[data-testid="agent-command-menu"]').classes()).toEqual(
+      expect.arrayContaining([
+        'absolute',
+        'bottom-full',
+        'left-0',
+        'right-0',
+        'z-996',
+        'overflow-auto',
+        'bg-[--center-bg-color]',
+        'max-h-[min(180px,30dvh)]'
+      ])
+    )
+    expect(wrapper.get('[data-testid="agent-command-skill-list"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="agent-command-hidden"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="agent-command-cancel"]').attributes('aria-label')).toBeTruthy()
+    await wrapper.get('[data-testid="agent-command-model-list"]').trigger('click')
+    expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-testid="agent-command-status"]').text()).toContain('请点击发送')
+    await wrapper.get(`[data-testid="${platform.mobile ? 'mobile-send-button' : 'send-button'}"]`).trigger('click')
+    await flushPromises()
+    expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(2)
+    expect(commandApi.postAgentCommand.mock.calls[1][0]).toMatchObject({
+      operation: 'invoke',
+      capabilityId: 'model.list',
+      roomId: 'room-1',
+      aiclawUid: 'agent'
+    })
+    expect(sendMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it('typed slash without explicit selection remains ordinary text', async () => {
+    commandApi.postAgentCommand.mockImplementation(async (body) => ({ ...body, status: 'unsupported' }))
+    const wrapper = mountInput()
+    getInputDom(wrapper).textContent = '/models'
+    await wrapper.get('[data-testid="message-input"]').trigger('input')
+    await flushPromises()
+    await wrapper.get('[data-testid="send-button"]').trigger('click')
+    await flushPromises()
+    expect(sendMock).toHaveBeenCalledTimes(1)
+    expect(commandApi.postAgentCommand.mock.calls.every(([body]) => body.operation === 'discover')).toBe(true)
+    wrapper.unmount()
+  })
+})
 
 describe('#45 空消息内联错误', () => {
   // 关键：测「可达触发」——不直调 handleDesktopSend，而是经真实 send-button 点击 / 回车，

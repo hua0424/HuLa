@@ -878,6 +878,8 @@ export enum ImUrlEnum {
   AICLAW_THINKING_DETAIL = 'aiclawThinkingDetail',
   /** 按触发消息批量反查 aiclaw thinking 元数据（REQ-014 / ADR-0007） */
   AICLAW_THINKING_BY_TRIGGER = 'aiclawThinkingByTrigger',
+  AICLAW_COMMANDS = 'aiclawCommands',
+  AICLAW_COMMAND_RESULT = 'aiclawCommandResult',
 
   // 文件下载签名
   /** 文件下载签名（BL-003 sign-on-access：客户端传 msgId，服务端反查 roomId+objectKey 返回临时 URL） */

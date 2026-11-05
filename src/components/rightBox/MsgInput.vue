@@ -3,6 +3,47 @@
     <!-- 录音模式 -->
     <VoiceRecorder v-show="isVoiceMode" @cancel="handleVoiceCancel" @send="sendVoiceDirect" />
 
+    <!-- Shared desktop/Web/Android command discovery; selection never sends by itself. -->
+    <section
+      v-if="agentCommands && (agentCommands.capabilities.value.length || agentCommands.status.value)"
+      data-testid="agent-command-menu"
+      :aria-label="t('editor.commands.title')"
+      class="absolute bottom-full left-0 right-0 z-996 px-12px py-6px text-13px max-h-[min(180px,30dvh)] overflow-auto bg-[--center-bg-color] text-[--text-color] rounded-8px border-(1px solid [--box-shadow-color]) shadow-md">
+      <div
+        v-if="!agentCommands.selected.value && agentCommands.status.value !== 'changed'"
+        class="flex flex-col gap-4px">
+        <button
+          v-for="capability in agentCommands.capabilities.value"
+          :key="capability.id"
+          type="button"
+          :data-testid="`agent-command-${capability.id.replace(/[^a-z0-9-]/gi, '-').toLowerCase()}`"
+          :aria-label="capability.name"
+          :disabled="agentCommands.busy.value || !agentCommands.executable(capability)"
+          @click="agentCommands.select(capability)"
+          class="text-left rounded p-6px border border-gray-300 disabled:opacity-50">
+          <strong>{{ capability.name }}</strong>
+          <span>· {{ capability.kind }} · {{ capability.scope }}</span>
+          <div>{{ capability.description }}</div>
+          <small v-if="!agentCommands.executable(capability)">
+            {{ capability.reason || t('editor.commands.metadata') }}
+          </small>
+        </button>
+      </div>
+      <div v-if="agentCommands.status.value" role="status" aria-live="polite" data-testid="agent-command-status">
+        {{ t(`editor.commands.${agentCommands.status.value}`) }}
+      </div>
+      <small v-if="agentCommands.requestId.value && agentCommands.status.value === 'unknown'">
+        {{ t('editor.commands.request_id') }}: {{ agentCommands.requestId.value }}
+      </small>
+      <button
+        type="button"
+        data-testid="agent-command-cancel"
+        :aria-label="t('editor.commands.cancel')"
+        @click="agentCommands.cancel()">
+        {{ t('editor.commands.cancel') }}
+      </button>
+    </section>
+
     <!-- 输入框表单 -->
     <form
       v-show="!isVoiceMode"
@@ -263,6 +304,7 @@ const pendingFiles = ref<UploadFile[]>([])
 
 /** 引入useMsgInput的相关方法 */
 const {
+  agentCommands,
   inputKeyDown,
   handleAit,
   handleInput,

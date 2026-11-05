@@ -729,6 +729,8 @@ pub enum ImUrl {
     AiclawGroupConfigCurrent,
     AiclawThinkingDetail,
     AiclawThinkingByTrigger,
+    AiclawCommands,
+    AiclawCommandResult,
 
     FileSignDownload,
 }
@@ -1075,6 +1077,8 @@ impl ImUrl {
             }
             ImUrl::AiclawThinkingDetail => (http::Method::GET, "im/aiclaw/thinking/{thinkingId}"),
             ImUrl::AiclawThinkingByTrigger => (http::Method::POST, "im/aiclaw/thinking/by-trigger"),
+            ImUrl::AiclawCommands => (http::Method::POST, "im/aiclaw/commands"),
+            ImUrl::AiclawCommandResult => (http::Method::GET, "im/aiclaw/commands/{requestId}"),
 
             ImUrl::FileSignDownload => (http::Method::POST, "im/file/sign-download"),
         }
@@ -1380,6 +1384,8 @@ impl ImUrl {
             "aiclawGroupConfigCurrent" => Ok(ImUrl::AiclawGroupConfigCurrent),
             "aiclawThinkingDetail" => Ok(ImUrl::AiclawThinkingDetail),
             "aiclawThinkingByTrigger" => Ok(ImUrl::AiclawThinkingByTrigger),
+            "aiclawCommands" => Ok(ImUrl::AiclawCommands),
+            "aiclawCommandResult" => Ok(ImUrl::AiclawCommandResult),
 
             "fileSignDownload" => Ok(ImUrl::FileSignDownload),
 
@@ -1398,4 +1404,24 @@ impl FromStr for ImUrl {
 
 pub trait ImRequest {
     async fn login(&mut self, login_req: LoginReq) -> Result<Option<LoginResp>, anyhow::Error>;
+}
+
+#[cfg(test)]
+mod command_route_tests {
+    use super::ImUrl;
+
+    #[test]
+    fn command_routes_parse_to_expected_method_and_path() {
+        for (name, method, path) in [
+            ("aiclawCommands", http::Method::POST, "im/aiclaw/commands"),
+            (
+                "aiclawCommandResult",
+                http::Method::GET,
+                "im/aiclaw/commands/{requestId}",
+            ),
+        ] {
+            let route: ImUrl = name.parse().expect("command route must parse");
+            assert_eq!(route.get_url(), (method, path));
+        }
+    }
 }

@@ -2,6 +2,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 
+vi.mock('@/utils/AiclawUtils', () => ({ isAiclaw: () => false }))
+
 const sharedMocks = vi.hoisted(() => ({
   contentType: 1,
   updateMsg: vi.fn(),

@@ -182,6 +182,22 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+describe('#502 command menu and composer layout', () => {
+  it('stacks the MsgInput display:contents children vertically instead of squeezing the editor beside the menu', () => {
+    const wrapper = mountFooter()
+    // Happy DOM has no layout engine; assert the real footer boundary's UnoCSS direction contract.
+    const container = wrapper.get('msg-input-stub').element.parentElement!
+    expect(container.classList.contains('flex')).toBe(true)
+    expect(container.classList.contains('flex-col')).toBe(true)
+    expect(container.classList.contains('flex-1')).toBe(true)
+    expect(container.classList.contains('min-h-0')).toBe(true)
+    // display:contents adds no containing block; the existing footer root anchors the popup above the toolbar.
+    expect(container.classList.contains('relative')).toBe(false)
+    expect(wrapper.get('main').classes()).toContain('relative')
+    wrapper.unmount()
+  })
+})
+
 describe('#155 桌面端 ChatFooter 上传按钮 testid', () => {
   it('渲染文件/图片/语音上传按钮的 testid', () => {
     const wrapper = mountFooter()
