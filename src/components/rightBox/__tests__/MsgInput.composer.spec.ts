@@ -236,6 +236,19 @@ describe('#502 shared command menu', () => {
     getInputDom(wrapper).textContent = '/'
     await wrapper.get('[data-testid="message-input"]').trigger('input')
     await flushPromises()
+    // Happy DOM cannot measure layout; the real-browser check verifies viewport bounds and unchanged composer height.
+    expect(wrapper.get('[data-testid="agent-command-menu"]').classes()).toEqual(
+      expect.arrayContaining([
+        'absolute',
+        'bottom-full',
+        'left-0',
+        'right-0',
+        'z-996',
+        'overflow-auto',
+        'bg-[--center-bg-color]',
+        'max-h-[min(180px,30dvh)]'
+      ])
+    )
     expect(wrapper.get('[data-testid="agent-command-skill-list"]').attributes('disabled')).toBeDefined()
     expect(wrapper.find('[data-testid="agent-command-hidden"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="agent-command-cancel"]').attributes('aria-label')).toBeTruthy()

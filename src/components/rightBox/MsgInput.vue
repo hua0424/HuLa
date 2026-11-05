@@ -8,7 +8,7 @@
       v-if="agentCommands && (agentCommands.capabilities.value.length || agentCommands.status.value)"
       data-testid="agent-command-menu"
       :aria-label="t('editor.commands.title')"
-      class="px-12px py-6px text-13px max-h-180px overflow-auto">
+      class="absolute bottom-full left-0 right-0 z-996 px-12px py-6px text-13px max-h-[min(180px,30dvh)] overflow-auto bg-[--center-bg-color] text-[--text-color] rounded-8px border-(1px solid [--box-shadow-color]) shadow-md">
       <div
         v-if="!agentCommands.selected.value && agentCommands.status.value !== 'changed'"
         class="flex flex-col gap-4px">

@@ -191,6 +191,9 @@ describe('#502 command menu and composer layout', () => {
     expect(container.classList.contains('flex-col')).toBe(true)
     expect(container.classList.contains('flex-1')).toBe(true)
     expect(container.classList.contains('min-h-0')).toBe(true)
+    // display:contents adds no containing block; the existing footer root anchors the popup above the toolbar.
+    expect(container.classList.contains('relative')).toBe(false)
+    expect(wrapper.get('main').classes()).toContain('relative')
     wrapper.unmount()
   })
 })
