@@ -6,6 +6,20 @@
     "copy": "复制",
     "cut": "剪切"
   },
+  "commands": {
+    "title": "助理能力",
+    "loading": "正在查询助理请求…",
+    "selected": "已选择模型列表，请点击发送执行。",
+    "changed": "输入内容或目标已变化，请重新选择命令，或取消后按普通文本发送。",
+    "completed": "命令已完成，助理将在当前会话回复。",
+    "failed": "助理命令失败，未自动重试。",
+    "unsupported": "助理不支持此能力。",
+    "unknown": "结果未知，请勿重复发送；再次尝试前请检查会话。",
+    "offline": "助理当前离线。",
+    "metadata": "仅供发现，执行链路尚未接通。",
+    "request_id": "请求编号",
+    "cancel": "取消命令／按普通文本"
+  },
   "send": "发送",
   "placeholder": "善言一句暖人心，恶语一句伤人心",
   "send_or_newline": "{send} 发送/{newline} 换行",
