@@ -8,6 +8,7 @@
   },
   "commands": {
     "title": "助理能力",
+    "source": "来源",
     "loading": "正在查询助理请求…",
     "selected": "已选择命令，填写参数后请点击发送执行。",
     "arguments": "原生技能参数（可选）",

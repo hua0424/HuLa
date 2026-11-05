@@ -12,6 +12,7 @@ export type AgentCapability = {
   scope: 'workspace' | 'conversation' | 'instance'
   parameters: { name: string; type: string; required: boolean }[]
   reason?: string
+  source?: string
 }
 export type AgentModel = { providerId: string; modelId: string; label: string; connected: boolean }
 export type ModelPage = { items: AgentModel[]; total: number; offset: number; nextOffset?: number }

@@ -8,6 +8,7 @@
   },
   "commands": {
     "title": "Agent capabilities",
+    "source": "Source",
     "loading": "Checking agent request…",
     "selected": "Command selected. Fill its parameters, then use Send to run it.",
     "arguments": "Native skill arguments (optional)",

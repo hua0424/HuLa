@@ -19,6 +19,7 @@ const skill = {
   ...model,
   id: 'skill:native/name',
   kind: 'skill' as const,
+  source: 'skill',
   parameters: [{ name: 'arguments', type: 'string', required: false }]
 }
 const setModel = {
@@ -76,6 +77,28 @@ it.each(['session.reset', 'session.compact', 'skill:native/name'])(
     })
   }
 )
+
+it.each([
+  { kind: 'skill' as const, source: undefined },
+  { kind: 'skill' as const, source: 'command' },
+  { kind: 'skill' as const, source: 'mcp' },
+  { kind: 'command' as const, source: 'skill' }
+])('rejects skill provenance $kind/$source without executing or falling back to chat', async (provenance) => {
+  const { editor, commands } = setup()
+  api.postAgentCommand.mockImplementation(async (body) => ({
+    ...body,
+    status: 'completed',
+    catalog: { ...catalog, capabilities: [{ ...skill, ...provenance }] }
+  }))
+  editor.value.textContent = '/'
+  await commands.input()
+  const capability = commands.capabilities.value[0]
+  expect(commands.executable(capability)).toBe(false)
+  commands.select(capability)
+  expect(commands.selected.value).toBeUndefined()
+  expect(await commands.send()).toBe(true)
+  expect(api.postAgentCommand).toHaveBeenCalledTimes(1)
+})
 
 it('blocks missing model parameters then sends the exact disconnected native pair, without splitting IDs', async () => {
   const { editor, commands } = setup()

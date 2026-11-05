@@ -243,19 +243,19 @@ export function useAgentCommands(
       capability.supported &&
       capability.executable &&
       (['model.list', 'model.set', 'session.reset', 'session.compact'].includes(capability.id) ||
-        capability.id.startsWith('skill:')) &&
+        (capability.id.startsWith('skill:') && capability.kind === 'skill' && capability.source === 'skill')) &&
       !capability.parameters?.some((p) => p.type !== 'string' || !names.includes(p.name))
     )
   }
   function select(capability: AgentCapability) {
-    if (
-      busy.value ||
-      consumed ||
-      !capabilities.value.includes(capability) ||
-      !executable(capability) ||
-      !same(discovered, target())
-    )
+    if (busy.value || consumed || !capabilities.value.includes(capability) || !same(discovered, target())) return
+    if (!executable(capability)) {
+      // A rejected explicit intent must not become an ordinary chat submission.
+      selected.value = undefined
+      blocked = true
+      status.value = 'changed'
       return
+    }
     selected.value = { ...discovered!, capability }
     argumentsText.value = ''
     selectedModel.value = undefined

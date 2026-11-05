@@ -204,6 +204,42 @@ const getInputDom = (wrapper: ReturnType<typeof mountInput>) =>
   wrapper.get('[data-testid="message-input"]').element as HTMLElement
 
 describe('#503 native command controls', () => {
+  it.each([undefined, 'command', 'mcp'])(
+    'keeps skill source %s metadata-only even when execution flags are true',
+    async (source) => {
+      commandApi.postAgentCommand.mockImplementation(async (body) => ({
+        ...body,
+        status: 'completed',
+        catalog: {
+          version: 'v1',
+          capabilities: [
+            {
+              id: 'skill:shadowed',
+              name: 'Shadowed',
+              kind: 'skill',
+              source,
+              supported: true,
+              executable: true,
+              defaultVisibility: 'public',
+              parameters: []
+            }
+          ]
+        }
+      }))
+      const wrapper = mountInput()
+      getInputDom(wrapper).textContent = '/'
+      await wrapper.get('[data-testid="message-input"]').trigger('input')
+      await flushPromises()
+      const button = wrapper.get('[data-testid="agent-command-skill-shadowed"]')
+      expect(button.attributes('disabled')).toBeDefined()
+      expect(button.text()).toContain('仅供发现')
+      await button.trigger('click')
+      expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(1)
+      expect(sendMock).not.toHaveBeenCalled()
+      expect(wrapper.find('[data-testid="agent-command-arguments"]').exists()).toBe(false)
+      wrapper.unmount()
+    }
+  )
   it('reconciles an uncertain command with GET only and labels dismissal as not stopping native work', async () => {
     commandApi.postAgentCommand.mockImplementation(async (body) => {
       if (body.operation === 'invoke') throw new Error('lost response')
@@ -333,6 +369,7 @@ describe('#503 native command controls', () => {
               id: 'skill:fixture',
               name: 'Fixture',
               kind: 'skill',
+              source: 'skill',
               supported: true,
               executable: true,
               defaultVisibility: 'public',
@@ -345,6 +382,7 @@ describe('#503 native command controls', () => {
       getInputDom(wrapper).textContent = '/'
       await wrapper.get('[data-testid="message-input"]').trigger('input')
       await flushPromises()
+      expect(wrapper.get('[data-testid="agent-command-source"]').text()).toContain('skill')
       await wrapper.get('[data-testid="agent-command-skill-fixture"]').trigger('click')
       const field = wrapper.get('[data-testid="agent-command-arguments"] textarea')
       await field.setValue('  literal <url>\n argument  ')

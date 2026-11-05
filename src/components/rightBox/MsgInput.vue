@@ -23,6 +23,9 @@
           class="text-left rounded p-6px border border-gray-300 disabled:opacity-50">
           <strong>{{ capability.name }}</strong>
           <span>· {{ capability.kind }} · {{ capability.scope }}</span>
+          <small v-if="capability.source" data-testid="agent-command-source">
+            · {{ t('editor.commands.source') }}: {{ capability.source }}
+          </small>
           <div>{{ capability.description }}</div>
           <small v-if="!agentCommands.executable(capability)">
             {{ capability.reason || t('editor.commands.metadata') }}
