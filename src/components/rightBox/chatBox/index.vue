@@ -13,6 +13,7 @@
           v-else
           direction="vertical"
           :resize-trigger-size="0"
+          :pane2-style="{ overflow: 'visible' }"
           class="h-full"
           :min="0.55"
           :max="0.74"
