@@ -3059,6 +3059,25 @@ export const useChatStore = defineStore(
       return true
     }
 
+    /**
+     * aichatoverview#504：群配置房间发现（成员缓存为空时的兜底）。
+     * 新浏览器/新端首次打开设置页、尚未进过任何群房拉取成员时，本地成员表为空
+     * 不等于「助理未加入任何群」——用主人自己的群列表作候选发现（已同步的
+     * groupDetails 优先，不足则经既有 group/list 接口静默补拉）。
+     * 返回候选 roomId 列表；发现失败返回 null（调用方按「未成功」处理，不冒充空列表）。
+     */
+    const discoverAiclawConfigRooms = async (guard: AiclawConfigGuard): Promise<string[] | null> => {
+      const groupStore = useGroupStore()
+      const synced = groupStore.groupDetails.map((g) => String(g.roomId)).filter((id) => id)
+      if (synced.length > 0) return synced
+      const { imRequestSilent } = await import('@/utils/ImRequestUtils')
+      const { ImUrlEnum } = await import('@/enums')
+      const data = await imRequestSilent({ url: ImUrlEnum.GROUP_LIST })
+      if (!aiclawConfigGuardCurrent(guard)) return null
+      if (!Array.isArray(data)) return null
+      return data.map((g) => String(g?.roomId ?? '')).filter((id) => id)
+    }
+
     /** 加载 aiclaw 群配置（遍历 aiclaw 所在群逐一获取），返回是否全部成功 */
     const loadAiclawGroupConfigs = async (aiclawUid: number): Promise<boolean> => {
       const groupStore = useGroupStore()
@@ -3068,16 +3087,25 @@ export const useChatStore = defineStore(
         const guard = await captureAiclawConfigGuard()
         if (!guard.live) return false
         // 获取 aiclaw 所在的所有群 roomId
-        const roomIds = groupStore.getRoomIdsByUid(String(aiclawUid))
-        // #484：不再「先清全集」——读取失败时保留上次可信值（否则一次网络抖动就把整列表清空）。
-        // 只移除已确认不在该助理房间集合里的陈旧键。
-        const staleKeys: string[] = []
-        for (const key of aiclawGroupConfigs.keys()) {
-          if (!key.startsWith(`${aiclawUid}:`)) continue
-          const keyRoomId = key.slice(`${aiclawUid}:`.length)
-          if (!roomIds.includes(keyRoomId)) staleKeys.push(key)
+        let roomIds = groupStore.getRoomIdsByUid(String(aiclawUid))
+        if (roomIds.length === 0) {
+          // aichatoverview#504：成员缓存为空走服务端发现兜底（PRESENT 落卡，
+          // NOT_ACCESSIBLE 由提交逻辑精准移除）；本分支没有成员归属事实，
+          // 不逐出任何未知键（#484 先清全集的教训）。
+          const discovered = await discoverAiclawConfigRooms(guard)
+          if (!discovered) return false
+          roomIds = discovered
+        } else {
+          // #484：不再「先清全集」——读取失败时保留上次可信值（否则一次网络抖动就把整列表清空）。
+          // 只移除已确认不在该助理房间集合里的陈旧键。
+          const staleKeys: string[] = []
+          for (const key of aiclawGroupConfigs.keys()) {
+            if (!key.startsWith(`${aiclawUid}:`)) continue
+            const keyRoomId = key.slice(`${aiclawUid}:`.length)
+            if (!roomIds.includes(keyRoomId)) staleKeys.push(key)
+          }
+          staleKeys.forEach((k) => aiclawGroupConfigs.delete(k))
         }
-        staleKeys.forEach((k) => aiclawGroupConfigs.delete(k))
         for (const roomId of roomIds) {
           if (!aiclawConfigGuardCurrent(guard)) return false
           // 单个群配置获取失败不影响其他群，但需让调用方知道本次加载不完整

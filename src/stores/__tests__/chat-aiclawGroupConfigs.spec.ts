@@ -39,6 +39,7 @@ vi.mock('vue-router', () => ({
 }))
 
 const imRequestMock = vi.hoisted(() => vi.fn())
+const imRequestSilentMock = vi.hoisted(() => vi.fn())
 /**
  * #484：单房间配置读取改用 `aiclaw/group/config/current`，服务端返回
  * `{ outcome: 'PRESENT' | 'NOT_ACCESSIBLE', configured, config }`。
@@ -52,6 +53,7 @@ const asCurrentReadEnvelope = (raw: unknown): unknown => {
 }
 vi.mock('@/utils/ImRequestUtils', () => ({
   imRequest: (...args: unknown[]) => Promise.resolve(imRequestMock(...args)).then(asCurrentReadEnvelope),
+  imRequestSilent: (...args: unknown[]) => imRequestSilentMock(...args),
   markMsgRead: vi.fn().mockResolvedValue(undefined),
   getSessionDetail: vi.fn().mockResolvedValue({
     roomId: 'room-1',
@@ -87,6 +89,7 @@ vi.mock('@/stores/user', () => ({
 }))
 const groupStoreMocks = vi.hoisted(() => ({
   getRoomIdsByUid: vi.fn(),
+  groupDetails: [] as Array<{ roomId: string }>,
   addGroupDetail: vi.fn().mockResolvedValue(undefined),
   getGroupDetail: vi.fn().mockReturnValue(undefined),
   getUserInfo: vi.fn().mockReturnValue({ name: 'Alice', avatar: '' })
@@ -520,5 +523,135 @@ describe('chatStore 保存/刷新代次（#457）', () => {
     inFlight.resolve({ roomId: '1', rateLimitPerMinute: 7, dailyLimit: 70, respondToAi: true, mentionRequired: true })
     await expect(refresh).resolves.toBe(false)
     expect(chatStore.getAiclawGroupConfig(1001, '1')).toBeUndefined()
+  })
+})
+
+/**
+ * aichatoverview#504：成员缓存为空时的服务端发现兜底。
+ * 真机复现：新浏览器 Web lane 首次打开主人群设置页，尚未进过任何群房拉取成员，
+ * getRoomIdsByUid 为空 → 旧逻辑 0 卡并谎称「未加入任何群聊」，而同 token
+ * group/list 有 4 群、group/config/current PRESENT/approved。
+ * 契约：成员表为空必须走服务端发现（PRESENT 落卡，NOT_ACCESSIBLE 精准移除），
+ * 发现失败返回 false（不冒充空列表）；兜底分支不得逐出未知键。
+ */
+describe('chatStore.loadAiclawGroupConfigs 成员缓存为空的发现兜底（#504）', () => {
+  const presentConfig = (roomId: string) => ({
+    roomId,
+    rateLimitPerMinute: 10,
+    dailyLimit: 100,
+    respondToAi: true,
+    mentionRequired: false,
+    approved: true
+  })
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    imRequestMock.mockReset()
+    imRequestSilentMock.mockReset()
+    groupStoreMocks.getRoomIdsByUid.mockReset().mockReturnValue([])
+    groupStoreMocks.groupDetails = []
+    groupStoreMocks.addGroupDetail.mockReset().mockResolvedValue(undefined)
+    groupStoreMocks.getGroupDetail.mockReset().mockReturnValue(undefined)
+    sessionBinding.value = null
+  })
+
+  it('已同步群列表优先：成员表为空但 groupDetails 有 4 群 → 3 PRESENT 落卡 + 1 不可访问移除，不补请求', async () => {
+    groupStoreMocks.groupDetails = [{ roomId: 'g-1' }, { roomId: 'g-2' }, { roomId: 'g-3' }, { roomId: 'g-4' }]
+    imRequestMock
+      .mockResolvedValueOnce(presentConfig('g-1'))
+      .mockResolvedValueOnce(presentConfig('g-2'))
+      .mockResolvedValueOnce(presentConfig('g-3'))
+      .mockResolvedValueOnce({ outcome: 'NOT_ACCESSIBLE' })
+
+    const chatStore = useChatStore()
+    const ok = await chatStore.loadAiclawGroupConfigs(1001)
+
+    expect(ok).toBe(true)
+    // 已同步列表优先：不打 group/list 补拉
+    expect(imRequestSilentMock).not.toHaveBeenCalled()
+    // 逐房当前读各一次
+    expect(imRequestMock).toHaveBeenCalledTimes(4)
+    const rooms = chatStore
+      .getAiclawGroupConfigList(1001)
+      .map((c) => c.roomId)
+      .sort()
+    expect(rooms).toEqual(['g-1', 'g-2', 'g-3'])
+  })
+
+  it('未同步则静默补拉：groupDetails 为空 → group/list 候选逐房裁决，PRESENT 落卡', async () => {
+    const { ImUrlEnum } = await import('@/enums')
+    imRequestSilentMock.mockResolvedValue([{ roomId: 'g-1' }, { roomId: 'g-2' }])
+    imRequestMock.mockResolvedValueOnce(presentConfig('g-1')).mockResolvedValueOnce(presentConfig('g-2'))
+
+    const chatStore = useChatStore()
+    const ok = await chatStore.loadAiclawGroupConfigs(1001)
+
+    expect(ok).toBe(true)
+    expect(imRequestSilentMock).toHaveBeenCalledTimes(1)
+    expect(imRequestSilentMock.mock.calls[0][0]).toMatchObject({ url: ImUrlEnum.GROUP_LIST })
+    expect(chatStore.getAiclawGroupConfigList(1001).map((c) => c.roomId)).toEqual(['g-1', 'g-2'])
+  })
+
+  it('发现失败不是空列表：补拉失败返回 false 且不落卡（调用方不得渲染“未加入任何群聊”）', async () => {
+    imRequestSilentMock.mockResolvedValue(null)
+
+    const chatStore = useChatStore()
+    const ok = await chatStore.loadAiclawGroupConfigs(1001)
+
+    expect(ok).toBe(false)
+    expect(imRequestMock).not.toHaveBeenCalled()
+    expect(chatStore.getAiclawGroupConfigList(1001)).toEqual([])
+  })
+
+  it('兜底不逐出未知键且刷新一致：成员路径已缓存 g-9 → 兜底发现 g-1 后两卡并存，重载不变', async () => {
+    groupStoreMocks.getRoomIdsByUid.mockReturnValue(['g-9'])
+    imRequestMock.mockResolvedValueOnce(presentConfig('g-9'))
+    const chatStore = useChatStore()
+    await expect(chatStore.loadAiclawGroupConfigs(1001)).resolves.toBe(true)
+    expect(chatStore.getAiclawGroupConfigList(1001).map((c) => c.roomId)).toEqual(['g-9'])
+
+    // 成员缓存丢失（如新端/刷新后），兜底经已同步列表发现 g-1
+    groupStoreMocks.getRoomIdsByUid.mockReturnValue([])
+    groupStoreMocks.groupDetails = [{ roomId: 'g-1' }]
+    imRequestMock.mockReset()
+    imRequestMock.mockResolvedValueOnce(presentConfig('g-1'))
+    await expect(chatStore.loadAiclawGroupConfigs(1001)).resolves.toBe(true)
+
+    // g-9 未被逐出（兜底分支无成员归属事实），g-1 落卡
+    expect(
+      chatStore
+        .getAiclawGroupConfigList(1001)
+        .map((c) => c.roomId)
+        .sort()
+    ).toEqual(['g-1', 'g-9'])
+
+    // 刷新一致：同样输入得到同样列表
+    imRequestMock.mockReset()
+    imRequestMock.mockResolvedValueOnce(presentConfig('g-1'))
+    await expect(chatStore.loadAiclawGroupConfigs(1001)).resolves.toBe(true)
+    expect(
+      chatStore
+        .getAiclawGroupConfigList(1001)
+        .map((c) => c.roomId)
+        .sort()
+    ).toEqual(['g-1', 'g-9'])
+  })
+
+  it('成员路径保持权威逐出：成员表非空时陈旧键仍被移除，且不走服务端发现', async () => {
+    groupStoreMocks.getRoomIdsByUid.mockReturnValue(['g-9'])
+    imRequestMock.mockResolvedValueOnce(presentConfig('g-9'))
+    const chatStore = useChatStore()
+    await expect(chatStore.loadAiclawGroupConfigs(1001)).resolves.toBe(true)
+
+    groupStoreMocks.getRoomIdsByUid.mockReturnValue(['g-1'])
+    groupStoreMocks.groupDetails = [{ roomId: 'g-9' }, { roomId: 'g-1' }]
+    imRequestMock.mockReset()
+    imRequestMock.mockResolvedValueOnce(presentConfig('g-1'))
+    await expect(chatStore.loadAiclawGroupConfigs(1001)).resolves.toBe(true)
+
+    // 成员表确认 g-9 已不在该助理房间集合 → 逐出；服务端发现不触发
+    expect(chatStore.getAiclawGroupConfig(1001, 'g-9')).toBeUndefined()
+    expect(chatStore.getAiclawGroupConfigList(1001).map((c) => c.roomId)).toEqual(['g-1'])
+    expect(imRequestSilentMock).not.toHaveBeenCalled()
   })
 })
