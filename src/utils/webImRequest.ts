@@ -157,7 +157,10 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   aiclawThinkingDetail: { method: 'GET', path: 'im/aiclaw/thinking/{thinkingId}' },
   aiclawThinkingByTrigger: { method: 'POST', path: 'im/aiclaw/thinking/by-trigger' },
   aiclawCommands: { method: 'POST', path: 'im/aiclaw/commands' },
-  aiclawCommandResult: { method: 'GET', path: 'im/aiclaw/commands/{requestId}' }
+  aiclawCommandResult: { method: 'GET', path: 'im/aiclaw/commands/{requestId}' },
+  // aichatoverview#504：主人命令权限（默认规则查看、群覆盖、指定名单）
+  aiclawCommandPolicy: { method: 'GET', path: 'im/aiclaw/command/policy' },
+  aiclawCommandPolicyUpdate: { method: 'PUT', path: 'im/aiclaw/command/policy' }
 }
 
 // 与联调契约一致：Authorization 头直接使用 base64 值（无 "Basic " 前缀）

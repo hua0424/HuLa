@@ -880,6 +880,9 @@ export enum ImUrlEnum {
   AICLAW_THINKING_BY_TRIGGER = 'aiclawThinkingByTrigger',
   AICLAW_COMMANDS = 'aiclawCommands',
   AICLAW_COMMAND_RESULT = 'aiclawCommandResult',
+  /** aichatoverview#504：主人命令权限（默认规则查看、群覆盖、指定名单） */
+  AICLAW_COMMAND_POLICY = 'aiclawCommandPolicy',
+  AICLAW_COMMAND_POLICY_UPDATE = 'aiclawCommandPolicyUpdate',
 
   // 文件下载签名
   /** 文件下载签名（BL-003 sign-on-access：客户端传 msgId，服务端反查 roomId+objectKey 返回临时 URL） */

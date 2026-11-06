@@ -1,7 +1,13 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 const request = vi.hoisted(() => vi.fn())
 vi.mock('@/utils/ImRequestUtils', () => ({ imRequest: request }))
-import { postAgentCommand, getAgentCommand, type AgentCommandRequest } from '../agentCommands'
+import {
+  postAgentCommand,
+  getAgentCommand,
+  getCommandPolicy,
+  putCommandPolicy,
+  type AgentCommandRequest
+} from '../agentCommands'
 
 beforeEach(() => {
   request.mockReset()
@@ -56,4 +62,19 @@ it('propagates transport uncertainty without retrying', async () => {
     postAgentCommand({ requestId: 'id', roomId: 'r', aiclawUid: 'a', operation: 'discover' })
   ).rejects.toThrow('timeout')
   expect(request).toHaveBeenCalledTimes(1)
+})
+// aichatoverview#504：主人命令权限面
+it('reads default policy rows without a room filter', async () => {
+  request.mockResolvedValue({ defaults: [], rows: [], effective: {} })
+  await getCommandPolicy({ aiclawUid: 'a' })
+  expect(request).toHaveBeenCalledExactlyOnceWith(
+    { url: 'aiclawCommandPolicy', params: { aiclawUid: 'a' } },
+    { showError: false }
+  )
+})
+it('writes policy rows through the update endpoint once', async () => {
+  const body = { aiclawUid: 'a', roomId: 'g', items: [{ capabilityId: 'skill:x', state: 'closed' as const }] }
+  request.mockResolvedValue({})
+  await putCommandPolicy(body)
+  expect(request).toHaveBeenCalledExactlyOnceWith({ url: 'aiclawCommandPolicyUpdate', body }, { showError: false })
 })

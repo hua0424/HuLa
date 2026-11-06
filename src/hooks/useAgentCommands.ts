@@ -173,8 +173,13 @@ export function useAgentCommands(
         if (!consume(result)) return
       }
       return confirmed
-    } catch {
-      // Preserve the last verified receipt, not the transport failure's guess.
+    } catch (error) {
+      // Preserve the last verified receipt, not the transport failure's guess —
+      // except authoritative server denials, which the caller maps to explicit states.
+      // #504 P1-2：字面量 'command_policy_denied_*' 必须与服务端
+      // AiclawCommandPolicyService.DENIED_CLOSED/DENIED_APPROVAL 同一常量源（含后缀 :capabilityId），改动需两侧同步。
+      const denied = error instanceof Error ? error.message : String(error ?? '')
+      if (denied.includes('command_policy_denied_')) throw error
       return undefined
     } finally {
       if (current() && primary) status.value = receiptStatus(confirmed)
@@ -225,13 +230,21 @@ export function useAgentCommands(
         discovered = { ...current, version: result.catalog.version }
         status.value = blocked ? 'changed' : ''
       }
-    } catch {
-      if (generation === epoch) status.value = 'unknown'
+    } catch (error) {
+      // aichatoverview#504：服务端门控拒绝（菜单过期/权限变更）用明确状态，不冒充 unknown。
+      if (generation === epoch) {
+        const message = error instanceof Error ? error.message : String(error ?? '')
+        if (message.includes('command_policy_denied_approval')) status.value = 'needs_approval'
+        else if (message.includes('command_policy_denied_closed')) status.value = 'not_permitted'
+        else status.value = 'unknown'
+      }
     } finally {
       if (generation === epoch) busy.value = false
     }
   }
   const capabilities = computed(() => catalog.value?.capabilities.filter((c) => c.defaultVisibility === 'public') || [])
+  /** aichatoverview#504：服务端标注需主人审批的能力（closed 项已被服务端移除）。 */
+  const needsApproval = (capability: AgentCapability) => capability.permission === 'approval_required'
   const executable = (capability: AgentCapability) => {
     const names =
       capability.id === 'model.set'
@@ -377,8 +390,14 @@ export function useAgentCommands(
         generation,
         intent
       )
-    } catch {
-      if (generation === epoch) status.value = 'unknown'
+    } catch (error) {
+      // aichatoverview#504：服务端门控拒绝（菜单过期/权限变更）用明确状态，不冒充 unknown。
+      if (generation === epoch) {
+        const message = error instanceof Error ? error.message : String(error ?? '')
+        if (message.includes('command_policy_denied_approval')) status.value = 'needs_approval'
+        else if (message.includes('command_policy_denied_closed')) status.value = 'not_permitted'
+        else status.value = 'unknown'
+      }
     } finally {
       if (generation === epoch) busy.value = false
     }
@@ -402,6 +421,7 @@ export function useAgentCommands(
     busy,
     submitted,
     executable,
+    needsApproval,
     select,
     send,
     input,

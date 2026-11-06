@@ -731,6 +731,9 @@ pub enum ImUrl {
     AiclawThinkingByTrigger,
     AiclawCommands,
     AiclawCommandResult,
+    /// aichatoverview#504：主人命令权限（默认规则查看、群覆盖、指定名单）
+    AiclawCommandPolicy,
+    AiclawCommandPolicyUpdate,
 
     FileSignDownload,
 }
@@ -1079,6 +1082,8 @@ impl ImUrl {
             ImUrl::AiclawThinkingByTrigger => (http::Method::POST, "im/aiclaw/thinking/by-trigger"),
             ImUrl::AiclawCommands => (http::Method::POST, "im/aiclaw/commands"),
             ImUrl::AiclawCommandResult => (http::Method::GET, "im/aiclaw/commands/{requestId}"),
+            ImUrl::AiclawCommandPolicy => (http::Method::GET, "im/aiclaw/command/policy"),
+            ImUrl::AiclawCommandPolicyUpdate => (http::Method::PUT, "im/aiclaw/command/policy"),
 
             ImUrl::FileSignDownload => (http::Method::POST, "im/file/sign-download"),
         }
@@ -1386,6 +1391,8 @@ impl ImUrl {
             "aiclawThinkingByTrigger" => Ok(ImUrl::AiclawThinkingByTrigger),
             "aiclawCommands" => Ok(ImUrl::AiclawCommands),
             "aiclawCommandResult" => Ok(ImUrl::AiclawCommandResult),
+            "aiclawCommandPolicy" => Ok(ImUrl::AiclawCommandPolicy),
+            "aiclawCommandPolicyUpdate" => Ok(ImUrl::AiclawCommandPolicyUpdate),
 
             "fileSignDownload" => Ok(ImUrl::FileSignDownload),
 
@@ -1418,6 +1425,16 @@ mod command_route_tests {
                 "aiclawCommandResult",
                 http::Method::GET,
                 "im/aiclaw/commands/{requestId}",
+            ),
+            (
+                "aiclawCommandPolicy",
+                http::Method::GET,
+                "im/aiclaw/command/policy",
+            ),
+            (
+                "aiclawCommandPolicyUpdate",
+                http::Method::PUT,
+                "im/aiclaw/command/policy",
             ),
         ] {
             let route: ImUrl = name.parse().expect("command route must parse");
