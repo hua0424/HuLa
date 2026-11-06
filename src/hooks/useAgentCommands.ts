@@ -176,6 +176,8 @@ export function useAgentCommands(
     } catch (error) {
       // Preserve the last verified receipt, not the transport failure's guess —
       // except authoritative server denials, which the caller maps to explicit states.
+      // #504 P1-2：字面量 'command_policy_denied_*' 必须与服务端
+      // AiclawCommandPolicyService.DENIED_CLOSED/DENIED_APPROVAL 同一常量源（含后缀 :capabilityId），改动需两侧同步。
       const denied = error instanceof Error ? error.message : String(error ?? '')
       if (denied.includes('command_policy_denied_')) throw error
       return undefined
