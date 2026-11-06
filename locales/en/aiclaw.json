@@ -158,6 +158,31 @@
     "add_to_group_success": "Group invitation sent",
     "add_to_group_failed": "Failed to add to group"
   },
+  "command_policy": {
+    "title": "Command Permissions",
+    "scope_default": "Default rules",
+    "scope_group": "Group override",
+    "capability": "Capability",
+    "state": "State",
+    "state_open": "Allow",
+    "state_closed": "Closed",
+    "state_approval": "Owner approval required",
+    "mode": "List mode",
+    "mode_all": "All members",
+    "mode_list": "Named list",
+    "allowed_uids": "UIDs (comma-separated)",
+    "add_capability": "Capability id (e.g. skill:xxx)",
+    "add": "Add",
+    "save": "Save",
+    "save_success": "Command permissions saved",
+    "save_failed": "Save failed",
+    "load_failed": "Failed to load command permissions",
+    "default_badge": "Default",
+    "override_badge": "Override",
+    "approval_badge": "Approval required",
+    "offlist_hint": "Users off the list cannot invoke in this group; no fallback to defaults",
+    "version_conflict": "Modified by someone else; refresh and retry"
+  },
   "auto_reply_tag": "Auto-reply",
   "notice": {
     "group_approve": {

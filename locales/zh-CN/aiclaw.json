@@ -160,6 +160,31 @@
     "add_to_group_success": "已发送入群邀请",
     "add_to_group_failed": "添加到群失败"
   },
+  "command_policy": {
+    "title": "命令权限",
+    "scope_default": "默认规则",
+    "scope_group": "群覆盖",
+    "capability": "能力",
+    "state": "状态",
+    "state_open": "允许调用",
+    "state_closed": "不开放",
+    "state_approval": "需主人审批",
+    "mode": "名单模式",
+    "mode_all": "全体成员",
+    "mode_list": "指定名单",
+    "allowed_uids": "指定 uid（逗号分隔）",
+    "add_capability": "能力 id（如 skill:xxx）",
+    "add": "添加",
+    "save": "保存",
+    "save_success": "命令权限已保存",
+    "save_failed": "保存失败",
+    "load_failed": "加载命令权限失败",
+    "default_badge": "默认",
+    "override_badge": "覆盖",
+    "approval_badge": "需审批",
+    "offlist_hint": "名单外用户在该群内不可调用，不回落默认",
+    "version_conflict": "已被他人修改，请刷新后重试"
+  },
   "auto_reply_tag": "自动回复",
   "notice": {
     "group_approve": {

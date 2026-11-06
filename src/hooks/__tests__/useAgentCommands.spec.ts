@@ -558,3 +558,25 @@ it('discovers slash but invokes only after menu selection and ordinary Send', as
   await commands.send()
   expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
 })
+// aichatoverview#504：权限标注与门控拒绝映射
+it.each([
+  { permission: 'open' as const, expected: false },
+  { permission: 'approval_required' as const, expected: true },
+  { permission: undefined, expected: false }
+])('marks permission=$permission as needsApproval=$expected', async ({ permission, expected }) => {
+  const { commands } = setup()
+  expect(commands.needsApproval({ ...model, permission })).toBe(expected)
+})
+it.each([
+  { gate: 'command_policy_denied_closed', expected: 'not_permitted' },
+  { gate: 'command_policy_denied_approval', expected: 'needs_approval' }
+])('maps server gate $gate to explicit status $expected instead of unknown', async ({ gate, expected }) => {
+  const { editor, commands } = setup()
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  api.postAgentCommand.mockRejectedValueOnce(new Error(gate))
+  expect(await commands.send()).toBe(true)
+  expect(commands.status.value).toBe(expected)
+  expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(1)
+})

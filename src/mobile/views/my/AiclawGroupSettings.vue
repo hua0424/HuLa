@@ -8,6 +8,12 @@
 
     <template #container>
       <div class="flex flex-col overflow-auto h-full">
+        <!-- aichatoverview#504：默认命令权限规则 -->
+        <div
+          class="mx-16px mt-16px p-16px rounded-12px bg-white dark:bg-#1a1a1a"
+          data-testid="aiclaw-command-policy-default-block">
+          <AiclawCommandPolicyForm :aiclaw-uid="uid" />
+        </div>
         <template v-if="sortedGroupConfigList.length > 0">
           <div
             v-for="config in sortedGroupConfigList"
@@ -47,6 +53,12 @@
               :adapter-type="adapterType"
               :default-workspace-dir="buildDefaultWorkspaceDir(uid, config.account)"
               @save="handleSaveGroupConfig" />
+            <!-- aichatoverview#504：该群命令权限覆盖行 -->
+            <div
+              class="mt-12px pt-12px border-t border-solid border-#eee"
+              data-testid="aiclaw-command-policy-group-block">
+              <AiclawCommandPolicyForm :aiclaw-uid="uid" :room-id="config.roomId" />
+            </div>
           </div>
         </template>
         <div v-else-if="!loading" class="flex flex-col items-center justify-center flex-1 text-13px text-#999">
@@ -67,6 +79,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
+import AiclawCommandPolicyForm from '@/components/aiclaw/AiclawCommandPolicyForm.vue'
 import { buildDefaultWorkspaceDir, aiclawGroupConfigReflects, sortAiclawGroupConfigs } from '@/utils/aiclawGroupConfig'
 import { ImUrlEnum } from '@/enums'
 import { imRequest } from '@/utils/ImRequestUtils'

@@ -407,6 +407,13 @@
           </n-button>
         </div>
         <div class="flex-1 overflow-auto">
+          <!-- aichatoverview#504：默认命令权限规则 -->
+          <div
+            v-if="selectedItem"
+            class="border-b border-[--line-color] px-24px py-16px"
+            data-testid="aiclaw-command-policy-default-block">
+            <AiclawCommandPolicyForm :aiclaw-uid="String(selectedItem.uid)" />
+          </div>
           <template v-if="sortedGroupConfigList.length > 0">
             <div
               v-for="config in sortedGroupConfigList"
@@ -447,6 +454,14 @@
                 :adapter-type="selectedItem?.adapterType"
                 :default-workspace-dir="buildDefaultWorkspaceDir(selectedItem?.uid ?? '', config.account)"
                 @save="handleSaveGroupConfig" />
+              <!-- aichatoverview#504：该群命令权限覆盖行 -->
+              <div
+                class="mt-12px pt-12px border-t border-[--line-color]"
+                data-testid="aiclaw-command-policy-group-block">
+                <AiclawCommandPolicyForm
+                  :aiclaw-uid="String(selectedItem?.uid ?? '')"
+                  :room-id="String(config.roomId)" />
+              </div>
             </div>
           </template>
           <div
@@ -537,6 +552,7 @@ import AiclawEditProfileForm from '@/components/aiclaw/AiclawEditProfileForm.vue
 import AiclawTokenDialog from '@/components/aiclaw/AiclawTokenDialog.vue'
 import AiclawDeleteConfirmDialog from '@/components/aiclaw/AiclawDeleteConfirmDialog.vue'
 import AiclawGroupConfigForm from '@/components/aiclaw/AiclawGroupConfigForm.vue'
+import AiclawCommandPolicyForm from '@/components/aiclaw/AiclawCommandPolicyForm.vue'
 import AiclawAddToGroupModal from '@/components/aiclaw/AiclawAddToGroupModal.vue'
 import { ImUrlEnum, ChangeTypeEnum } from '@/enums'
 import { imRequest, imRequestSilent } from '@/utils/ImRequestUtils'
