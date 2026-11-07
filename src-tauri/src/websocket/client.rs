@@ -1173,6 +1173,16 @@ impl WebSocketClient {
                 let _ = events.emit_to_owner("ws-group-config-change", data);
             }
 
+            // aichatoverview#505：主人待审批 / 发起人审批终态
+            "commandApprovalRequest" => {
+                info!("AIclaw command approval request");
+                let _ = events.emit_to_owner("ws-command-approval-request", data);
+            }
+            "commandApprovalResult" => {
+                info!("AIclaw command approval result");
+                let _ = events.emit_to_owner("ws-command-approval-result", data);
+            }
+
             // 未知消息类型
             _ => {
                 warn!("Received unhandled message type: {}", message_type);

@@ -158,6 +158,9 @@ const URL_MAP: Record<string, { method: string; path: string }> = {
   aiclawThinkingByTrigger: { method: 'POST', path: 'im/aiclaw/thinking/by-trigger' },
   aiclawCommands: { method: 'POST', path: 'im/aiclaw/commands' },
   aiclawCommandResult: { method: 'GET', path: 'im/aiclaw/commands/{requestId}' },
+  aiclawCommandApprove: { method: 'POST', path: 'im/aiclaw/commands/{requestId}/approve' },
+  aiclawCommandReject: { method: 'POST', path: 'im/aiclaw/commands/{requestId}/reject' },
+  aiclawCommandApprovals: { method: 'GET', path: 'im/aiclaw/commands/approvals' },
   // aichatoverview#504：主人命令权限（默认规则查看、群覆盖、指定名单）
   aiclawCommandPolicy: { method: 'GET', path: 'im/aiclaw/command/policy' },
   aiclawCommandPolicyUpdate: { method: 'PUT', path: 'im/aiclaw/command/policy' }

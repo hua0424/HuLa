@@ -235,6 +235,12 @@ class WebSocketWebClient {
       case 'groupConfigChange':
         mitt.emit(WsResponseMessageType.AICLAW_GROUP_CONFIG_UPDATE, data)
         break
+      case 'commandApprovalRequest':
+        mitt.emit(WsResponseMessageType.COMMAND_APPROVAL_REQUEST, data)
+        break
+      case 'commandApprovalResult':
+        mitt.emit(WsResponseMessageType.COMMAND_APPROVAL_RESULT, data)
+        break
       default:
         console.debug('[WebWS] 未处理的消息类型:', type)
     }

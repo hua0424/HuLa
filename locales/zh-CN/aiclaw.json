@@ -185,6 +185,17 @@
     "offlist_hint": "名单外用户在该群内不可调用，不回落默认",
     "version_conflict": "已被他人修改，请刷新后重试"
   },
+  "command_approval": {
+    "title": "待审批命令",
+    "loading": "加载中…",
+    "load_failed": "加载待审批命令失败",
+    "empty": "暂无待审批命令",
+    "caller": "发起人",
+    "expires_in": "{seconds} 秒后过期",
+    "approve": "批准",
+    "reject": "拒绝",
+    "action_failed": "审批操作失败，请刷新后重试"
+  },
   "auto_reply_tag": "自动回复",
   "notice": {
     "group_approve": {

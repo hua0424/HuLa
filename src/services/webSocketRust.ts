@@ -657,6 +657,18 @@ export class RustWebSocketClient {
       })
     )
 
+    // aichatoverview#505：主人待审批 / 发起人审批终态
+    this.listenerController.add(
+      await listen('ws-command-approval-request', (event: any) => {
+        useMitt.emit(WsResponseMessageType.COMMAND_APPROVAL_REQUEST, event.payload)
+      })
+    )
+    this.listenerController.add(
+      await listen('ws-command-approval-result', (event: any) => {
+        useMitt.emit(WsResponseMessageType.COMMAND_APPROVAL_RESULT, event.payload)
+      })
+    )
+
     // 后台联系人列表同步完成事件（离线错过群解散推送的兜底刷新）
     this.listenerController.add(
       await listen('contacts-synced', (event: any) => {

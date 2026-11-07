@@ -113,6 +113,8 @@
         {{ t('aiclaw.command_policy.add') }}
       </n-button>
     </div>
+    <!-- aichatoverview#505：主人待审批命令（群覆盖页仅显示该群） -->
+    <AiclawCommandApprovalList :aiclaw-uid="aiclawUid" :room-id="roomId" />
   </div>
 </template>
 
@@ -120,6 +122,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getCommandPolicy, putCommandPolicy, type CommandPolicyRow } from '@/services/agentCommands'
+import AiclawCommandApprovalList from '@/components/aiclaw/AiclawCommandApprovalList.vue'
 
 type EditableRow = CommandPolicyRow & { allowedUidsText: string }
 

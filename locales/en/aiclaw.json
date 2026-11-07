@@ -183,6 +183,17 @@
     "offlist_hint": "Users off the list cannot invoke in this group; no fallback to defaults",
     "version_conflict": "Modified by someone else; refresh and retry"
   },
+  "command_approval": {
+    "title": "Pending command approvals",
+    "loading": "Loading…",
+    "load_failed": "Failed to load pending approvals",
+    "empty": "No pending approvals",
+    "caller": "Caller",
+    "expires_in": "Expires in {seconds}s",
+    "approve": "Approve",
+    "reject": "Reject",
+    "action_failed": "Approval action failed; refresh and retry"
+  },
   "auto_reply_tag": "Auto-reply",
   "notice": {
     "group_approve": {
