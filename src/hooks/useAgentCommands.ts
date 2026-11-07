@@ -220,6 +220,7 @@ export function useAgentCommands(
           lockCommandApproval(userId(), body.roomId, result.requestId, result.expiresAt)
         } else if (result.approvalStatus && result.approvalStatus !== 'pending') {
           unlockCommandApproval(userId(), body.roomId, result.requestId)
+          status.value = result.approvalStatus
         }
       }
       return true

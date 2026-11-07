@@ -626,6 +626,6 @@ it('unlocks through GET when the approval result WS event is lost', async () => 
   expect(commands.status.value).toBe('pending')
   await vi.advanceTimersByTimeAsync(2_000)
   expect(commands.approvalLocked.value).toBe(false)
-  expect(commands.status.value).toBe('unknown')
+  expect(commands.status.value).toBe('approved')
   expect(api.getAgentCommand).toHaveBeenCalledTimes(1)
 })
