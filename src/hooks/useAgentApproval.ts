@@ -41,19 +41,23 @@ export function commandApprovalLock(userId: string, roomId: string): CommandAppr
 }
 
 /**
- * 60s 审批 window 从服务端受理起算，客户端收到响应必然更晚，
- * 因此本地从收到响应起等满 60s 解锁不会早于服务端期限（只可能略晚）。
- * 真正的批准/拒绝/过期/失效会由 WS/GET 更早解锁。
+ * 60s 审批 window 从服务端受理起算。锁按服务端给出的 expiresAt 到期，
+ * 重复收到同一 pending 的 GET/WS 只刷新剩余时间，不能延长审批期限。
  */
 export function lockCommandApproval(userId: string, roomId: string, requestId: string, expiresAt: number) {
   if (!userId || !roomId || !requestId) return
   const key = lockKey(userId, roomId)
   const previous = timers.get(key)
   if (previous) clearTimeout(previous)
+  const delay = expiresAt - Date.now()
+  if (delay <= 0) {
+    release(key, requestId)
+    return
+  }
   locks.set(key, { requestId, userId, roomId, expiresAt })
   timers.set(
     key,
-    setTimeout(() => release(key, requestId), 60_000)
+    setTimeout(() => release(key, requestId), delay)
   )
 }
 

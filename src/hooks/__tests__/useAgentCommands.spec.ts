@@ -602,3 +602,30 @@ it('locks the sending member on pending approval without a second submission', a
   expect(await commands.send()).toBe(true)
   expect(api.postAgentCommand.mock.calls.length).toBe(posted)
 })
+// aichatoverview#505：WS 丢失时，pending 仍以 GET 的服务端终态解锁。
+it('unlocks through GET when the approval result WS event is lost', async () => {
+  vi.useFakeTimers()
+  const { editor, commands } = setup()
+  let invoke: Record<string, unknown> | undefined
+  api.postAgentCommand.mockImplementation(async (body) => {
+    if (body.operation === 'discover') return { ...body, status: 'completed', catalog }
+    invoke = body
+    return { ...body, status: 'pending', approvalStatus: 'pending', expiresAt: Date.now() + 60_000 }
+  })
+  api.getAgentCommand.mockImplementation(async () => ({
+    ...invoke,
+    status: 'accepted',
+    phase: 'dispatch',
+    approvalStatus: 'approved'
+  }))
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  await commands.send()
+  expect(commands.approvalLocked.value).toBe(true)
+  expect(commands.status.value).toBe('pending')
+  await vi.advanceTimersByTimeAsync(2_000)
+  expect(commands.approvalLocked.value).toBe(false)
+  expect(commands.status.value).toBe('unknown')
+  expect(api.getAgentCommand).toHaveBeenCalledTimes(1)
+})

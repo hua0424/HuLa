@@ -31,3 +31,13 @@ it('unlocks only the matching request and releases on deadline', () => {
   vi.advanceTimersByTime(60_000)
   expect(commandApprovalLock('11', 'room-a')).toBeUndefined()
 })
+
+it('does not extend the approval deadline when a pending lock is seen again', () => {
+  vi.useFakeTimers()
+  const expiresAt = Date.now() + 60_000
+  lockCommandApproval('11', 'room-a', 'request-1', expiresAt)
+  vi.advanceTimersByTime(50_000)
+  lockCommandApproval('11', 'room-a', 'request-1', expiresAt)
+  vi.advanceTimersByTime(10_000)
+  expect(commandApprovalLock('11', 'room-a')).toBeUndefined()
+})

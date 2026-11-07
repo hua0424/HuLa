@@ -45,6 +45,12 @@ export function useAgentCommands(
   let blocked = false
   let consumed: Intent | undefined
   let discovered: Intent | undefined
+  let approvalPollTimer: ReturnType<typeof setTimeout> | undefined
+  function stopApprovalPoll() {
+    if (approvalPollTimer === undefined) return
+    clearTimeout(approvalPollTimer)
+    approvalPollTimer = undefined
+  }
 
   function target(): Omit<Intent, 'version'> | undefined {
     const el = editor.value
@@ -98,6 +104,7 @@ export function useAgentCommands(
     status.value = blocked ? 'changed' : ''
   }
   function cancel() {
+    stopApprovalPoll()
     blocked = false
     consumed = undefined
     selected.value = undefined
@@ -151,6 +158,7 @@ export function useAgentCommands(
             : 'invalidated'
   })
   onScopeDispose(() => {
+    stopApprovalPoll()
     epoch++
   })
 
@@ -189,7 +197,7 @@ export function useAgentCommands(
         result.operation !== body.operation
       )
         return false
-      if (confirmed) {
+      if (confirmed && confirmed.status !== 'pending') {
         if (confirmed.generation && result.generation !== confirmed.generation) return false
         for (const key of ['sessionId', 'inputId', 'messageId', 'parentId', 'turnId'] as const) {
           if (confirmed.nativeRef?.[key] && result.nativeRef?.[key] !== confirmed.nativeRef[key]) return false
@@ -216,9 +224,31 @@ export function useAgentCommands(
       }
       return true
     }
+    const pollPending = () => {
+      stopApprovalPoll()
+      approvalPollTimer = setTimeout(async () => {
+        approvalPollTimer = undefined
+        if (generation !== epoch || !commandApprovalLock(userId(), body.roomId)) return
+        try {
+          const next = await getAgentCommand(body.requestId)
+          if (generation !== epoch || !consume(next)) return
+          if (
+            next?.status === 'pending' &&
+            next.approvalStatus === 'pending' &&
+            commandApprovalLock(userId(), body.roomId)
+          )
+            pollPending()
+        } catch {
+          // 网络失败不制造终态；锁到期或 WS/GET 成功前继续按服务端真相重试。
+          if (generation === epoch && commandApprovalLock(userId(), body.roomId)) pollPending()
+        }
+      }, 2_000)
+    }
     try {
       let result = options.reconcile ? await getAgentCommand(body.requestId) : await postAgentCommand(body)
       if (!consume(result)) return
+      // WS 可能丢失；pending 期间用有界 GET 兜底，批准/拒绝/过期后立即解锁。
+      if (primary && result?.status === 'pending' && result.approvalStatus === 'pending') pollPending()
       // Bounded GET only; native work continues after the UI stops waiting.
       for (let attempt = 0; !options.reconcile && result?.status === 'accepted' && attempt < 10; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 1000))
