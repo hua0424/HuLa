@@ -3,7 +3,13 @@ import { createI18n } from 'vue-i18n'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import aiclawZh from '~/locales/zh-CN/aiclaw.json'
 
-const api = vi.hoisted(() => ({ getCommandPolicy: vi.fn(), putCommandPolicy: vi.fn() }))
+const api = vi.hoisted(() => ({
+  getCommandPolicy: vi.fn(),
+  putCommandPolicy: vi.fn(),
+  getAgentCommandApprovals: vi.fn(),
+  approveAgentCommand: vi.fn(),
+  rejectAgentCommand: vi.fn()
+}))
 vi.mock('@/services/agentCommands', () => api)
 import AiclawCommandPolicyForm from '@/components/aiclaw/AiclawCommandPolicyForm.vue'
 import type { CommandPolicy } from '@/services/agentCommands'
@@ -45,6 +51,7 @@ beforeEach(() => {
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   api.getCommandPolicy.mockReset().mockResolvedValue(policy)
   api.putCommandPolicy.mockReset().mockResolvedValue({})
+  api.getAgentCommandApprovals.mockReset().mockResolvedValue([])
   message.success.mockReset()
   message.error.mockReset()
   Object.defineProperty(window, '$message', { value: message, configurable: true, writable: true })

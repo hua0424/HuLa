@@ -98,6 +98,10 @@ export enum WsResponseMessageType {
   THINKING_END = 'thinkingEnd',
   /** AI 助理群聊配置变更通知 */
   AICLAW_GROUP_CONFIG_UPDATE = 'groupConfigChange',
+  /** aichatoverview#505：主人收到待审批命令 */
+  COMMAND_APPROVAL_REQUEST = 'commandApprovalRequest',
+  /** aichatoverview#505：发起人收到审批终态（仅用于立即解锁当前房间输入框） */
+  COMMAND_APPROVAL_RESULT = 'commandApprovalResult',
   /** REQ-016 #194：资料变更通知（改名/简介/头像 profile；好友备注 remark） */
   USER_INFO_CHANGE = 'userInfoChange',
   /**
@@ -395,4 +399,17 @@ export type AiclawGroupConfigUpdatePayload = {
   roomId: number
   /** 完整配置对象（前端直接替换本地缓存） */
   config: AiclawGroupConfig
+}
+
+/** aichatoverview#505：主人审批 WS 事件（请求与终态共用）。 */
+export type CommandApprovalPayload = {
+  requestId: string
+  roomId: number | string
+  aiclawUid: number | string
+  capabilityId?: string
+  callerUid: string
+  ownerUid?: string | null
+  approvalStatus: 'pending' | 'approved' | 'rejected' | 'expired' | 'invalidated'
+  expiresAt?: number
+  error?: string
 }

@@ -76,6 +76,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
   const groupStore = useGroupStore()
   const chatStore = useChatStore()
   const globalStore = useGlobalStore()
+  const { triggerInputEvent, insertNode, getMessageContentType, getEditorRange, imgPaste, reply, userUid } = useCommon()
   const agentCommands = useAgentCommands(
     messageInputDom,
     () => ({
@@ -83,10 +84,10 @@ export const useMsgInput = (messageInputDom: Ref) => {
       aiclawUid: String(globalStore.currentSession?.detailId || ''),
       group: chatStore.isGroup
     }),
-    isAiclaw
+    isAiclaw,
+    () => String(userUid.value || '')
   )
   const { getCursorSelectionRange, updateSelectionRange, focusOn } = useCursorManager()
-  const { triggerInputEvent, insertNode, getMessageContentType, getEditorRange, imgPaste, reply, userUid } = useCommon()
 
   const createRafProgressUpdater = (tempMsgId: string) => {
     let scheduled = false
@@ -113,6 +114,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
   const msgInput = ref('')
   /** 发送按钮是否禁用 */
   const disabledSend = computed(() => {
+    if (agentCommands.approvalLocked.value) return true
     const plainText = stripHtml(msgInput.value)
     return (
       plainText.length === 0 ||
@@ -668,7 +670,8 @@ export const useMsgInput = (messageInputDom: Ref) => {
     if (disabledSend.value) {
       e.preventDefault()
       e.stopPropagation()
-      resetInput()
+      // 待审批不是空输入：拦住发送，但保留用户正在写的内容。
+      if (!agentCommands.approvalLocked.value) resetInput()
       return
     }
 

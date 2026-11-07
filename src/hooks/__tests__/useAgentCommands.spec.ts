@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 const api = vi.hoisted(() => ({ postAgentCommand: vi.fn(), getAgentCommand: vi.fn() }))
 vi.mock('@/services/agentCommands', () => api)
 import { useAgentCommands } from '../useAgentCommands'
+import { clearCommandApprovalLocks } from '../useAgentApproval'
 
 const model = {
   id: 'model.list',
@@ -32,7 +33,7 @@ const setModel = {
 }
 const catalog = { version: 'v1', framework: 'opencode', runtimeVersion: '1', capabilities: [model] }
 const scopes: ReturnType<typeof effectScope>[] = []
-function setup(group = false) {
+function setup(group = false, userId = '11') {
   const editor = ref(document.createElement('div'))
   const session = ref({ roomId: 'r1', aiclawUid: group ? '' : 'agent', group })
   const scope = effectScope()
@@ -41,7 +42,8 @@ function setup(group = false) {
     useAgentCommands(
       editor,
       () => session.value,
-      (uid) => uid === 'agent'
+      (uid) => uid === 'agent',
+      () => userId
     )
   )!
   api.postAgentCommand.mockImplementation(async (req) => ({
@@ -53,6 +55,7 @@ function setup(group = false) {
 }
 afterEach(() => {
   scopes.splice(0).forEach((s) => s.stop())
+  clearCommandApprovalLocks()
   vi.clearAllMocks()
   vi.useRealTimers()
 })
@@ -579,4 +582,23 @@ it.each([
   expect(await commands.send()).toBe(true)
   expect(commands.status.value).toBe(expected)
   expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(1)
+})
+// aichatoverview#505：pending 只锁发起人当前房间，且第二次 Send 不再发 POST。
+it('locks the sending member on pending approval without a second submission', async () => {
+  const { editor, commands } = setup()
+  api.postAgentCommand.mockImplementation(async (body) => ({
+    ...body,
+    status: body.operation === 'discover' ? 'completed' : 'pending',
+    catalog: body.operation === 'discover' ? catalog : undefined,
+    ...(body.operation === 'invoke' ? { approvalStatus: 'pending', expiresAt: Date.now() + 60_000 } : undefined)
+  }))
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  expect(await commands.send()).toBe(true)
+  expect(commands.approvalLocked.value).toBe(true)
+  expect(commands.status.value).toBe('pending')
+  const posted = api.postAgentCommand.mock.calls.length
+  expect(await commands.send()).toBe(true)
+  expect(api.postAgentCommand.mock.calls.length).toBe(posted)
 })

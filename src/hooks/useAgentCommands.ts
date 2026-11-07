@@ -9,6 +9,9 @@ import {
   type AgentModel,
   type ModelPage
 } from '@/services/agentCommands'
+import { commandApprovalLock, lockCommandApproval, unlockCommandApproval } from '@/hooks/useAgentApproval'
+import { useMitt } from '@/hooks/useMitt'
+import { WsResponseMessageType, type CommandApprovalPayload } from '@/services/wsType'
 
 type Target = { roomId: string; aiclawUid: string; group: boolean }
 type Intent = { html: string; roomId: string; aiclawUid: string; mention?: Element; version: string }
@@ -17,7 +20,8 @@ type Intent = { html: string; roomId: string; aiclawUid: string; mention?: Eleme
 export function useAgentCommands(
   editor: Ref<HTMLElement | undefined>,
   session: () => Target,
-  isAgent: (uid: string) => boolean
+  isAgent: (uid: string) => boolean,
+  userId: () => string = () => ''
 ) {
   const mentions = new WeakMap<Element, string>()
   const catalog = shallowRef<AgentCatalog>()
@@ -100,7 +104,52 @@ export function useAgentCommands(
     invalidate()
     requestId.value = ''
   }
-  watch([() => session().roomId, () => session().aiclawUid, () => session().group], cancel, { flush: 'sync' })
+  const approvalLocked = computed(() => !!commandApprovalLock(userId(), session().roomId))
+  const approvalExpiresAt = computed(() => commandApprovalLock(userId(), session().roomId)?.expiresAt)
+  function restoreApprovalLock() {
+    const lock = commandApprovalLock(userId(), session().roomId)
+    if (!lock) return
+    requestId.value = lock.requestId
+    status.value = 'pending'
+  }
+  watch(
+    [() => session().roomId, () => session().aiclawUid, () => session().group],
+    () => {
+      cancel()
+      restoreApprovalLock()
+    },
+    { flush: 'sync' }
+  )
+  restoreApprovalLock()
+  useMitt.on(WsResponseMessageType.COMMAND_APPROVAL_RESULT, (data: CommandApprovalPayload) => {
+    if (!data?.requestId) return
+    const uid = userId()
+    if (!uid || (data.callerUid && String(data.callerUid) !== uid)) return
+    const roomId = String(data.roomId ?? '')
+    // 只解锁该用户该房间对应的申请；旧事件/切房间/换账号不会锁住别处。
+    unlockCommandApproval(uid, roomId, data.requestId)
+    if (data.requestId !== requestId.value || roomId !== session().roomId) return
+    if (receipt.value) {
+      receipt.value =
+        data.approvalStatus === 'approved'
+          ? { ...receipt.value, approvalStatus: 'approved', status: 'accepted', phase: 'dispatch', error: undefined }
+          : {
+              ...receipt.value,
+              approvalStatus: data.approvalStatus,
+              status: 'noop',
+              phase: 'approval',
+              error: data.error || `approval_${data.approvalStatus}`
+            }
+    }
+    status.value =
+      data.approvalStatus === 'approved'
+        ? 'approved'
+        : data.approvalStatus === 'rejected'
+          ? 'rejected'
+          : data.approvalStatus === 'expired'
+            ? 'expired'
+            : 'invalidated'
+  })
   onScopeDispose(() => {
     epoch++
   })
@@ -159,6 +208,11 @@ export function useAgentCommands(
       if (primary) {
         receipt.value = result
         status.value = receiptStatus(result)
+        if (result.status === 'pending' && result.approvalStatus === 'pending' && result.expiresAt) {
+          lockCommandApproval(userId(), body.roomId, result.requestId, result.expiresAt)
+        } else if (result.approvalStatus && result.approvalStatus !== 'pending') {
+          unlockCommandApproval(userId(), body.roomId, result.requestId)
+        }
       }
       return true
     }
@@ -336,6 +390,11 @@ export function useAgentCommands(
     if (!consumed && models.value?.items.includes(model) && !modelsBusy.value) selectedModel.value = model
   }
   async function send(): Promise<boolean> {
+    // 真实发送入口也必须被锁；不能只把按钮画成 disabled。
+    if (approvalLocked.value) {
+      status.value = 'pending'
+      return true
+    }
     if (consumed && consumed.html !== editor.value?.innerHTML) invalidate()
     if (consumed || blocked) {
       if (blocked) status.value = 'changed'
@@ -417,6 +476,8 @@ export function useAgentCommands(
     status,
     requestId,
     receipt,
+    approvalLocked,
+    approvalExpiresAt,
     reconcile,
     busy,
     submitted,

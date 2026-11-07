@@ -128,7 +128,8 @@
       <div v-if="agentCommands.status.value" role="status" aria-live="polite" data-testid="agent-command-status">
         {{ t(`editor.commands.${agentCommands.status.value}`) }}
       </div>
-      <small v-if="agentCommands.requestId.value && ['accepted', 'unknown'].includes(agentCommands.status.value)">
+      <small
+        v-if="agentCommands.requestId.value && ['pending', 'accepted', 'unknown'].includes(agentCommands.status.value)">
         {{ t('editor.commands.request_id') }}: {{ agentCommands.requestId.value }}
       </small>
       <small v-if="agentCommands.receipt.value?.error" class="block break-words">

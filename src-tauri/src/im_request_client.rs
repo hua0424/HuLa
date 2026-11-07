@@ -731,6 +731,10 @@ pub enum ImUrl {
     AiclawThinkingByTrigger,
     AiclawCommands,
     AiclawCommandResult,
+    /// aichatoverview#505：主人审批（空 body，仅冻结申请的所有者）
+    AiclawCommandApprove,
+    AiclawCommandReject,
+    AiclawCommandApprovals,
     /// aichatoverview#504：主人命令权限（默认规则查看、群覆盖、指定名单）
     AiclawCommandPolicy,
     AiclawCommandPolicyUpdate,
@@ -1082,6 +1086,13 @@ impl ImUrl {
             ImUrl::AiclawThinkingByTrigger => (http::Method::POST, "im/aiclaw/thinking/by-trigger"),
             ImUrl::AiclawCommands => (http::Method::POST, "im/aiclaw/commands"),
             ImUrl::AiclawCommandResult => (http::Method::GET, "im/aiclaw/commands/{requestId}"),
+            ImUrl::AiclawCommandApprove => {
+                (http::Method::POST, "im/aiclaw/commands/{requestId}/approve")
+            }
+            ImUrl::AiclawCommandReject => {
+                (http::Method::POST, "im/aiclaw/commands/{requestId}/reject")
+            }
+            ImUrl::AiclawCommandApprovals => (http::Method::GET, "im/aiclaw/commands/approvals"),
             ImUrl::AiclawCommandPolicy => (http::Method::GET, "im/aiclaw/command/policy"),
             ImUrl::AiclawCommandPolicyUpdate => (http::Method::PUT, "im/aiclaw/command/policy"),
 
@@ -1391,6 +1402,9 @@ impl ImUrl {
             "aiclawThinkingByTrigger" => Ok(ImUrl::AiclawThinkingByTrigger),
             "aiclawCommands" => Ok(ImUrl::AiclawCommands),
             "aiclawCommandResult" => Ok(ImUrl::AiclawCommandResult),
+            "aiclawCommandApprove" => Ok(ImUrl::AiclawCommandApprove),
+            "aiclawCommandReject" => Ok(ImUrl::AiclawCommandReject),
+            "aiclawCommandApprovals" => Ok(ImUrl::AiclawCommandApprovals),
             "aiclawCommandPolicy" => Ok(ImUrl::AiclawCommandPolicy),
             "aiclawCommandPolicyUpdate" => Ok(ImUrl::AiclawCommandPolicyUpdate),
 
@@ -1425,6 +1439,21 @@ mod command_route_tests {
                 "aiclawCommandResult",
                 http::Method::GET,
                 "im/aiclaw/commands/{requestId}",
+            ),
+            (
+                "aiclawCommandApprove",
+                http::Method::POST,
+                "im/aiclaw/commands/{requestId}/approve",
+            ),
+            (
+                "aiclawCommandReject",
+                http::Method::POST,
+                "im/aiclaw/commands/{requestId}/reject",
+            ),
+            (
+                "aiclawCommandApprovals",
+                http::Method::GET,
+                "im/aiclaw/commands/approvals",
             ),
             (
                 "aiclawCommandPolicy",

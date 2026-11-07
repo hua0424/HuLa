@@ -34,9 +34,12 @@ export type AgentCommandRequest = {
   parameters?: { arguments?: string; providerId?: string; modelId?: string; query?: string; offset?: number }
   catalogVersion?: string
 }
+export type AgentCommandApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'invalidated'
 export type AgentCommandResult = Pick<AgentCommandRequest, 'requestId' | 'roomId' | 'aiclawUid' | 'operation'> & {
-  status: 'accepted' | 'completed' | 'failed' | 'noop' | 'unsupported' | 'unknown' | 'offline'
-  phase?: 'dispatch' | 'accepted' | 'outcome'
+  status: 'pending' | 'accepted' | 'completed' | 'failed' | 'noop' | 'unsupported' | 'unknown' | 'offline'
+  approvalStatus?: AgentCommandApprovalStatus
+  expiresAt?: number
+  phase?: 'dispatch' | 'accepted' | 'outcome' | 'approval'
   generation?: string
   nativeRef?: { sessionId: string; inputId?: string; messageId?: string; parentId?: string; turnId?: string }
   effect?:
@@ -55,6 +58,23 @@ export const postAgentCommand = (body: AgentCommandRequest) =>
   imRequest<AgentCommandResult>({ url: ImUrlEnum.AICLAW_COMMANDS, body }, { showError: false })
 export const getAgentCommand = (requestId: string) =>
   imRequest<AgentCommandResult>({ url: ImUrlEnum.AICLAW_COMMAND_RESULT, params: { requestId } }, { showError: false })
+
+/** aichatoverview#505：主人待审批列表（服务端只返回当前认证主人的申请）。 */
+export type AgentCommandApproval = {
+  requestId: string
+  roomId: string
+  aiclawUid: string
+  capabilityId?: string
+  parameters?: AgentCommandRequest['parameters']
+  callerUid: string
+  expiresAt: number
+}
+export const getAgentCommandApprovals = () =>
+  imRequest<AgentCommandApproval[]>({ url: ImUrlEnum.AICLAW_COMMAND_APPROVALS }, { showError: false })
+export const approveAgentCommand = (requestId: string) =>
+  imRequest<AgentCommandResult>({ url: ImUrlEnum.AICLAW_COMMAND_APPROVE, params: { requestId } }, { showError: false })
+export const rejectAgentCommand = (requestId: string) =>
+  imRequest<AgentCommandResult>({ url: ImUrlEnum.AICLAW_COMMAND_REJECT, params: { requestId } }, { showError: false })
 
 /** aichatoverview#504：主人命令权限行（默认规则行 roomId=0，群覆盖行 roomId>0）。 */
 export type CommandPolicyRow = {

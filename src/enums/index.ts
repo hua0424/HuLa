@@ -880,6 +880,10 @@ export enum ImUrlEnum {
   AICLAW_THINKING_BY_TRIGGER = 'aiclawThinkingByTrigger',
   AICLAW_COMMANDS = 'aiclawCommands',
   AICLAW_COMMAND_RESULT = 'aiclawCommandResult',
+  /** aichatoverview#505：主人审批（空 body，仅冻结申请的所有者） */
+  AICLAW_COMMAND_APPROVE = 'aiclawCommandApprove',
+  AICLAW_COMMAND_REJECT = 'aiclawCommandReject',
+  AICLAW_COMMAND_APPROVALS = 'aiclawCommandApprovals',
   /** aichatoverview#504：主人命令权限（默认规则查看、群覆盖、指定名单） */
   AICLAW_COMMAND_POLICY = 'aiclawCommandPolicy',
   AICLAW_COMMAND_POLICY_UPDATE = 'aiclawCommandPolicyUpdate',

@@ -2,10 +2,13 @@ import { beforeEach, expect, it, vi } from 'vitest'
 const request = vi.hoisted(() => vi.fn())
 vi.mock('@/utils/ImRequestUtils', () => ({ imRequest: request }))
 import {
-  postAgentCommand,
+  approveAgentCommand,
   getAgentCommand,
+  getAgentCommandApprovals,
   getCommandPolicy,
+  postAgentCommand,
   putCommandPolicy,
+  rejectAgentCommand,
   type AgentCommandRequest
 } from '../agentCommands'
 
@@ -77,4 +80,21 @@ it('writes policy rows through the update endpoint once', async () => {
   request.mockResolvedValue({})
   await putCommandPolicy(body)
   expect(request).toHaveBeenCalledExactlyOnceWith({ url: 'aiclawCommandPolicyUpdate', body }, { showError: false })
+})
+// aichatoverview#505：主人审批入口不暴露未鉴权通用命令路径
+it('lists owner pending approvals and approves or rejects by correlated request id', async () => {
+  request.mockResolvedValue([])
+  expect(await getAgentCommandApprovals()).toEqual([])
+  expect(request).toHaveBeenLastCalledWith({ url: 'aiclawCommandApprovals' }, { showError: false })
+  request.mockResolvedValue({ requestId: 'r', status: 'accepted' })
+  await approveAgentCommand('r')
+  expect(request).toHaveBeenLastCalledWith(
+    { url: 'aiclawCommandApprove', params: { requestId: 'r' } },
+    { showError: false }
+  )
+  await rejectAgentCommand('r')
+  expect(request).toHaveBeenLastCalledWith(
+    { url: 'aiclawCommandReject', params: { requestId: 'r' } },
+    { showError: false }
+  )
 })
