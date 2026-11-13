@@ -129,14 +129,17 @@
         {{ t(`editor.commands.${agentCommands.status.value}`) }}
       </div>
       <small
-        v-if="agentCommands.requestId.value && ['pending', 'accepted', 'unknown'].includes(agentCommands.status.value)">
+        v-if="
+          agentCommands.requestId.value &&
+          ['pending', 'approved', 'accepted', 'unknown'].includes(agentCommands.status.value)
+        ">
         {{ t('editor.commands.request_id') }}: {{ agentCommands.requestId.value }}
       </small>
       <small v-if="agentCommands.receipt.value?.error" class="block break-words">
         {{ agentCommands.receipt.value.error }}
       </small>
       <button
-        v-if="agentCommands.requestId.value && ['accepted', 'unknown'].includes(agentCommands.status.value)"
+        v-if="agentCommands.requestId.value && ['approved', 'accepted', 'unknown'].includes(agentCommands.status.value)"
         type="button"
         data-testid="agent-command-reconcile"
         :aria-label="t('editor.commands.reconcile')"
