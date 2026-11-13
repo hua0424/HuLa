@@ -685,3 +685,77 @@ it.each(['accepted', 'completed', 'failed', 'noop', 'unknown'])(
     expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(1)
   }
 )
+
+it.each(['pending', 'dispatch', 'recovery-error'])(
+  'preserves shared execution evidence across an overlapping %s GET',
+  async (late) => {
+    vi.useFakeTimers()
+    const { editor, commands } = setup()
+    let invoke: Record<string, unknown> | undefined
+    api.postAgentCommand.mockImplementation(async (body) => {
+      if (body.operation === 'discover') return { ...body, status: 'completed', catalog }
+      invoke = body
+      return { ...body, status: 'pending', approvalStatus: 'pending', expiresAt: Date.now() + 60_000 }
+    })
+    let resolvePoll!: (value: unknown) => void
+    let resolveRecovery!: (value: unknown) => void
+    let rejectRecovery!: (reason: Error) => void
+    api.getAgentCommand.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePoll = resolve
+        })
+    )
+    api.getAgentCommand.mockImplementationOnce(
+      () =>
+        new Promise((resolve, reject) => {
+          resolveRecovery = resolve
+          rejectRecovery = reject
+        })
+    )
+    editor.value.textContent = '/'
+    await commands.input()
+    commands.select(commands.capabilities.value[0])
+    await commands.send()
+    vi.advanceTimersByTime(2_000)
+    expect(api.getAgentCommand).toHaveBeenCalledTimes(1)
+    useMitt.emit(WsResponseMessageType.COMMAND_APPROVAL_RESULT, {
+      ...invoke,
+      callerUid: '11',
+      approvalStatus: 'approved'
+    })
+    expect(commands.approvalLocked.value).toBe(false)
+    const recovering = commands.reconcile()
+    expect(api.getAgentCommand).toHaveBeenCalledTimes(2)
+    const completed = {
+      ...invoke,
+      status: 'completed',
+      phase: 'outcome',
+      approvalStatus: 'approved',
+      receiptRevision: 1
+    }
+    if (late === 'recovery-error') {
+      resolvePoll(completed)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(commands.status.value).toBe('completed')
+      rejectRecovery(new Error('lost recovery response'))
+      await recovering
+    } else {
+      resolveRecovery(completed)
+      await recovering
+      resolvePoll({
+        ...invoke,
+        status: late === 'pending' ? 'pending' : 'accepted',
+        phase: late === 'pending' ? 'approval' : 'dispatch',
+        approvalStatus: late === 'pending' ? 'pending' : 'approved',
+        expiresAt: Date.now() + 60_000
+      })
+      await vi.advanceTimersByTimeAsync(0)
+    }
+    expect(commands.status.value).toBe('completed')
+    expect(commands.receipt.value).toMatchObject(completed)
+    expect(commands.approvalLocked.value).toBe(false)
+    expect(api.getAgentCommand).toHaveBeenCalledTimes(2)
+    expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(1)
+  }
+)

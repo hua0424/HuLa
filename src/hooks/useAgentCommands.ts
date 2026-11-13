@@ -207,7 +207,10 @@ export function useAgentCommands(
         result.operation !== body.operation
       )
         return false
+      // Concurrent GETs and approval WS events share this request's latest evidence.
+      if (primary && receipt.value?.requestId === body.requestId) confirmed = receipt.value
       if (confirmed && confirmed.status !== 'pending') {
+        if (result.status === 'pending' || result.approvalStatus === 'pending') return false
         if (confirmed.generation && result.generation !== confirmed.generation) return false
         for (const key of ['sessionId', 'inputId', 'messageId', 'parentId', 'turnId'] as const) {
           if (confirmed.nativeRef?.[key] && result.nativeRef?.[key] !== confirmed.nativeRef[key]) return false
@@ -276,7 +279,7 @@ export function useAgentCommands(
       if (denied.includes('command_policy_denied_')) throw error
       return undefined
     } finally {
-      if (current() && primary) status.value = receiptStatus(confirmed)
+      if (current() && primary && requestId.value === body.requestId) status.value = receiptStatus(receipt.value)
     }
   }
 
