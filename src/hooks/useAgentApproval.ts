@@ -1,4 +1,7 @@
 import { reactive } from 'vue'
+import type { AgentCommandRequest, AgentCommandResult } from '@/services/agentCommands'
+import { canWriteScopedSnapshot, sameSession, sessionBinding, type SessionIdentity } from '@/services/sessionBinding'
+import { homeWindowOnlyStorage } from '@/stores/persistHomeWindowOnly'
 
 /**
  * aichatoverview#505：按真实用户 + 房间保存“等待主人审批”的输入框锁。
@@ -17,7 +20,117 @@ export type CommandApprovalLock = {
 const locks = reactive(new Map<string, CommandApprovalLock>())
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
 
-const lockKey = (userId: string, roomId: string) => `${userId}:${roomId}`
+const lockKey = (userId: string, roomId: string) => {
+  const binding = sessionBinding.value
+  return JSON.stringify([binding?.backendKey, binding?.uid, binding?.sessionEpoch, userId, roomId])
+}
+
+/** One latest submitted invocation per identity/room, not an execution queue. No payload or grant is stored. */
+export type CommandRecovery = {
+  binding: SessionIdentity
+  group: boolean
+  observed: boolean
+  receipt: Pick<
+    AgentCommandResult,
+    | 'requestId'
+    | 'roomId'
+    | 'aiclawUid'
+    | 'operation'
+    | 'status'
+    | 'approvalStatus'
+    | 'expiresAt'
+    | 'phase'
+    | 'generation'
+    | 'nativeRef'
+    | 'receiptRevision'
+  >
+}
+const recoveryKey = (binding: SessionIdentity, roomId: string) =>
+  `agent-command-recovery:${JSON.stringify([binding.backendKey, binding.uid, binding.sessionEpoch, roomId])}`
+
+function recoveryReceipt(result: AgentCommandResult): CommandRecovery['receipt'] {
+  const nativeRef: AgentCommandResult['nativeRef'] =
+    typeof result.nativeRef?.sessionId === 'string' ? { sessionId: result.nativeRef.sessionId } : undefined
+  for (const key of ['inputId', 'messageId', 'parentId', 'turnId'] as const) {
+    if (nativeRef && typeof result.nativeRef?.[key] === 'string') nativeRef[key] = result.nativeRef[key]
+  }
+  return {
+    requestId: result.requestId,
+    roomId: result.roomId,
+    aiclawUid: result.aiclawUid,
+    operation: result.operation,
+    status: result.status,
+    approvalStatus: result.approvalStatus,
+    expiresAt: result.expiresAt,
+    phase: result.phase,
+    generation: result.generation,
+    nativeRef,
+    receiptRevision: result.receiptRevision
+  }
+}
+
+export function saveCommandRecovery(
+  binding: SessionIdentity | null,
+  userId: string,
+  group: boolean,
+  body: AgentCommandRequest,
+  result?: AgentCommandResult
+) {
+  if (
+    !binding ||
+    binding.uid !== userId ||
+    !sameSession(binding, sessionBinding.value) ||
+    !canWriteScopedSnapshot() ||
+    body.operation !== 'invoke'
+  )
+    return
+  const receipt = recoveryReceipt(result ?? { ...body, status: 'unknown' })
+  try {
+    homeWindowOnlyStorage().setItem(
+      recoveryKey(binding, body.roomId),
+      JSON.stringify({ binding, group, observed: !!result, receipt })
+    )
+  } catch {
+    // Storage can be disabled/full; mounted GET recovery and server execution remain independent.
+  }
+}
+
+export function commandRecovery(userId: string, roomId: string): CommandRecovery | undefined {
+  const binding = sessionBinding.value
+  if (!binding || binding.uid !== userId || !roomId) return
+  try {
+    const saved: Partial<CommandRecovery> | null = JSON.parse(
+      homeWindowOnlyStorage().getItem(recoveryKey(binding, roomId)) ?? 'null'
+    )
+    const result = saved?.receipt
+    if (
+      !saved?.binding ||
+      !sameSession(saved.binding, binding) ||
+      typeof saved.group !== 'boolean' ||
+      typeof saved.observed !== 'boolean' ||
+      !result ||
+      typeof result.requestId !== 'string' ||
+      !result.requestId ||
+      result.roomId !== roomId ||
+      typeof result.aiclawUid !== 'string' ||
+      !result.aiclawUid ||
+      result.operation !== 'invoke' ||
+      !['pending', 'accepted', 'completed', 'failed', 'noop', 'unsupported', 'unknown', 'offline'].includes(
+        result.status
+      ) ||
+      (result.approvalStatus !== undefined &&
+        !['pending', 'approved', 'rejected', 'expired', 'invalidated'].includes(result.approvalStatus)) ||
+      (result.phase !== undefined && !['dispatch', 'accepted', 'outcome', 'approval'].includes(result.phase)) ||
+      (result.expiresAt !== undefined && !Number.isFinite(result.expiresAt)) ||
+      (result.generation !== undefined && typeof result.generation !== 'string') ||
+      (result.receiptRevision !== undefined && !Number.isSafeInteger(result.receiptRevision))
+    )
+      return
+    return { binding, group: saved.group, observed: saved.observed, receipt: recoveryReceipt(result) }
+  } catch {
+    return undefined
+  }
+}
 
 function release(key: string, requestId?: string) {
   const existing = locks.get(key)
@@ -40,11 +153,7 @@ export function commandApprovalLock(userId: string, roomId: string): CommandAppr
   return lock
 }
 
-/**
- * 60s 审批 window 从服务端受理起算。客户端收到响应必然晚于服务端受理，
- * 因此本地至少等满 60s 不会早于服务端期限；真正的终态由 WS/GET 更早解锁。
- * 重复看到同一 pending 不重设定时器，不能延长审批期限。
- */
+/** 服务端原始绝对期限；恢复不续期。仅解锁输入，不推断请求未执行或停止已批准的工作。 */
 export function lockCommandApproval(userId: string, roomId: string, requestId: string, expiresAt: number) {
   if (!userId || !roomId || !requestId) return
   const key = lockKey(userId, roomId)
@@ -55,7 +164,7 @@ export function lockCommandApproval(userId: string, roomId: string, requestId: s
   locks.set(key, { requestId, userId, roomId, expiresAt })
   timers.set(
     key,
-    setTimeout(() => release(key, requestId), Math.max(60_000, expiresAt - Date.now()))
+    setTimeout(() => release(key, requestId), Math.max(0, expiresAt - Date.now()))
   )
 }
 

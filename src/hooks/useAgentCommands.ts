@@ -9,7 +9,14 @@ import {
   type AgentModel,
   type ModelPage
 } from '@/services/agentCommands'
-import { commandApprovalLock, lockCommandApproval, unlockCommandApproval } from '@/hooks/useAgentApproval'
+import {
+  commandApprovalLock,
+  commandRecovery,
+  lockCommandApproval,
+  saveCommandRecovery,
+  unlockCommandApproval
+} from '@/hooks/useAgentApproval'
+import { eventSession, sameSession, sessionBinding } from '@/services/sessionBinding'
 import { useMitt } from '@/hooks/useMitt'
 import { WsResponseMessageType, type CommandApprovalPayload } from '@/services/wsType'
 
@@ -114,28 +121,56 @@ export function useAgentCommands(
   const approvalLocked = computed(() => !!commandApprovalLock(userId(), session().roomId))
   const approvalExpiresAt = computed(() => commandApprovalLock(userId(), session().roomId)?.expiresAt)
   function restoreApprovalLock() {
-    const lock = commandApprovalLock(userId(), session().roomId)
-    if (!lock) return
-    requestId.value = lock.requestId
-    status.value = 'pending'
+    const s = session()
+    const saved = commandRecovery(userId(), s.roomId)
+    if (
+      saved &&
+      saved.group === s.group &&
+      isAgent(saved.receipt.aiclawUid) &&
+      (s.group || s.aiclawUid === saved.receipt.aiclawUid)
+    ) {
+      const result = saved.receipt
+      trackedRequest = {
+        requestId: result.requestId,
+        roomId: result.roomId,
+        aiclawUid: result.aiclawUid,
+        operation: result.operation
+      }
+      requestId.value = result.requestId
+      receipt.value = saved.observed ? result : undefined
+      status.value = saved.observed ? receiptStatus(result) : 'unknown'
+      if (result.status === 'pending' && result.approvalStatus === 'pending') {
+        if (result.expiresAt && result.expiresAt > Date.now()) {
+          lockCommandApproval(userId(), result.roomId, result.requestId, result.expiresAt)
+        } else status.value = 'unknown'
+      }
+      // Never restore a selection/parameters, replay POST, or replace a draft.
+      void reconcile()
+      return
+    }
+    // Older mounted locks have no persisted execution metadata.
+    if (!sessionBinding.value) {
+      const lock = commandApprovalLock(userId(), s.roomId)
+      if (lock) {
+        requestId.value = lock.requestId
+        status.value = 'pending'
+      }
+    }
   }
-  watch(
-    [() => session().roomId, () => session().aiclawUid, () => session().group],
-    () => {
-      cancel()
-      restoreApprovalLock()
-    },
-    { flush: 'sync' }
-  )
-  restoreApprovalLock()
-  useMitt.on(WsResponseMessageType.COMMAND_APPROVAL_RESULT, (data: CommandApprovalPayload) => {
-    if (!data?.requestId) return
+  const approvalResult = (data: CommandApprovalPayload) => {
+    if (!data?.requestId || data.approvalStatus === 'pending') return
+    if (sessionBinding.value && !sameSession(eventSession(data) ?? null, sessionBinding.value)) return
     const uid = userId()
     if (!uid || (data.callerUid && String(data.callerUid) !== uid)) return
     const roomId = String(data.roomId ?? '')
-    // 只解锁该用户该房间对应的申请；旧事件/切房间/换账号不会锁住别处。
+    if (
+      data.requestId !== requestId.value ||
+      roomId !== session().roomId ||
+      (trackedRequest && String(data.aiclawUid) !== trackedRequest.aiclawUid)
+    )
+      return
+    // Only this identity/room/agent/request can release the current input lock.
     unlockCommandApproval(uid, roomId, data.requestId)
-    if (data.requestId !== requestId.value || roomId !== session().roomId) return
     // Approval events cannot erase a verified native ACK or execution outcome.
     if (receipt.value?.phase === 'accepted' || receipt.value?.phase === 'outcome') return
     if (receipt.value) {
@@ -158,13 +193,26 @@ export function useAgentCommands(
           : data.approvalStatus === 'expired'
             ? 'expired'
             : 'invalidated'
-  })
+    if (trackedRequest && receipt.value) {
+      saveCommandRecovery(sessionBinding.value, uid, session().group, trackedRequest, receipt.value)
+    }
+  }
+  const reconnected = (data: unknown) => {
+    if (sessionBinding.value && !sameSession(eventSession(data) ?? null, sessionBinding.value)) return
+    if (!trackedRequest) restoreApprovalLock()
+    else void reconcile()
+  }
+  useMitt.on(WsResponseMessageType.COMMAND_APPROVAL_RESULT, approvalResult)
+  useMitt.on(WsResponseMessageType.ONLINE, reconnected)
   onScopeDispose(() => {
     stopApprovalPoll()
     epoch++
+    useMitt.off(WsResponseMessageType.COMMAND_APPROVAL_RESULT, approvalResult)
+    useMitt.off(WsResponseMessageType.ONLINE, reconnected)
   })
 
   const receiptStatus = (result?: AgentCommandResult) => {
+    if (result?.status === 'pending' && result.expiresAt && result.expiresAt <= Date.now()) return 'unknown'
     if (result?.status === 'accepted') {
       if (result.phase === 'accepted') return 'accepted'
       return result.approvalStatus === 'approved' ? 'approved' : 'unknown'
@@ -178,12 +226,29 @@ export function useAgentCommands(
   async function request(
     body: AgentCommandRequest,
     generation: number,
-    intent: Omit<Intent, 'version'>,
+    intent: Omit<Intent, 'version'> | undefined,
     options: { page?: number; reconcile?: boolean } = {}
   ): Promise<AgentCommandResult | undefined> {
     const primary = options.page === undefined
-    const current = () => {
-      if (generation !== epoch || (!primary && options.page !== modelEpoch)) return false
+    const binding = sessionBinding.value
+    const uid = userId()
+    const s = { ...session() }
+    const current = (query = !!options.reconcile) => {
+      if (
+        generation !== epoch ||
+        uid !== userId() ||
+        !sameSession(binding, sessionBinding.value) ||
+        (!primary && options.page !== modelEpoch)
+      )
+        return false
+      // Submitted queries bind to immutable request metadata, not the mutable editor/mention node.
+      if (query && primary)
+        return (
+          requestId.value === body.requestId &&
+          s.roomId === session().roomId &&
+          s.aiclawUid === session().aiclawUid &&
+          s.group === session().group
+        )
       if (!same(intent, target())) {
         invalidate()
         return false
@@ -196,9 +261,10 @@ export function useAgentCommands(
       trackedRequest = body
       trackedIntent = intent
       receipt.value = undefined
+      saveCommandRecovery(binding, uid, s.group, body)
     }
-    const consume = (result: AgentCommandResult | undefined) => {
-      if (!current()) return false
+    const consume = (result: AgentCommandResult | undefined, query = !!options.reconcile) => {
+      if (!current(query)) return false
       if (
         !result ||
         result.requestId !== body.requestId ||
@@ -209,6 +275,9 @@ export function useAgentCommands(
         return false
       // Concurrent GETs and approval WS events share this request's latest evidence.
       if (primary && receipt.value?.requestId === body.requestId) confirmed = receipt.value
+      // A pending observation cannot renew the server's original approval deadline.
+      if (confirmed?.expiresAt !== undefined && result.status === 'pending' && result.expiresAt !== confirmed.expiresAt)
+        return false
       if (confirmed && confirmed.status !== 'pending') {
         if (result.status === 'pending' || result.approvalStatus === 'pending') return false
         if (confirmed.generation && result.generation !== confirmed.generation) return false
@@ -229,6 +298,7 @@ export function useAgentCommands(
       if (primary) {
         receipt.value = result
         status.value = receiptStatus(result)
+        saveCommandRecovery(binding, uid, s.group, body, result)
         if (result.status === 'pending' && result.approvalStatus === 'pending' && result.expiresAt) {
           lockCommandApproval(userId(), body.roomId, result.requestId, result.expiresAt)
         } else if (result.approvalStatus && result.approvalStatus !== 'pending') {
@@ -244,7 +314,7 @@ export function useAgentCommands(
         if (generation !== epoch || !commandApprovalLock(userId(), body.roomId)) return
         try {
           const next = await getAgentCommand(body.requestId)
-          if (generation !== epoch || !consume(next)) return
+          if (!consume(next, true)) return
           if (
             next?.status === 'pending' &&
             next.approvalStatus === 'pending' &&
@@ -265,9 +335,9 @@ export function useAgentCommands(
       // Bounded GET only; native work continues after the UI stops waiting.
       for (let attempt = 0; !options.reconcile && result?.status === 'accepted' && attempt < 10; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 1000))
-        if (!current()) return
+        if (!current(true)) return
         result = await getAgentCommand(body.requestId)
-        if (!consume(result)) return
+        if (!consume(result, true)) return
       }
       return confirmed
     } catch (error) {
@@ -279,12 +349,34 @@ export function useAgentCommands(
       if (denied.includes('command_policy_denied_')) throw error
       return undefined
     } finally {
-      if (current() && primary && requestId.value === body.requestId) status.value = receiptStatus(receipt.value)
+      if (
+        current(!!options.reconcile || receipt.value?.requestId === body.requestId) &&
+        primary &&
+        requestId.value === body.requestId
+      )
+        status.value = receiptStatus(receipt.value)
     }
   }
 
   async function reconcile() {
-    if (!trackedRequest || !trackedIntent || busy.value || !['approved', 'accepted', 'unknown'].includes(status.value))
+    if (
+      !trackedRequest ||
+      busy.value ||
+      ![
+        'pending',
+        'approved',
+        'accepted',
+        'unknown',
+        'completed',
+        'failed',
+        'noop',
+        'unsupported',
+        'offline',
+        'rejected',
+        'expired',
+        'invalidated'
+      ].includes(status.value)
+    )
       return
     const generation = epoch
     busy.value = true
@@ -295,6 +387,8 @@ export function useAgentCommands(
       if (
         generation === epoch &&
         body.operation === 'discover' &&
+        intent &&
+        same(intent, target()) &&
         result?.status === 'completed' &&
         result.catalog &&
         Array.isArray(result.catalog.capabilities)
@@ -506,6 +600,23 @@ export function useAgentCommands(
     }
     return true
   }
+  watch(
+    [
+      () => session().roomId,
+      () => session().aiclawUid,
+      () => session().group,
+      userId,
+      () => sessionBinding.value?.backendKey,
+      () => sessionBinding.value?.uid,
+      () => sessionBinding.value?.sessionEpoch
+    ],
+    () => {
+      cancel()
+      restoreApprovalLock()
+    },
+    { flush: 'sync' }
+  )
+  restoreApprovalLock()
   return {
     capabilities,
     selected,
