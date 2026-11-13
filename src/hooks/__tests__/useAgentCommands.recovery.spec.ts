@@ -237,6 +237,170 @@ it('queries the frozen submitted ID during pending polling even when its editor 
   expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
 })
 
+it.each([false, true])(
+  'retains submitted query ownership through real input/IME (%s) and a deferred recovery GET',
+  async (composing) => {
+    const old = await submit()
+    const body = submitted
+    old.scope.stop()
+    let resolve!: (result: unknown) => void
+    api.getAgentCommand.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    const restored = await setup()
+    await flush()
+    restored.editor.value.textContent = 'my new draft'
+    await restored.commands.input(composing)
+    resolve({ ...body, status: 'completed', phase: 'outcome', approvalStatus: 'approved' })
+    await flush()
+    expect(restored.commands.requestId.value).toBe(body.requestId)
+    expect(restored.commands.status.value).toBe('completed')
+    expect(restored.commands.approvalLocked.value).toBe(false)
+    expect(restored.editor.value.textContent).toBe('my new draft')
+    expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+  }
+)
+
+it.each([false, true])(
+  'unlocks the submitted ID through approved WS after real input/IME (%s), without replaying',
+  async (composing) => {
+    const mounted = await submit()
+    const body = submitted
+    mounted.editor.value.textContent = 'my new draft'
+    await mounted.commands.input(composing)
+    const { useMitt } = await import('../useMitt')
+    const { WsResponseMessageType } = await import('@/services/wsType')
+    useMitt.emit(WsResponseMessageType.COMMAND_APPROVAL_RESULT, {
+      _sessionBinding: identity,
+      requestId: body.requestId,
+      roomId: body.roomId,
+      aiclawUid: body.aiclawUid,
+      callerUid: '11',
+      approvalStatus: 'approved'
+    })
+    expect(mounted.commands.requestId.value).toBe(body.requestId)
+    expect(mounted.commands.status.value).toBe('approved')
+    expect(mounted.commands.approvalLocked.value).toBe(false)
+    expect(mounted.editor.value.textContent).toBe('my new draft')
+    expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+  }
+)
+
+it.each([false, true])(
+  'keeps pending polling and approved WS monotonic across real input/IME (%s)',
+  async (composing) => {
+    const mounted = await submit()
+    const body = submitted
+    let resolve!: (result: unknown) => void
+    api.getAgentCommand.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    vi.advanceTimersByTime(2_000)
+    await flush()
+    mounted.editor.value.textContent = 'do not replace this draft'
+    await mounted.commands.input(composing)
+    const { useMitt } = await import('../useMitt')
+    const { WsResponseMessageType } = await import('@/services/wsType')
+    useMitt.emit(WsResponseMessageType.COMMAND_APPROVAL_RESULT, {
+      _sessionBinding: identity,
+      requestId: body.requestId,
+      roomId: body.roomId,
+      aiclawUid: body.aiclawUid,
+      callerUid: '11',
+      approvalStatus: 'approved'
+    })
+    resolve({ ...body, status: 'pending', approvalStatus: 'pending', expiresAt: Date.now() + 58_000 })
+    await flush()
+    expect(mounted.commands.requestId.value).toBe(body.requestId)
+    expect(mounted.commands.status.value).toBe('approved')
+    expect(mounted.commands.approvalLocked.value).toBe(false)
+    expect(mounted.editor.value.textContent).toBe('do not replace this draft')
+    expect(api.getAgentCommand).toHaveBeenCalledTimes(1)
+    expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+  }
+)
+
+it.each(['user', 'room', 'binding'])(
+  'still rejects an edited invocation query after a true %s change',
+  async (change) => {
+    const old = await submit()
+    const body = submitted
+    old.scope.stop()
+    let resolve!: (result: unknown) => void
+    api.getAgentCommand.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    const restored = await setup()
+    await flush()
+    restored.editor.value.textContent = 'new scope draft'
+    await restored.commands.input(true)
+    if (change === 'user') restored.user.value = '22'
+    if (change === 'room') restored.session.value = { roomId: 'r2', aiclawUid: 'agent', group: false }
+    if (change === 'binding') restored.sessionBinding.value = { ...identity, sessionEpoch: 8 }
+    resolve({ ...body, status: 'completed', approvalStatus: 'approved', phase: 'outcome' })
+    await flush()
+    expect(restored.commands.requestId.value).toBe('')
+    expect(restored.commands.receipt.value).toBeUndefined()
+    expect(restored.commands.approvalLocked.value).toBe(false)
+    expect(restored.editor.value.textContent).toBe('new scope draft')
+    expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+  }
+)
+
+it('keeps the submitted owner across a real new menu lookup without using that menu as execution authority', async () => {
+  const mounted = await submit()
+  const body = submitted
+  mounted.editor.value.textContent = '/new'
+  await mounted.commands.input()
+  mounted.commands.select(mounted.commands.capabilities.value[0])
+  expect(mounted.commands.requestId.value).toBe(body.requestId)
+  await vi.advanceTimersByTimeAsync(2_000)
+  expect(mounted.commands.receipt.value?.requestId).toBe(body.requestId)
+  expect(mounted.commands.status.value).toBe('completed')
+  expect(mounted.commands.approvalLocked.value).toBe(false)
+  expect(mounted.editor.value.textContent).toBe('/new')
+  expect(api.postAgentCommand.mock.calls.filter(([request]) => request.operation === 'invoke')).toHaveLength(1)
+})
+
+it('keeps a submitted ID queryable on reconnect after real input and loss of the initial POST response', async () => {
+  const mounted = await setup()
+  mounted.editor.value.textContent = '/'
+  await mounted.commands.input()
+  mounted.commands.select(mounted.commands.capabilities.value[0])
+  let reject!: (error: Error) => void
+  api.postAgentCommand.mockImplementationOnce((body: AgentCommandRequest) => {
+    submitted = body
+    return new Promise((...callbacks) => {
+      reject = callbacks[1]
+    })
+  })
+  const pending = mounted.commands.send()
+  await flush()
+  const body = submitted
+  mounted.editor.value.textContent = 'my pending draft'
+  await mounted.commands.input(true)
+  reject(new Error('response lost'))
+  await pending
+  const { useMitt } = await import('../useMitt')
+  const { WsResponseMessageType } = await import('@/services/wsType')
+  useMitt.emit(WsResponseMessageType.ONLINE, { _sessionBinding: identity })
+  await flush()
+  expect(api.getAgentCommand).toHaveBeenCalledWith(body.requestId)
+  expect(mounted.commands.status.value).toBe('completed')
+  expect(mounted.commands.requestId.value).toBe(body.requestId)
+  expect(mounted.editor.value.textContent).toBe('my pending draft')
+  expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+})
+
 it('recovers an accepted request after losing the initial POST response, without treating local unknown as server evidence', async () => {
   api.postAgentCommand.mockImplementationOnce(async (body) => ({
     ...body,
@@ -319,6 +483,17 @@ it('does not let an old same-room GET overwrite or unlock a newly submitted ID',
   await restored.commands.send()
   const newest = submitted
   expect(newest.requestId).not.toBe(previous.requestId)
+  const { useMitt } = await import('../useMitt')
+  const { WsResponseMessageType } = await import('@/services/wsType')
+  useMitt.emit(WsResponseMessageType.COMMAND_APPROVAL_RESULT, {
+    _sessionBinding: identity,
+    requestId: previous.requestId,
+    roomId: previous.roomId,
+    aiclawUid: previous.aiclawUid,
+    callerUid: '11',
+    approvalStatus: 'approved'
+  })
+  expect(restored.commands.approvalLocked.value).toBe(true)
   resolve({ ...previous, status: 'completed', phase: 'outcome', approvalStatus: 'approved' })
   await flush()
   expect(restored.commands.requestId.value).toBe(newest.requestId)

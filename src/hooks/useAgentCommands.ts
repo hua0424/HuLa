@@ -85,12 +85,18 @@ export function useAgentCommands(
   const same = (a: Omit<Intent, 'version'> | undefined, b: Omit<Intent, 'version'> | undefined) =>
     !!a && !!b && a.html === b.html && a.roomId === b.roomId && a.aiclawUid === b.aiclawUid && a.mention === b.mention
 
-  function invalidate() {
-    epoch++
+  function forgetRequest() {
+    stopApprovalPoll()
     receipt.value = undefined
     trackedRequest = undefined
     trackedIntent = undefined
     requestId.value = ''
+  }
+  function invalidate() {
+    epoch++
+    // Editing invalidates menu intent, not ownership of an already submitted invocation.
+    if (trackedRequest?.operation !== 'invoke') forgetRequest()
+    trackedIntent = undefined
     if (consumed && consumed.html !== editor.value?.innerHTML) {
       // Submitted-draft dedup must not trap a genuinely new ordinary message.
       consumed = undefined
@@ -109,14 +115,16 @@ export function useAgentCommands(
     catalog.value = undefined
     busy.value = false
     status.value = blocked ? 'changed' : ''
+    if (receipt.value && ['pending', 'accepted', 'unknown'].includes(receipt.value.status)) {
+      status.value = receiptStatus(receipt.value)
+    }
   }
   function cancel() {
-    stopApprovalPoll()
     blocked = false
     consumed = undefined
     selected.value = undefined
     invalidate()
-    requestId.value = ''
+    status.value = ''
   }
   const approvalLocked = computed(() => !!commandApprovalLock(userId(), session().roomId))
   const approvalExpiresAt = computed(() => commandApprovalLock(userId(), session().roomId)?.expiresAt)
@@ -205,7 +213,7 @@ export function useAgentCommands(
   useMitt.on(WsResponseMessageType.COMMAND_APPROVAL_RESULT, approvalResult)
   useMitt.on(WsResponseMessageType.ONLINE, reconnected)
   onScopeDispose(() => {
-    stopApprovalPoll()
+    forgetRequest()
     epoch++
     useMitt.off(WsResponseMessageType.COMMAND_APPROVAL_RESULT, approvalResult)
     useMitt.off(WsResponseMessageType.ONLINE, reconnected)
@@ -229,26 +237,24 @@ export function useAgentCommands(
     intent: Omit<Intent, 'version'> | undefined,
     options: { page?: number; reconcile?: boolean } = {}
   ): Promise<AgentCommandResult | undefined> {
-    const primary = options.page === undefined
+    // A new menu lookup must not take ownership away from the submitted invocation.
+    const primary =
+      options.page === undefined && (body.operation === 'invoke' || trackedRequest?.operation !== 'invoke')
     const binding = sessionBinding.value
     const uid = userId()
     const s = { ...session() }
     const current = (query = !!options.reconcile) => {
-      if (
-        generation !== epoch ||
-        uid !== userId() ||
-        !sameSession(binding, sessionBinding.value) ||
-        (!primary && options.page !== modelEpoch)
-      )
-        return false
-      // Submitted queries bind to immutable request metadata, not the mutable editor/mention node.
-      if (query && primary)
+      if (uid !== userId() || !sameSession(binding, sessionBinding.value)) return false
+      // Only the same submitted invocation owns its GET, independently of editor/menu epochs.
+      if (query && primary && body.operation === 'invoke')
         return (
+          trackedRequest === body &&
           requestId.value === body.requestId &&
           s.roomId === session().roomId &&
           s.aiclawUid === session().aiclawUid &&
           s.group === session().group
         )
+      if (generation !== epoch || (options.page !== undefined && options.page !== modelEpoch)) return false
       if (!same(intent, target())) {
         invalidate()
         return false
@@ -311,7 +317,7 @@ export function useAgentCommands(
       stopApprovalPoll()
       approvalPollTimer = setTimeout(async () => {
         approvalPollTimer = undefined
-        if (generation !== epoch || !commandApprovalLock(userId(), body.roomId)) return
+        if (!current(true) || !commandApprovalLock(userId(), body.roomId)) return
         try {
           const next = await getAgentCommand(body.requestId)
           if (!consume(next, true)) return
@@ -323,7 +329,7 @@ export function useAgentCommands(
             pollPending()
         } catch {
           // 网络失败不制造终态；锁到期或 WS/GET 成功前继续按服务端真相重试。
-          if (generation === epoch && commandApprovalLock(userId(), body.roomId)) pollPending()
+          if (current(true) && commandApprovalLock(userId(), body.roomId)) pollPending()
         }
       }, 2_000)
     }
@@ -362,26 +368,27 @@ export function useAgentCommands(
     if (
       !trackedRequest ||
       busy.value ||
-      ![
-        'pending',
-        'approved',
-        'accepted',
-        'unknown',
-        'completed',
-        'failed',
-        'noop',
-        'unsupported',
-        'offline',
-        'rejected',
-        'expired',
-        'invalidated'
-      ].includes(status.value)
+      (trackedRequest.operation !== 'invoke' &&
+        ![
+          'pending',
+          'approved',
+          'accepted',
+          'unknown',
+          'completed',
+          'failed',
+          'noop',
+          'unsupported',
+          'offline',
+          'rejected',
+          'expired',
+          'invalidated'
+        ].includes(status.value))
     )
       return
     const generation = epoch
+    const body = trackedRequest
     busy.value = true
     try {
-      const body = trackedRequest
       const intent = trackedIntent
       const result = await request(body, generation, intent, { reconcile: true })
       if (
@@ -398,7 +405,7 @@ export function useAgentCommands(
         status.value = blocked ? 'changed' : ''
       }
     } finally {
-      if (generation === epoch) busy.value = false
+      if (generation === epoch || (body.operation === 'invoke' && trackedRequest === body)) busy.value = false
     }
   }
 
@@ -611,6 +618,7 @@ export function useAgentCommands(
       () => sessionBinding.value?.sessionEpoch
     ],
     () => {
+      forgetRequest()
       cancel()
       restoreApprovalLock()
     },
