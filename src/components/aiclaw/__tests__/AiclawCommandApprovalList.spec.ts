@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -9,7 +10,17 @@ const api = vi.hoisted(() => ({
   rejectAgentCommand: vi.fn()
 }))
 vi.mock('@/services/agentCommands', () => api)
+const native = vi.hoisted(() => ({
+  desktop: false,
+  callback: undefined as ((event: { payload: { aiclawUid: string } }) => void) | undefined,
+  unlisten: vi.fn(),
+  listenBound: vi.fn()
+}))
+vi.mock('@/utils/PlatformConstants', () => ({ isDesktop: () => native.desktop }))
+vi.mock('@/services/sessionBinding', () => ({ listenBound: native.listenBound }))
 import AiclawCommandApprovalList from '@/components/aiclaw/AiclawCommandApprovalList.vue'
+import { useMitt } from '@/hooks/useMitt'
+import { WsResponseMessageType } from '@/services/wsType'
 
 const i18n = createI18n({
   legacy: false,
@@ -28,6 +39,14 @@ const item = {
 }
 
 beforeEach(() => {
+  native.desktop = false
+  native.callback = undefined
+  native.unlisten.mockReset()
+  native.listenBound.mockReset().mockImplementation(async (event, callback) => {
+    expect(event).toBe('ws-command-approval-request')
+    native.callback = callback
+    return native.unlisten
+  })
   api.getAgentCommandApprovals.mockReset().mockResolvedValue([item])
   api.approveAgentCommand.mockReset().mockResolvedValue({})
   api.rejectAgentCommand.mockReset().mockResolvedValue({})
@@ -70,4 +89,106 @@ it('hides approvals from another room and rejects only the chosen request', asyn
   await flushPromises()
   expect(api.rejectAgentCommand).toHaveBeenCalledExactlyOnceWith('r1')
   matching.unmount()
+})
+
+it('refreshes the already-open desktop owner view on a bound native request without local mitt', async () => {
+  native.desktop = true
+  api.getAgentCommandApprovals.mockResolvedValue([])
+  const wrapper = mount(AiclawCommandApprovalList, {
+    props: { aiclawUid: 'agent' },
+    global: { plugins: [i18n] }
+  })
+  try {
+    await flushPromises()
+    expect(native.listenBound).toHaveBeenCalledOnce()
+    expect(wrapper.find('[data-testid="aiclaw-command-approval-row-r1"]').exists()).toBe(false)
+    api.getAgentCommandApprovals.mockResolvedValue([item])
+    native.callback?.({ payload: { aiclawUid: 'other-agent' } })
+    await flushPromises()
+    expect(api.getAgentCommandApprovals).toHaveBeenCalledTimes(1)
+    native.callback?.({ payload: { aiclawUid: 'agent' } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="aiclaw-command-approval-row-r1"]').exists()).toBe(true)
+  } finally {
+    wrapper.unmount()
+  }
+  expect(native.unlisten).toHaveBeenCalledOnce()
+})
+
+it.each(['resolve', 'reject'])(
+  'ignores a stale initial approval query that completes by %s after refresh',
+  async (outcome) => {
+    native.desktop = true
+    let resolveInitial!: (value: (typeof item)[]) => void
+    let rejectInitial!: (reason: Error) => void
+    api.getAgentCommandApprovals.mockImplementationOnce(
+      () =>
+        new Promise<(typeof item)[]>((resolve, reject) => {
+          resolveInitial = resolve
+          rejectInitial = reject
+        })
+    )
+    const wrapper = mount(AiclawCommandApprovalList, {
+      props: { aiclawUid: 'agent' },
+      global: { plugins: [i18n] }
+    })
+    try {
+      await flushPromises()
+      native.callback?.({ payload: { aiclawUid: 'agent' } })
+      await flushPromises()
+      expect(wrapper.find('[data-testid="aiclaw-command-approval-row-r1"]').exists()).toBe(true)
+      if (outcome === 'resolve') resolveInitial([])
+      else rejectInitial(new Error('stale request failed'))
+      await flushPromises()
+      expect(wrapper.find('[data-testid="aiclaw-command-approval-row-r1"]').exists()).toBe(true)
+      expect(wrapper.text()).not.toContain(aiclawZh.command_approval.load_failed)
+    } finally {
+      wrapper.unmount()
+    }
+  }
+)
+
+it('retains same-window mitt refresh on Web and mobile', async () => {
+  api.getAgentCommandApprovals.mockResolvedValue([])
+  const wrapper = mount(AiclawCommandApprovalList, {
+    props: { aiclawUid: 'agent' },
+    global: { plugins: [i18n] }
+  })
+  try {
+    await flushPromises()
+    api.getAgentCommandApprovals.mockResolvedValue([item])
+    useMitt.emit(WsResponseMessageType.COMMAND_APPROVAL_REQUEST, { aiclawUid: 'agent' })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="aiclaw-command-approval-row-r1"]').exists()).toBe(true)
+    expect(native.listenBound).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('releases a native subscription that finishes registering after unmount', async () => {
+  native.desktop = true
+  let registered!: (unlisten: () => void) => void
+  native.listenBound.mockImplementation(
+    () =>
+      new Promise<() => void>((resolve) => {
+        registered = resolve
+      })
+  )
+  const wrapper = mount(AiclawCommandApprovalList, {
+    props: { aiclawUid: 'agent' },
+    global: { plugins: [i18n] }
+  })
+  wrapper.unmount()
+  registered(native.unlisten)
+  await flushPromises()
+  expect(native.unlisten).toHaveBeenCalledOnce()
+  expect(api.getAgentCommandApprovals).not.toHaveBeenCalled()
+})
+
+it('keeps the native request route to the separate desktop management window', () => {
+  const rust = readFileSync('src-tauri/src/websocket/client.rs', 'utf8')
+  const requestArm = rust.split('"commandApprovalRequest" => {')[1]?.split('"commandApprovalResult"')[0]
+  expect(requestArm).toMatch(/events\.emit_to\(\s*"aiAssistant",\s*"ws-command-approval-request"/)
+  expect(requestArm).toContain('events.emit_to_owner("ws-command-approval-request"')
 })
