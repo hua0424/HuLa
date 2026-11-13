@@ -13,6 +13,7 @@ import {
   commandApprovalLock,
   commandRecovery,
   lockCommandApproval,
+  normalizeCommandReceipt,
   saveCommandRecovery,
   unlockCommandApproval
 } from '@/hooks/useAgentApproval'
@@ -269,8 +270,9 @@ export function useAgentCommands(
       receipt.value = undefined
       saveCommandRecovery(binding, uid, s.group, body)
     }
-    const consume = (result: AgentCommandResult | undefined, query = !!options.reconcile) => {
+    const consume = (incoming: AgentCommandResult | undefined, query = !!options.reconcile) => {
       if (!current(query)) return false
+      const result = incoming && normalizeCommandReceipt(incoming)
       if (
         !result ||
         result.requestId !== body.requestId ||

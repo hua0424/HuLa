@@ -18,6 +18,29 @@ const capability = {
   parameters: [{ name: 'arguments', type: 'string', required: false }]
 }
 let submitted: AgentCommandRequest
+const invalidDeadlines = [
+  NaN,
+  Infinity,
+  -Infinity,
+  0,
+  -1,
+  1.5,
+  Number.MAX_SAFE_INTEGER + 1,
+  'NaN',
+  'Infinity',
+  '1794587365685.5',
+  '1e12',
+  '-1794587365685',
+  '9007199254740992',
+  '',
+  ' 1794587365685',
+  '1794587365685 ',
+  '+1794587365685',
+  null,
+  true,
+  {},
+  []
+]
 
 async function setup(binding: typeof identity | null = identity, roomId = 'r1', aiclawUid = 'agent') {
   const { sessionBinding } = await import('@/services/sessionBinding')
@@ -107,6 +130,89 @@ it('hydrates after a real module reset using only storage and the authoritative 
   expect(restored.editor.value.textContent).toBe('new ordinary draft')
 })
 
+it('hydrates a decimal-string wire deadline after a real module reset and continues same-deadline pending GET polling', async () => {
+  const expiresAt = 1794587365685
+  vi.setSystemTime(expiresAt - 60_000)
+  api.postAgentCommand.mockImplementation(async (body: AgentCommandRequest) => {
+    if (body.operation === 'discover')
+      return { ...body, status: 'completed', catalog: { version: 'v1', capabilities: [capability] } }
+    submitted = body
+    return { ...body, status: 'pending', approvalStatus: 'pending', expiresAt: String(expiresAt) }
+  })
+  const old = await submit()
+  old.scope.stop()
+  const { clearCommandApprovalLocks } = await import('../useAgentApproval')
+  clearCommandApprovalLocks()
+  vi.resetModules()
+  vi.advanceTimersByTime(50_000)
+  api.getAgentCommand.mockResolvedValueOnce({
+    ...submitted,
+    status: 'pending',
+    approvalStatus: 'pending',
+    expiresAt: String(expiresAt)
+  })
+  const restored = await setup()
+  restored.editor.value.textContent = 'preserve this draft'
+  await flush()
+  expect(restored.commands.requestId.value).toBe(submitted.requestId)
+  expect(restored.commands.approvalExpiresAt.value).toBe(expiresAt)
+  expect(restored.commands.receipt.value?.expiresAt).toBe(expiresAt)
+  expect(restored.commands.approvalLocked.value).toBe(true)
+  const key = Object.keys(localStorage).find((key) => key.startsWith('agent-command-recovery:'))!
+  expect(JSON.parse(localStorage.getItem(key)!).receipt.expiresAt).toBe(expiresAt)
+  await vi.advanceTimersByTimeAsync(2_000)
+  expect(api.getAgentCommand).toHaveBeenCalledTimes(2)
+  expect(restored.commands.status.value).toBe('completed')
+  expect(restored.commands.approvalLocked.value).toBe(false)
+  expect(restored.editor.value.textContent).toBe('preserve this draft')
+  expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+})
+
+it('normalizes an existing decimal-string cache at hydration without renewing the original server deadline', async () => {
+  const old = await submit()
+  const expiresAt = old.commands.approvalExpiresAt.value!
+  old.scope.stop()
+  const { clearCommandApprovalLocks } = await import('../useAgentApproval')
+  clearCommandApprovalLocks()
+  const key = Object.keys(localStorage).find((key) => key.startsWith('agent-command-recovery:'))!
+  const saved = JSON.parse(localStorage.getItem(key)!)
+  saved.receipt.expiresAt = String(expiresAt)
+  localStorage.setItem(key, JSON.stringify(saved))
+  vi.resetModules()
+  vi.advanceTimersByTime(50_000)
+  api.getAgentCommand.mockRejectedValueOnce(new Error('offline'))
+  const restored = await setup()
+  await flush()
+  expect(api.getAgentCommand).toHaveBeenCalledWith(submitted.requestId)
+  expect(restored.commands.approvalExpiresAt.value).toBe(expiresAt)
+  expect(restored.commands.approvalLocked.value).toBe(true)
+  vi.advanceTimersByTime(10_000)
+  expect(restored.commands.approvalLocked.value).toBe(false)
+  expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+})
+
+it.each(invalidDeadlines)('does not persist an invalid wire deadline as observed evidence %j', async (expiresAt) => {
+  api.postAgentCommand.mockImplementationOnce(async (body) => ({
+    ...body,
+    status: 'completed',
+    catalog: { version: 'v1', capabilities: [capability] }
+  }))
+  api.postAgentCommand.mockImplementationOnce(async (body) => {
+    submitted = body
+    return { ...body, status: 'pending', approvalStatus: 'pending', expiresAt }
+  })
+  const mounted = await submit()
+  expect(mounted.commands.requestId.value).toBe(submitted.requestId)
+  expect(mounted.commands.receipt.value).toBeUndefined()
+  expect(mounted.commands.approvalLocked.value).toBe(false)
+  const key = Object.keys(localStorage).find((key) => key.startsWith('agent-command-recovery:'))!
+  const saved = JSON.parse(localStorage.getItem(key)!)
+  expect(saved.observed).toBe(false)
+  expect(saved.receipt.expiresAt).toBeUndefined()
+  expect(api.getAgentCommand).not.toHaveBeenCalled()
+  expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+})
+
 it('recovers on remount and reconnect with the original ID despite a changed draft and never replays POST', async () => {
   const old = await submit()
   old.scope.stop()
@@ -157,7 +263,8 @@ it.each([
   { binding: { ...identity, sessionEpoch: 6 } },
   { receipt: { operation: 'discover' } },
   { receipt: { status: 'granted' } },
-  { receipt: { expiresAt: 'later' } }
+  { receipt: { expiresAt: 'later' } },
+  ...invalidDeadlines.map((expiresAt) => ({ receipt: { expiresAt } }))
 ])('rejects malformed or foreign persisted metadata without GET or POST %j', async (patch) => {
   const old = await submit()
   old.scope.stop()

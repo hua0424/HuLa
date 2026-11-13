@@ -48,7 +48,18 @@ export type CommandRecovery = {
 const recoveryKey = (binding: SessionIdentity, roomId: string) =>
   `agent-command-recovery:${JSON.stringify([binding.backendKey, binding.uid, binding.sessionEpoch, roomId])}`
 
-function recoveryReceipt(result: AgentCommandResult): CommandRecovery['receipt'] {
+/** Public Long timestamps can be decimal strings; keep the original absolute deadline, never renew it. */
+export function normalizeCommandReceipt(result: AgentCommandResult): AgentCommandResult | undefined {
+  const raw: unknown = result.expiresAt
+  if (raw === undefined) return result
+  const expiresAt = typeof raw === 'number' ? raw : typeof raw === 'string' && /^[0-9]+$/.test(raw) ? Number(raw) : NaN
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= 0) return
+  return { ...result, expiresAt }
+}
+
+function recoveryReceipt(raw: AgentCommandResult): CommandRecovery['receipt'] | undefined {
+  const result = normalizeCommandReceipt(raw)
+  if (!result) return
   const nativeRef: AgentCommandResult['nativeRef'] =
     typeof result.nativeRef?.sessionId === 'string' ? { sessionId: result.nativeRef.sessionId } : undefined
   for (const key of ['inputId', 'messageId', 'parentId', 'turnId'] as const) {
@@ -85,6 +96,7 @@ export function saveCommandRecovery(
   )
     return
   const receipt = recoveryReceipt(result ?? { ...body, status: 'unknown' })
+  if (!receipt) return
   try {
     homeWindowOnlyStorage().setItem(
       recoveryKey(binding, body.roomId),
@@ -121,12 +133,13 @@ export function commandRecovery(userId: string, roomId: string): CommandRecovery
       (result.approvalStatus !== undefined &&
         !['pending', 'approved', 'rejected', 'expired', 'invalidated'].includes(result.approvalStatus)) ||
       (result.phase !== undefined && !['dispatch', 'accepted', 'outcome', 'approval'].includes(result.phase)) ||
-      (result.expiresAt !== undefined && !Number.isFinite(result.expiresAt)) ||
       (result.generation !== undefined && typeof result.generation !== 'string') ||
       (result.receiptRevision !== undefined && !Number.isSafeInteger(result.receiptRevision))
     )
       return
-    return { binding, group: saved.group, observed: saved.observed, receipt: recoveryReceipt(result) }
+    const receipt = recoveryReceipt(result)
+    if (!receipt) return
+    return { binding, group: saved.group, observed: saved.observed, receipt }
   } catch {
     return undefined
   }
