@@ -1176,6 +1176,8 @@ impl WebSocketClient {
             // aichatoverview#505：主人待审批 / 发起人审批终态
             "commandApprovalRequest" => {
                 info!("AIclaw command approval request");
+                // 管理窗是独立 WebView，本地 mitt 不跨窗；沿用账号绑定信封定向投递。
+                let _ = events.emit_to("aiAssistant", "ws-command-approval-request", data.clone());
                 let _ = events.emit_to_owner("ws-command-approval-request", data);
             }
             "commandApprovalResult" => {

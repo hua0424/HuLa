@@ -59,7 +59,10 @@ import {
   type AgentCommandApproval
 } from '@/services/agentCommands'
 import { useMitt } from '@/hooks/useMitt'
+import { listenBound } from '@/services/sessionBinding'
 import { WsResponseMessageType, type CommandApprovalPayload } from '@/services/wsType'
+import { isDesktop } from '@/utils/PlatformConstants'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 
 const props = defineProps<{
   aiclawUid: string
@@ -75,6 +78,7 @@ const busyId = ref('')
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
+let approvalUnlisten: UnlistenFn | undefined
 
 const secondsLeft = (item: AgentCommandApproval) => Math.max(0, Math.ceil((item.expiresAt - now.value) / 1000))
 const describeParameters = (item: AgentCommandApproval) => {
@@ -116,16 +120,31 @@ const decide = async (item: AgentCommandApproval, approve: boolean) => {
   }
 }
 
-onMounted(() => {
+const refreshOnRequest = (data: CommandApprovalPayload) => {
+  if (!disposed && data && String(data.aiclawUid) === props.aiclawUid) void load()
+}
+
+onMounted(async () => {
+  if (isDesktop()) {
+    try {
+      const unlisten = await listenBound<CommandApprovalPayload>('ws-command-approval-request', ({ payload }) => {
+        refreshOnRequest(payload)
+      })
+      if (disposed) unlisten()
+      else approvalUnlisten = unlisten
+    } catch (error) {
+      console.error('[CommandApprovalList] Failed to listen for approvals:', error)
+    }
+  }
+  if (disposed) return
   void load()
   timer = setInterval(() => {
     now.value = Date.now()
   }, 1000)
 })
 
-useMitt.on(WsResponseMessageType.COMMAND_APPROVAL_REQUEST, (data: CommandApprovalPayload) => {
-  if (data && String(data.aiclawUid) === props.aiclawUid) void load()
-})
+// Web / 移动端与聊天 WS 共用上下文；桌面直接接绑定事件，避免 home 内重复刷新。
+if (!isDesktop()) useMitt.on(WsResponseMessageType.COMMAND_APPROVAL_REQUEST, refreshOnRequest)
 
 watch(
   () => [props.aiclawUid, props.roomId],
@@ -136,6 +155,7 @@ watch(
 
 onBeforeUnmount(() => {
   disposed = true
+  approvalUnlisten?.()
   if (timer) clearInterval(timer)
 })
 </script>
