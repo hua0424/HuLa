@@ -136,6 +136,8 @@ export function useAgentCommands(
     // 只解锁该用户该房间对应的申请；旧事件/切房间/换账号不会锁住别处。
     unlockCommandApproval(uid, roomId, data.requestId)
     if (data.requestId !== requestId.value || roomId !== session().roomId) return
+    // Approval events cannot erase a verified native ACK or execution outcome.
+    if (receipt.value?.phase === 'accepted' || receipt.value?.phase === 'outcome') return
     if (receipt.value) {
       receipt.value =
         data.approvalStatus === 'approved'
@@ -162,8 +164,16 @@ export function useAgentCommands(
     epoch++
   })
 
-  const receiptStatus = (result?: AgentCommandResult) =>
-    result?.status === 'accepted' ? (result.phase === 'accepted' ? 'accepted' : 'unknown') : result?.status || 'unknown'
+  const receiptStatus = (result?: AgentCommandResult) => {
+    if (result?.status === 'accepted') {
+      if (result.phase === 'accepted') return 'accepted'
+      return result.approvalStatus === 'approved' ? 'approved' : 'unknown'
+    }
+    if (result?.status === 'noop' && result.approvalStatus && result.approvalStatus !== 'approved') {
+      return result.approvalStatus
+    }
+    return result?.status || 'unknown'
+  }
 
   async function request(
     body: AgentCommandRequest,
@@ -197,7 +207,10 @@ export function useAgentCommands(
         result.operation !== body.operation
       )
         return false
+      // Concurrent GETs and approval WS events share this request's latest evidence.
+      if (primary && receipt.value?.requestId === body.requestId) confirmed = receipt.value
       if (confirmed && confirmed.status !== 'pending') {
+        if (result.status === 'pending' || result.approvalStatus === 'pending') return false
         if (confirmed.generation && result.generation !== confirmed.generation) return false
         for (const key of ['sessionId', 'inputId', 'messageId', 'parentId', 'turnId'] as const) {
           if (confirmed.nativeRef?.[key] && result.nativeRef?.[key] !== confirmed.nativeRef[key]) return false
@@ -220,7 +233,6 @@ export function useAgentCommands(
           lockCommandApproval(userId(), body.roomId, result.requestId, result.expiresAt)
         } else if (result.approvalStatus && result.approvalStatus !== 'pending') {
           unlockCommandApproval(userId(), body.roomId, result.requestId)
-          status.value = result.approvalStatus
         }
       }
       return true
@@ -267,12 +279,13 @@ export function useAgentCommands(
       if (denied.includes('command_policy_denied_')) throw error
       return undefined
     } finally {
-      if (current() && primary) status.value = receiptStatus(confirmed)
+      if (current() && primary && requestId.value === body.requestId) status.value = receiptStatus(receipt.value)
     }
   }
 
   async function reconcile() {
-    if (!trackedRequest || !trackedIntent || busy.value || !['accepted', 'unknown'].includes(status.value)) return
+    if (!trackedRequest || !trackedIntent || busy.value || !['approved', 'accepted', 'unknown'].includes(status.value))
+      return
     const generation = epoch
     busy.value = true
     try {

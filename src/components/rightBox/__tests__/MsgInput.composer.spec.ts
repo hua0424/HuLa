@@ -3,6 +3,9 @@ import { createI18n } from 'vue-i18n'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 import { useAgentCommands } from '@/hooks/useAgentCommands'
+import { useMitt } from '@/hooks/useMitt'
+import { clearCommandApprovalLocks } from '@/hooks/useAgentApproval'
+import { WsResponseMessageType } from '@/services/wsType'
 import zhEditor from '../../../../locales/zh-CN/editor.json'
 
 const commandApi = vi.hoisted(() => ({ postAgentCommand: vi.fn(), getAgentCommand: vi.fn() }))
@@ -80,7 +83,8 @@ vi.mock('@/hooks/useMsgInput.ts', () => ({
     const commands = useAgentCommands(
       editor,
       () => ({ roomId: 'room-1', aiclawUid: 'agent', group: false }),
-      (uid) => uid === 'agent'
+      (uid) => uid === 'agent',
+      () => '11'
     )
     const text = ref('')
     return {
@@ -120,9 +124,6 @@ vi.mock('@/hooks/useAiclawSession', () => ({
 }))
 
 // --- hooks / 工具汇聚点：仅提供被测无关的安全默认 ---
-vi.mock('@/hooks/useMitt.ts', () => ({
-  useMitt: { on: vi.fn(), off: vi.fn(), emit: vi.fn() }
-}))
 vi.mock('@/views/moreWindow/settings/config.ts', () => ({ useSendOptions: () => ref([]) }))
 
 // --- store mock：仅提供模板/setup 读到的安全默认值 ---
@@ -196,6 +197,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  clearCommandApprovalLocks()
   vi.clearAllMocks()
 })
 
@@ -240,9 +242,12 @@ describe('#503 native command controls', () => {
       wrapper.unmount()
     }
   )
-  it('reconciles an uncertain command with GET only and labels dismissal as not stopping native work', async () => {
+  it.each(['unknown', 'approved'])('reconciles a %s command through the public GET-only control', async (state) => {
     commandApi.postAgentCommand.mockImplementation(async (body) => {
-      if (body.operation === 'invoke') throw new Error('lost response')
+      if (body.operation === 'invoke') {
+        if (state === 'unknown') throw new Error('lost response')
+        return { ...body, status: 'pending', approvalStatus: 'pending', expiresAt: Date.now() + 60_000 }
+      }
       return {
         ...body,
         status: 'completed',
@@ -270,10 +275,20 @@ describe('#503 native command controls', () => {
     await wrapper.get('[data-testid="send-button"]').trigger('click')
     await flushPromises()
     const body = commandApi.postAgentCommand.mock.calls[1][0]
+    if (state === 'approved') {
+      useMitt.emit(WsResponseMessageType.COMMAND_APPROVAL_RESULT, {
+        ...body,
+        callerUid: '11',
+        approvalStatus: 'approved'
+      })
+      await nextTick()
+      expect(wrapper.text()).toContain(body.requestId)
+    }
     commandApi.getAgentCommand.mockResolvedValue({
       ...body,
       status: 'completed',
       phase: 'outcome',
+      approvalStatus: state === 'approved' ? 'approved' : undefined,
       receiptRevision: 2,
       reconciled: true,
       effect: { kind: 'reset', sessionId: 'new-session', generation: '2' }
