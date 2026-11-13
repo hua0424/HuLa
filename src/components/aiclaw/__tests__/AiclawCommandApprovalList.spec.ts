@@ -115,6 +115,39 @@ it('refreshes the already-open desktop owner view on a bound native request with
   expect(native.unlisten).toHaveBeenCalledOnce()
 })
 
+it.each(['resolve', 'reject'])(
+  'ignores a stale initial approval query that completes by %s after refresh',
+  async (outcome) => {
+    native.desktop = true
+    let resolveInitial!: (value: (typeof item)[]) => void
+    let rejectInitial!: (reason: Error) => void
+    api.getAgentCommandApprovals.mockImplementationOnce(
+      () =>
+        new Promise<(typeof item)[]>((resolve, reject) => {
+          resolveInitial = resolve
+          rejectInitial = reject
+        })
+    )
+    const wrapper = mount(AiclawCommandApprovalList, {
+      props: { aiclawUid: 'agent' },
+      global: { plugins: [i18n] }
+    })
+    try {
+      await flushPromises()
+      native.callback?.({ payload: { aiclawUid: 'agent' } })
+      await flushPromises()
+      expect(wrapper.find('[data-testid="aiclaw-command-approval-row-r1"]').exists()).toBe(true)
+      if (outcome === 'resolve') resolveInitial([])
+      else rejectInitial(new Error('stale request failed'))
+      await flushPromises()
+      expect(wrapper.find('[data-testid="aiclaw-command-approval-row-r1"]').exists()).toBe(true)
+      expect(wrapper.text()).not.toContain(aiclawZh.command_approval.load_failed)
+    } finally {
+      wrapper.unmount()
+    }
+  }
+)
+
 it('retains same-window mitt refresh on Web and mobile', async () => {
   api.getAgentCommandApprovals.mockResolvedValue([])
   const wrapper = mount(AiclawCommandApprovalList, {

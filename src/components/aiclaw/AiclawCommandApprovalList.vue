@@ -78,6 +78,7 @@ const busyId = ref('')
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
+let loadSequence = 0
 let approvalUnlisten: UnlistenFn | undefined
 
 const secondsLeft = (item: AgentCommandApproval) => Math.max(0, Math.ceil((item.expiresAt - now.value) / 1000))
@@ -94,15 +95,16 @@ const visible = (item: AgentCommandApproval) =>
 
 const load = async () => {
   if (!props.aiclawUid) return
+  const sequence = ++loadSequence
   loading.value = true
   loadError.value = false
   try {
     const result = await getAgentCommandApprovals()
-    if (!disposed) items.value = (Array.isArray(result) ? result : []).filter(visible)
+    if (!disposed && sequence === loadSequence) items.value = (Array.isArray(result) ? result : []).filter(visible)
   } catch {
-    if (!disposed) loadError.value = true
+    if (!disposed && sequence === loadSequence) loadError.value = true
   } finally {
-    if (!disposed) loading.value = false
+    if (!disposed && sequence === loadSequence) loading.value = false
   }
 }
 
