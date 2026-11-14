@@ -58,14 +58,28 @@ export function useCursorManager() {
 
     const selection = window.getSelection()
     if (!selection) return
-    const selectionRange = getCursorSelectionRange()
-    if (!selectionRange) return
-
-    const range = document.createRange()
-    range.selectNodeContents(editor)
-    range.collapse(false)
-    selection?.removeAllRanges()
-    selection?.addRange(selectionRange.range)
+    const isEditableRange = (candidate?: Range): candidate is Range =>
+      !!candidate &&
+      [candidate.startContainer, candidate.endContainer].every((node) => {
+        if (!editor.contains(node)) return false
+        let element = node instanceof Element ? node : node.parentElement
+        while (element && element !== editor) {
+          if (element.getAttribute('contenteditable') === 'false') return false
+          element = element.parentElement
+        }
+        return true
+      })
+    const cached = getCursorSelectionRange()?.range
+    const current = selection.rangeCount ? selection.getRangeAt(0) : undefined
+    let range = isEditableRange(cached) ? cached : isEditableRange(current) ? current : undefined
+    if (!range) {
+      range = document.createRange()
+      range.selectNodeContents(editor)
+      range.collapse(false)
+    }
+    selection.removeAllRanges()
+    selection.addRange(range)
+    updateSelectionRange({ range, selection })
   }
 
   return { getCursorSelectionRange, updateSelectionRange, focusOn }
