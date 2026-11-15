@@ -14,7 +14,97 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio::task::JoinHandle;
-use tokio::time::{Duration, interval, sleep};
+use tokio::time::{Duration, interval, sleep, timeout};
+
+// Cooperative-close grace, not a handshake deadline; abort is still joined afterwards.
+const STOP_GRACE: Duration = Duration::from_millis(250);
+
+#[derive(Default)]
+struct ConnectionTasks {
+    root: Mutex<Option<JoinHandle<()>>>,
+    children: RwLock<Vec<JoinHandle<()>>>,
+    should_stop: Arc<AtomicBool>,
+    // Retirement and root publication share this short, await-free commit.
+    retired: std::sync::Mutex<bool>,
+    close_sender: RwLock<Option<mpsc::UnboundedSender<()>>>,
+}
+
+impl ConnectionTasks {
+    async fn start(
+        &self,
+        replace: bool,
+        validate: impl Fn() -> Result<()>,
+        prepare: impl std::future::Future<Output = ()>,
+        run: impl std::future::Future<Output = ()> + Send + 'static,
+    ) -> Result<()> {
+        let mut root = self.root.lock().await;
+        self.validate(&validate)?;
+        if !replace
+            && !self.should_stop.load(Ordering::SeqCst)
+            && root.as_ref().is_some_and(|task| !task.is_finished())
+        {
+            return Ok(());
+        }
+        self.stop_locked(&mut root).await;
+        prepare.await;
+        self.validate(&validate)?;
+        let retired = self.retired.lock().expect("WS retirement mutex poisoned");
+        anyhow::ensure!(!*retired, "WS客户端已关闭");
+        self.should_stop.store(false, Ordering::SeqCst);
+        *root = Some(tokio::spawn(run));
+        Ok(())
+    }
+
+    fn is_retired(&self) -> bool {
+        *self.retired.lock().expect("WS retirement mutex poisoned")
+    }
+
+    fn validate(&self, validate: &impl Fn() -> Result<()>) -> Result<()> {
+        anyhow::ensure!(!self.is_retired(), "WS客户端已关闭");
+        validate()
+    }
+
+    fn retire(&self) {
+        let mut retired = self.retired.lock().expect("WS retirement mutex poisoned");
+        *retired = true;
+        self.should_stop.store(true, Ordering::SeqCst);
+    }
+
+    async fn stop(&self) {
+        // Retire before awaiting the control lock, including when this request is cancelled.
+        self.retire();
+        let mut root = self.root.lock().await;
+        self.stop_locked(&mut root).await;
+    }
+
+    async fn stop_locked(&self, root: &mut Option<JoinHandle<()>>) {
+        self.should_stop.store(true, Ordering::SeqCst);
+        if let Some(sender) = self.close_sender.write().await.take() {
+            let _ = sender.send(());
+        }
+        if let Some(task) = root.as_mut() {
+            if timeout(STOP_GRACE, &mut *task).await.is_err() {
+                task.abort();
+                let _ = task.await;
+            }
+        }
+        *root = None;
+        self.stop_children().await;
+    }
+
+    async fn stop_children(&self) {
+        // Keep handles in their owner across awaits so cancelled control cannot detach them.
+        // Children never acquire this lock; only the root registers or joins them.
+        let mut children = self.children.write().await;
+        for task in children.iter() {
+            task.abort();
+        }
+        while let Some(task) = children.last_mut() {
+            let _ = task.await;
+            children.pop();
+        }
+    }
+}
 
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tracing::{debug, error, info, warn};
@@ -100,8 +190,8 @@ pub struct WebSocketClient {
     message_sender: Arc<RwLock<Option<mpsc::UnboundedSender<Message>>>>,
     pending_messages: Arc<RwLock<Vec<serde_json::Value>>>,
 
-    // 连接控制
-    should_stop: Arc<AtomicBool>,
+    // Root and child ownership is shared by every clone of this client.
+    tasks: Arc<ConnectionTasks>,
 
     // 应用状态跟踪
     is_app_in_background: Arc<AtomicBool>,
@@ -110,15 +200,6 @@ pub struct WebSocketClient {
 
     // 连接状态标记
     is_ws_connected: Arc<AtomicBool>,
-
-    // 连接互斥锁，防止并发连接
-    connection_mutex: Arc<Mutex<()>>,
-
-    // 任务句柄管理
-    task_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
-
-    // 关闭信号发送器
-    close_sender: Arc<RwLock<Option<mpsc::UnboundedSender<()>>>>,
 }
 
 /// Every queued frontend event retains its connection's immutable origin.
@@ -171,9 +252,9 @@ impl WebSocketClient {
         Ok(())
     }
 
-    pub fn new(app_handle: AppHandle, binding: SessionBinding) -> Self {
+    pub fn new(app_handle: AppHandle, binding: SessionBinding, config: WebSocketConfig) -> Self {
         Self {
-            config: Arc::new(RwLock::new(WebSocketConfig::default())),
+            config: Arc::new(RwLock::new(config)),
             state: Arc::new(RwLock::new(ConnectionState::Disconnected)),
             app_handle,
             binding,
@@ -186,79 +267,63 @@ impl WebSocketClient {
             auth_refresh_attempts: Arc::new(AtomicU32::new(0)),
             message_sender: Arc::new(RwLock::new(None)),
             pending_messages: Arc::new(RwLock::new(Vec::new())),
-            should_stop: Arc::new(AtomicBool::new(false)),
+            tasks: Arc::new(ConnectionTasks::default()),
             is_app_in_background: Arc::new(AtomicBool::new(false)),
             last_foreground_time: Arc::new(AtomicU64::new(
                 chrono::Utc::now().timestamp_millis() as u64
             )),
             background_heartbeat_failures: Arc::new(AtomicU32::new(0)),
             is_ws_connected: Arc::new(AtomicBool::new(false)),
-            connection_mutex: Arc::new(Mutex::new(())),
-            task_handles: Arc::new(RwLock::new(Vec::new())),
-            close_sender: Arc::new(RwLock::new(None)),
         }
     }
 
-    /// 初始化连接
+    /// The command acknowledges scheduling, not a successful handshake.
     pub async fn connect(&self, config: WebSocketConfig) -> Result<()> {
-        // 获取连接锁，确保同时只有一个连接操作
-        let _lock: tokio::sync::MutexGuard<'_, ()> = self.connection_mutex.lock().await;
-        info!(
-            "Initializing WebSocket connection to: {}",
-            config.server_url
-        );
-
-        // 在锁保护下再次检查连接状态
-        if self.is_ws_connected.load(Ordering::SeqCst) {
-            warn!("WebSocket already connected, ignoring duplicate connection request");
-            return Ok(());
-        }
-
-        self.ensure_session()?;
-        // 更新配置
-        *self.config.write().await = config;
-        self.should_stop.store(false, Ordering::SeqCst);
-        // REQ-017 #198：新的连接意图（登录/重登/手动重连）——复位鉴权失败标记与自愈计数，
-        // 否则上一轮 give-up 的残留标记会让新连接永远进不了重连循环
-        self.auth_failed.store(false, Ordering::SeqCst);
-        self.auth_refresh_attempts.store(0, Ordering::SeqCst);
-
-        // 开始连接循环
-        self.connection_loop().await?;
-
-        Ok(())
+        self.tasks
+            .start(
+                false,
+                || self.ensure_session(),
+                async {
+                    *self.config.write().await = config;
+                    self.auth_failed.store(false, Ordering::SeqCst);
+                    self.auth_refresh_attempts.store(0, Ordering::SeqCst);
+                },
+                self.run_connection(),
+            )
+            .await
     }
 
-    /// 断开连接
-    pub async fn disconnect(&self) {
-        let _lock = self.connection_mutex.lock().await;
-        self.internal_disconnect().await;
-    }
-
-    /// 内部断开连接方法（不获取锁）
-    pub async fn internal_disconnect(&self) {
-        info!("Disconnecting WebSocket connection");
-        self.should_stop.store(true, Ordering::SeqCst);
-
-        // 更新连接状态
-        self.is_ws_connected.store(false, Ordering::SeqCst);
-
-        // 取消所有任务
-        let mut handles = self.task_handles.write().await;
-        let task_count = handles.len();
-        for handle in handles.drain(..) {
-            handle.abort();
-        }
-        info!("Cancelled {} async tasks", task_count);
-
-        // 发送关闭信号以主动关闭 WebSocket 连接
-        if let Some(close_sender) = self.close_sender.write().await.take() {
-            if let Err(_) = close_sender.send(()) {
-                warn!("Failed to send close signal, connection may already be closed");
-            } else {
-                info!("WebSocket close signal sent");
+    fn run_connection(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
+        let client = self.clone();
+        async move {
+            if let Err(error) = client.connection_loop().await {
+                error!("WebSocket connection loop ended: {}", error);
             }
+            client.cleanup_connection_state().await;
         }
+    }
+
+    pub fn same_owner(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.tasks, &other.tasks)
+    }
+
+    pub fn is_retired(&self) -> bool {
+        self.tasks.is_retired()
+    }
+
+    pub(super) fn retire(&self) {
+        self.tasks.retire();
+    }
+
+    /// Permanently close this client's resources; a later init creates another client.
+    pub async fn disconnect(&self) {
+        self.tasks.stop().await;
+        self.reset_disconnected_state().await;
+    }
+
+    async fn reset_disconnected_state(&self) {
+        info!("Disconnecting WebSocket connection");
+        self.is_ws_connected.store(false, Ordering::SeqCst);
 
         // 清理消息发送器
         *self.message_sender.write().await = None;
@@ -366,31 +431,19 @@ impl WebSocketClient {
         }
     }
 
-    /// 强制重连
+    /// Acknowledge replacement of the root, without waiting for a handshake.
     pub async fn force_reconnect(&self) -> Result<()> {
-        self.ensure_session()?;
-        info!("Force reconnecting");
-
-        // 获取连接锁
-        let _lock = self.connection_mutex.lock().await;
-
-        // 标记为重连，以便前端显示同步提示
-        self.is_reconnecting.store(true, Ordering::SeqCst);
-
-        self.reconnect_attempts.store(0, Ordering::SeqCst);
-
-        // 先断开当前连接
-        self.internal_disconnect().await;
-
-        // 重新连接
-        let config = self.config.read().await.clone();
-
-        // 更新配置
-        *self.config.write().await = config.clone();
-        self.should_stop.store(false, Ordering::SeqCst);
-
-        // 开始连接循环
-        self.connection_loop().await
+        self.tasks
+            .start(
+                true,
+                || self.ensure_session(),
+                async {
+                    self.reset_disconnected_state().await;
+                    self.is_reconnecting.store(true, Ordering::SeqCst);
+                },
+                self.run_connection(),
+            )
+            .await
     }
 
     /// 主连接循环
@@ -398,7 +451,7 @@ impl WebSocketClient {
         loop {
             self.ensure_session()?;
             // 检查是否应该停止
-            if self.should_stop.load(Ordering::SeqCst) {
+            if self.tasks.should_stop.load(Ordering::SeqCst) {
                 info!("Received stop signal, exiting connection loop");
                 break;
             }
@@ -419,7 +472,7 @@ impl WebSocketClient {
 
                     // 监控连接状态，直到断开
                     while self.is_ws_connected.load(Ordering::SeqCst)
-                        && !self.should_stop.load(Ordering::SeqCst)
+                        && !self.tasks.should_stop.load(Ordering::SeqCst)
                     {
                         sleep(Duration::from_millis(100)).await;
                     }
@@ -433,6 +486,8 @@ impl WebSocketClient {
                     continue;
                 }
                 Err(e) => {
+                    // A failed post-handshake setup may already have registered sync work.
+                    self.cleanup_connection_state().await;
                     // REQ-017 #198：握手被鉴权拒绝（HTTP 401/403）——不做普通退避计数，
                     // 直接进入 refresh 自愈（由循环顶部统一处理）
                     if self.auth_failed.load(Ordering::SeqCst) {
@@ -544,7 +599,7 @@ impl WebSocketClient {
             "WS authentication unrecoverable ({}), stopping reconnect and notifying frontend",
             reason
         );
-        self.should_stop.store(true, Ordering::SeqCst);
+        self.tasks.should_stop.store(true, Ordering::SeqCst);
         self.is_ws_connected.store(false, Ordering::SeqCst);
         self.update_state(ConnectionState::Error, false).await;
         if let Err(e) = self.events().emit(
@@ -560,6 +615,7 @@ impl WebSocketClient {
 
     /// 清理连接状态
     async fn cleanup_connection_state(&self) {
+        self.tasks.stop_children().await;
         // 停止心跳
         self.heartbeat_active.store(false, Ordering::SeqCst);
 
@@ -567,7 +623,7 @@ impl WebSocketClient {
         *self.message_sender.write().await = None;
 
         // 清理关闭信号发送器
-        *self.close_sender.write().await = None;
+        *self.tasks.close_sender.write().await = None;
 
         // 重置连接状态
         self.is_ws_connected.store(false, Ordering::SeqCst);
@@ -619,7 +675,7 @@ impl WebSocketClient {
                 warn!("WS handshake rejected with auth error: {}", e);
                 self.auth_failed.store(true, Ordering::SeqCst);
             }
-            anyhow::anyhow!("Failed to connect to WebSocket '{}': {}", url_str, e)
+            anyhow::anyhow!("Failed to connect to WebSocket: {}", e)
         })?;
 
         self.ensure_session()?;
@@ -631,7 +687,7 @@ impl WebSocketClient {
 
         // 创建关闭信号通道
         let (close_sender, mut close_receiver) = mpsc::unbounded_channel();
-        *self.close_sender.write().await = Some(close_sender);
+        *self.tasks.close_sender.write().await = Some(close_sender);
 
         // 更新连接状态
         let was_reconnecting = self.is_reconnecting.swap(false, Ordering::SeqCst);
@@ -639,7 +695,7 @@ impl WebSocketClient {
             .await;
 
         if was_reconnecting {
-            self.schedule_post_reconnect_sync();
+            self.schedule_post_reconnect_sync().await;
         }
 
         // 标记为已连接
@@ -651,9 +707,11 @@ impl WebSocketClient {
         // 启动心跳
         self.start_heartbeat().await;
 
+        // Register without an await between spawn and push, even if the root is aborted.
+        let mut handles = self.tasks.children.write().await;
         // 处理消息发送
         let message_sender_task = {
-            let should_stop = self.should_stop.clone();
+            let should_stop = self.tasks.should_stop.clone();
             let is_ws_connected = self.is_ws_connected.clone();
             let app_handle = self.app_handle.clone();
             let binding = self.binding.clone();
@@ -681,8 +739,10 @@ impl WebSocketClient {
                         else => break,
                     }
                 }
+                is_ws_connected.store(false, Ordering::SeqCst);
             })
         };
+        handles.push(message_sender_task);
 
         // 处理消息接收
         let message_receiver_task = {
@@ -749,40 +809,10 @@ impl WebSocketClient {
                         _ => {}
                     }
                 }
+                is_ws_connected.store(false, Ordering::SeqCst);
             })
         };
-
-        // 启动后台任务监控
-        let should_stop = self.should_stop.clone();
-        let heartbeat_active = self.heartbeat_active.clone();
-        let message_sender_ref = self.message_sender.clone();
-
-        let monitor_task = tokio::spawn(async move {
-            // 等待任务完成或停止信号
-            tokio::select! {
-                _ = message_sender_task => {
-                    info!("Message sending task ended");
-                }
-                _ = message_receiver_task => {
-                    info!("Message receiving task ended");
-                }
-                _ = async {
-                    while !should_stop.load(Ordering::SeqCst) {
-                        sleep(Duration::from_millis(100)).await;
-                    }
-                } => {
-                    info!("Received stop signal");
-                }
-            }
-
-            // 清理
-            heartbeat_active.store(false, Ordering::SeqCst);
-            *message_sender_ref.write().await = None;
-        });
-
-        // 保存监控任务句柄
-        let mut handles = self.task_handles.write().await;
-        handles.push(monitor_task);
+        handles.push(message_receiver_task);
 
         info!("WebSocket connection and background tasks started");
         Ok(())
@@ -1204,9 +1234,10 @@ impl WebSocketClient {
         let interval_ms = config.heartbeat_interval;
         let timeout_ms = config.heartbeat_timeout;
 
+        let mut handles = self.tasks.children.write().await;
         let heartbeat_task = {
             let heartbeat_active = self.heartbeat_active.clone();
-            let should_stop = self.should_stop.clone();
+            let should_stop = self.tasks.should_stop.clone();
             let last_pong_time = self.last_pong_time.clone();
             let consecutive_failures = self.consecutive_failures.clone();
             let message_sender = self.message_sender.clone();
@@ -1286,8 +1317,6 @@ impl WebSocketClient {
             })
         };
 
-        // 保存心跳任务句柄
-        let mut handles = self.task_handles.write().await;
         handles.push(heartbeat_task);
     }
 
@@ -1412,6 +1441,9 @@ impl WebSocketClient {
 
     /// 检查并恢复连接（从后台恢复时调用）
     async fn check_and_recover_connection(&self) {
+        if self.is_retired() {
+            return;
+        }
         let current_state = self.get_state().await;
         let last_pong = self.last_pong_time.load(Ordering::SeqCst);
         let now = chrono::Utc::now().timestamp_millis() as u64;
@@ -1429,6 +1461,9 @@ impl WebSocketClient {
                     // 60秒无心跳
                     warn!("Connection may be lost, forcing reconnection");
                     if let Err(e) = self.force_reconnect().await {
+                        if self.is_retired() {
+                            return;
+                        }
                         warn!("Auto-reconnection failed: {}", e);
                         // 通知前端需要重连
                         if let Err(emit_err) = self.events().emit(
@@ -1450,6 +1485,9 @@ impl WebSocketClient {
             ConnectionState::Disconnected | ConnectionState::Error => {
                 info!("Connection disconnected, attempting to reconnect");
                 if let Err(e) = self.force_reconnect().await {
+                    if self.is_retired() {
+                        return;
+                    }
                     warn!("Auto-reconnection failed: {}", e);
                     // 通知前端需要重连
                     if let Err(emit_err) = self.events().emit(
@@ -1482,6 +1520,9 @@ impl WebSocketClient {
                     info!("Test heartbeat sent successfully");
                 }
                 Err(e) => {
+                    if self.is_retired() {
+                        return;
+                    }
                     warn!("Test heartbeat failed: {}", e);
                     // 通过事件通知前端需要重连
                     if let Err(emit_err) = self.events().emit(
@@ -1509,16 +1550,17 @@ impl WebSocketClient {
         self.is_ws_connected.load(Ordering::SeqCst)
     }
 
-    fn schedule_post_reconnect_sync(&self) {
+    async fn schedule_post_reconnect_sync(&self) {
         let app_handle = self.app_handle.clone();
         let binding = self.binding.clone();
-        tokio::spawn(async move {
+        let mut handles = self.tasks.children.write().await;
+        handles.push(tokio::spawn(async move {
             if let Err(err) = Self::run_sync_messages(&app_handle, &binding).await {
                 warn!("Post-reconnect message sync failed: {}", err);
             } else {
                 info!("Post-reconnect message sync completed");
             }
-        });
+        }));
     }
 
     async fn run_sync_messages(
@@ -1540,6 +1582,453 @@ impl WebSocketClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::oneshot;
+
+    #[derive(Default)]
+    struct Runs {
+        active: AtomicU32,
+        peak: AtomicU32,
+        events: std::sync::Mutex<Vec<(&'static str, bool)>>,
+    }
+
+    struct Running(Arc<Runs>, &'static str);
+    impl Drop for Running {
+        fn drop(&mut self) {
+            self.0.events.lock().unwrap().push((self.1, false));
+            self.0.active.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    // Only the root future is substituted. Locking, stopping, joining, retirement and
+    // replacement execute the exact production ConnectionTasks used by the client.
+    async fn tracked_root(
+        runs: Arc<Runs>,
+        name: &'static str,
+        healthy: Option<Arc<AtomicBool>>,
+        ready: oneshot::Sender<()>,
+    ) {
+        let active = runs.active.fetch_add(1, Ordering::SeqCst) + 1;
+        runs.peak.fetch_max(active, Ordering::SeqCst);
+        runs.events.lock().unwrap().push((name, true));
+        let _running = Running(runs, name);
+        let _ = ready.send(());
+        if let Some(stop) = healthy {
+            while !stop.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        } else {
+            std::future::pending::<()>().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn lifecycle_pending_and_healthy_reconnect_ack_after_old_exit() {
+        for healthy in [false, true] {
+            let tasks = ConnectionTasks::default();
+            let runs = Arc::new(Runs::default());
+            let (ready, started) = oneshot::channel();
+            timeout(
+                Duration::from_secs(1),
+                tasks.start(
+                    false,
+                    || Ok(()),
+                    async {},
+                    tracked_root(
+                        runs.clone(),
+                        "old",
+                        healthy.then(|| tasks.should_stop.clone()),
+                        ready,
+                    ),
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            started.await.unwrap();
+            // Repeated init while connecting/connected must not spawn a second root.
+            tasks
+                .start(false, || Ok(()), async {}, async {
+                    panic!("duplicate root")
+                })
+                .await
+                .unwrap();
+            let (ready, started) = oneshot::channel();
+            timeout(
+                Duration::from_secs(1),
+                tasks.start(
+                    true,
+                    || Ok(()),
+                    async {},
+                    tracked_root(runs.clone(), "new", None, ready),
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            started.await.unwrap();
+            assert_eq!(
+                *runs.events.lock().unwrap(),
+                vec![("old", true), ("old", false), ("new", true)]
+            );
+            assert_eq!(runs.peak.load(Ordering::SeqCst), 1);
+            // ACK returned although the replacement's simulated handshake is still pending.
+            assert_eq!(runs.active.load(Ordering::SeqCst), 1);
+            timeout(Duration::from_secs(1), tasks.stop()).await.unwrap();
+            assert_eq!(runs.active.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn lifecycle_cancelled_control_retains_root_for_next_request() {
+        let tasks = ConnectionTasks::default();
+        let runs = Arc::new(Runs::default());
+        let (ready, started) = oneshot::channel();
+        tasks
+            .start(
+                false,
+                || Ok(()),
+                async {},
+                tracked_root(runs.clone(), "old", None, ready),
+            )
+            .await
+            .unwrap();
+        started.await.unwrap();
+        let (close, mut closed) = mpsc::unbounded_channel();
+        *tasks.close_sender.write().await = Some(close);
+        let mut replacement = Box::pin(tasks.start(true, || Ok(()), async {}, async {
+            panic!("cancelled root started")
+        }));
+        tokio::select! {
+            result = &mut replacement => panic!("control completed before grace: {result:?}"),
+            _ = closed.recv() => {}
+        }
+        drop(replacement);
+        assert!(
+            tasks
+                .root
+                .lock()
+                .await
+                .as_ref()
+                .is_some_and(|root| !root.is_finished())
+        );
+        let (ready, started) = oneshot::channel();
+        timeout(
+            Duration::from_secs(1),
+            tasks.start(
+                false,
+                || Ok(()),
+                async {},
+                tracked_root(runs.clone(), "new", None, ready),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        started.await.unwrap();
+        assert_eq!(runs.peak.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *runs.events.lock().unwrap(),
+            vec![("old", true), ("old", false), ("new", true)]
+        );
+        tasks.stop().await;
+    }
+
+    #[tokio::test]
+    async fn lifecycle_cancelled_child_join_retains_all_children_and_blocks_late_callbacks() {
+        let tasks = ConnectionTasks::default();
+        let runs = Arc::new(Runs::default());
+        let mutations = Arc::new(AtomicU32::new(0));
+        let mut callbacks = Vec::new();
+        for name in ["sender", "receiver", "heartbeat", "sync"] {
+            let (ready, started) = oneshot::channel();
+            let (send, receive) = oneshot::channel::<()>();
+            callbacks.push(send);
+            let runs = runs.clone();
+            let mutations = mutations.clone();
+            let mut children = tasks.children.write().await;
+            children.push(tokio::spawn(async move {
+                runs.active.fetch_add(1, Ordering::SeqCst);
+                let _running = Running(runs, name);
+                let _ = ready.send(());
+                if receive.await.is_ok() {
+                    mutations.fetch_add(1, Ordering::SeqCst);
+                }
+            }));
+            drop(children);
+            started.await.unwrap();
+        }
+        let mut cleanup = Box::pin(tasks.stop_children());
+        // On this single-thread runtime, aborted children cannot finish before we yield.
+        assert!(futures_util::poll!(&mut cleanup).is_pending());
+        drop(cleanup);
+        assert_eq!(tasks.children.try_read().unwrap().len(), 4);
+        timeout(Duration::from_secs(1), tasks.stop_children())
+            .await
+            .unwrap();
+        assert!(tasks.children.read().await.is_empty());
+        assert_eq!(runs.active.load(Ordering::SeqCst), 0);
+        assert!(
+            callbacks
+                .into_iter()
+                .all(|callback| callback.send(()).is_err())
+        );
+        assert_eq!(mutations.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn lifecycle_invalidated_binding_during_stop_does_not_start() {
+        let store = crate::session::SessionStore::new(Arc::new(Mutex::new(())));
+        let binding = store
+            .install(
+                0,
+                "http://offline.invalid".into(),
+                "1".into(),
+                sea_orm::DatabaseConnection::Disconnected,
+            )
+            .await
+            .unwrap();
+        let validate = || {
+            anyhow::ensure!(store.is_current(&binding), "stale source binding");
+            Ok(())
+        };
+        let tasks = ConnectionTasks::default();
+        let runs = Arc::new(Runs::default());
+        let (ready, started) = oneshot::channel();
+        tasks
+            .start(
+                false,
+                validate,
+                async {},
+                tracked_root(runs.clone(), "old", None, ready),
+            )
+            .await
+            .unwrap();
+        started.await.unwrap();
+        let (close, mut closed) = mpsc::unbounded_channel();
+        *tasks.close_sender.write().await = Some(close);
+        let mut replacement = Box::pin(tasks.start(true, validate, async {}, async {
+            panic!("stale root started")
+        }));
+        tokio::select! {
+            result = &mut replacement => panic!("unexpected early result: {result:?}"),
+            _ = closed.recv() => { store.invalidate().await; }
+        }
+        assert!(
+            timeout(Duration::from_secs(1), replacement)
+                .await
+                .unwrap()
+                .is_err()
+        );
+        assert!(tasks.root.lock().await.is_none());
+        assert_eq!(runs.active.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn lifecycle_cancelled_stop_and_competing_controls_keep_one_owner() {
+        let tasks = ConnectionTasks::default();
+        let runs = Arc::new(Runs::default());
+        let (ready, started) = oneshot::channel();
+        tasks
+            .start(
+                false,
+                || Ok(()),
+                async {},
+                tracked_root(runs.clone(), "old", None, ready),
+            )
+            .await
+            .unwrap();
+        started.await.unwrap();
+        let (close, mut closed) = mpsc::unbounded_channel();
+        *tasks.close_sender.write().await = Some(close);
+        let mut stop = Box::pin(tasks.stop());
+        tokio::select! {
+            _ = &mut stop => panic!("pending root stopped before grace"),
+            _ = closed.recv() => {}
+        }
+        drop(stop);
+        assert!(tasks.is_retired());
+        assert!(tasks.root.lock().await.is_some());
+        let (init, force, ()) = timeout(Duration::from_secs(1), async {
+            tokio::join!(
+                tasks.start(false, || Ok(()), async {}, async { panic!("late init") }),
+                tasks.start(true, || Ok(()), async {}, async {
+                    panic!("late foreground")
+                }),
+                tasks.stop(),
+            )
+        })
+        .await
+        .unwrap();
+        assert!(init.is_err());
+        assert!(force.is_err());
+        assert!(tasks.root.lock().await.is_none());
+        assert_eq!(runs.peak.load(Ordering::SeqCst), 1);
+        assert_eq!(runs.active.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn lifecycle_init_owner_commit_rejects_stale_waiter_and_holds_session_gate() {
+        let sessions = crate::session::SessionStore::new(Arc::new(Mutex::new(())));
+        let old = sessions
+            .install(
+                0,
+                "http://offline.invalid".into(),
+                "A".into(),
+                sea_orm::DatabaseConnection::Disconnected,
+            )
+            .await
+            .unwrap();
+        let owner = RwLock::new(Some(Arc::new(ConnectionTasks::default())));
+        let mut publishing = owner.write().await;
+        let mut stale = Box::pin(crate::websocket::commands::commit_ws_owner(
+            &owner,
+            &sessions,
+            &old,
+            |owner| {
+                owner.as_ref().unwrap().retire();
+                Ok(())
+            },
+        ));
+        assert!(futures_util::poll!(&mut stale).is_pending());
+        let epoch = sessions.invalidate().await;
+        let current = sessions
+            .install(
+                epoch,
+                "http://offline.invalid".into(),
+                "B".into(),
+                sea_orm::DatabaseConnection::Disconnected,
+            )
+            .await
+            .unwrap();
+        let tasks = Arc::new(ConnectionTasks::default());
+        let runs = Arc::new(Runs::default());
+        let (ready, started) = oneshot::channel();
+        tasks
+            .start(
+                false,
+                || Ok(()),
+                async {},
+                tracked_root(runs.clone(), "B", Some(tasks.should_stop.clone()), ready),
+            )
+            .await
+            .unwrap();
+        started.await.unwrap();
+        *publishing = Some(tasks.clone());
+        drop(publishing);
+        let rejected = timeout(Duration::from_secs(1), stale)
+            .await
+            .unwrap()
+            .is_err();
+        let untouched = !tasks.is_retired() && !tasks.should_stop.load(Ordering::SeqCst);
+        let gate_held =
+            crate::websocket::commands::commit_ws_owner(&owner, &sessions, &current, |_| {
+                let mut invalidation = Box::pin(sessions.invalidate());
+                let mut context =
+                    std::task::Context::from_waker(futures_util::task::noop_waker_ref());
+                Ok(std::future::Future::poll(invalidation.as_mut(), &mut context).is_pending())
+            })
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(1), tasks.stop()).await.unwrap();
+        assert!(rejected, "stale init was permitted to retire new epoch B");
+        assert!(untouched, "stale init changed B's terminal/stop state");
+        assert!(
+            gate_held,
+            "owner decision was not protected from session invalidation"
+        );
+        assert_eq!(runs.peak.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn lifecycle_retire_between_validation_and_root_commit_cannot_be_overwritten() {
+        let tasks = Arc::new(ConnectionTasks::default());
+        let runs = Arc::new(Runs::default());
+        let (validated, at_commit) = oneshot::channel();
+        let validated = std::sync::Mutex::new(Some(validated));
+        let (release, released) = std::sync::mpsc::channel();
+        let validations = AtomicU32::new(0);
+        let (ready, started) = oneshot::channel();
+        let starting = {
+            let tasks = tasks.clone();
+            let runs = runs.clone();
+            tokio::spawn(async move {
+                tasks
+                    .start(
+                        false,
+                        move || {
+                            if validations.fetch_add(1, Ordering::SeqCst) == 1 {
+                                validated.lock().unwrap().take().unwrap().send(()).unwrap();
+                                // A bounded test-only rendezvous inside the real second validate.
+                                released.recv_timeout(Duration::from_secs(2)).unwrap();
+                            }
+                            Ok(())
+                        },
+                        async {},
+                        tracked_root(runs, "retired", Some(tasks.should_stop.clone()), ready),
+                    )
+                    .await
+            })
+        };
+        timeout(Duration::from_secs(2), at_commit)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut stopping = Box::pin(tasks.stop());
+        // Runs on another OS thread while start owns root, then cancels its wait.
+        assert!(futures_util::poll!(&mut stopping).is_pending());
+        drop(stopping);
+        release.send(()).unwrap();
+        let accepted = timeout(Duration::from_secs(2), starting)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_ok();
+        if accepted {
+            timeout(Duration::from_secs(1), started)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let ran = runs.peak.load(Ordering::SeqCst);
+        // Always collect even the intentionally buggy candidate before asserting RED.
+        timeout(Duration::from_secs(1), tasks.stop()).await.unwrap();
+        assert!(
+            !accepted,
+            "start overwrote permanent retirement after validation"
+        );
+        assert_eq!(ran, 0, "retired owner ran new IO");
+        assert!(tasks.root.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn lifecycle_retired_clone_rejects_late_foreground_but_auth_stop_can_restart() {
+        let tasks = Arc::new(ConnectionTasks::default());
+        // Authentication give-up stops execution, but does not retire the resource owner.
+        tasks.should_stop.store(true, Ordering::SeqCst);
+        let runs = Arc::new(Runs::default());
+        let (ready, started) = oneshot::channel();
+        tasks
+            .start(
+                true,
+                || Ok(()),
+                async {},
+                tracked_root(runs.clone(), "manual", None, ready),
+            )
+            .await
+            .unwrap();
+        started.await.unwrap();
+        let late_foreground = tasks.clone();
+        timeout(Duration::from_secs(1), tasks.stop()).await.unwrap();
+        assert!(
+            late_foreground
+                .start(true, || Ok(()), async {}, async {
+                    panic!("retired root started")
+                })
+                .await
+                .is_err()
+        );
+        assert_eq!(runs.active.load(Ordering::SeqCst), 0);
+    }
 
     /// REQ-017 #198：4001 是唯一鉴权失败关闭码（server #206 契约）。
     /// 1007（旧的 uid==null → BAD_DATA 通用码）不再视为鉴权信号——避免把协议错误误判成 token 失效。
