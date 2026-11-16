@@ -147,7 +147,7 @@ export class RustWebSocketClient {
 
       await invoke('ws_init_connection', { params })
 
-      info('[RustWS] WebSocket 连接初始化成功')
+      info('[RustWS] WebSocket 连接已安排，等待连接状态事件')
     } catch (err) {
       error(`[RustWS] 连接初始化失败: ${err}`)
       throw err
@@ -199,7 +199,7 @@ export class RustWebSocketClient {
   async forceReconnect(): Promise<void> {
     try {
       await invoke('ws_force_reconnect')
-      info('[RustWS] 强制重连成功')
+      info('[RustWS] 强制重连已安排，等待连接状态事件')
     } catch (err) {
       error(`[RustWS] 强制重连失败: ${err}`)
       throw err

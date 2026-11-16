@@ -1,5 +1,5 @@
 use crate::AppData;
-use crate::session::SessionIdentity;
+use crate::session::{SessionBinding, SessionIdentity, SessionStore};
 
 use super::{client::WebSocketClient, types::*};
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,20 @@ pub fn get_websocket_client_container() -> &'static Arc<RwLock<Option<WebSocketC
         info!("Creating global WebSocket client container");
         Arc::new(RwLock::new(None))
     })
+}
+
+// The closure is the synchronous owner decision used by the actual init command.
+pub(super) async fn commit_ws_owner<T, R>(
+    container: &RwLock<Option<T>>,
+    sessions: &SessionStore,
+    binding: &SessionBinding,
+    commit: impl FnOnce(&mut Option<T>) -> Result<R, String>,
+) -> Result<R, String> {
+    // GLOBAL -> session gate. Existing gate holders never acquire GLOBAL.
+    // Both guards cover only this synchronous decision, never stop/join or network IO.
+    let mut owner = container.write().await;
+    let _session = sessions.commit(binding).await?;
+    commit(&mut owner)
 }
 
 /// WebSocket 初始化参数
@@ -79,43 +93,48 @@ pub async fn ws_init_connection(
         ..Default::default()
     };
     drop(rc);
-    if !state.session.is_current(&binding) {
-        return Err("WS初始化代次失效".into());
-    }
-
-    // 获取或创建客户端实例
-    let client = {
-        let mut client_guard = client_container.write().await;
-
-        if let Some(existing) = client_guard.as_ref() {
-            if existing.binding.identity == binding.identity {
-                if existing.is_connected() {
-                    return Ok(SuccessResponse::new());
-                }
-            } else {
-                existing.internal_disconnect().await;
-                *client_guard = None;
+    // Keep an old owner visible until all its resources have actually stopped.
+    // No GLOBAL guard may cross control/join: receivers acquire it to send ACKs.
+    let (existing, replace) =
+        commit_ws_owner(client_container, &state.session, &binding, |owner| {
+            if owner.is_none() {
+                *owner = Some(WebSocketClient::new(
+                    app_handle.clone(),
+                    binding.clone(),
+                    config.clone(),
+                ));
             }
-        }
-        if let Some(existing) = client_guard.as_ref() {
-            existing.clone()
-        } else {
-            let client = WebSocketClient::new(app_handle, binding);
-            *client_guard = Some(client.clone());
-            client
-        }
+            let existing = owner.as_ref().unwrap().clone();
+            let replace = existing.binding.identity != binding.identity || existing.is_retired();
+            if replace {
+                existing.retire();
+            }
+            Ok((existing, replace))
+        })
+        .await?;
+    let client = if !replace {
+        existing
+    } else {
+        existing.disconnect().await;
+        commit_ws_owner(client_container, &state.session, &binding, |owner| {
+            if !owner
+                .as_ref()
+                .is_some_and(|current| current.same_owner(&existing))
+            {
+                return Err("WS初始化已被另一控制请求取代".into());
+            }
+            let client = WebSocketClient::new(app_handle, binding.clone(), config.clone());
+            *owner = Some(client.clone());
+            Ok(client)
+        })
+        .await?
     };
 
-    tokio::spawn(async move {
-        match client.connect(config).await {
-            Ok(_) => {
-                info!("WebSocket connection initialized successfully");
-            }
-            Err(e) => {
-                error!(" WebSocket connection initialization failed: {}", e);
-            }
-        }
-    });
+    client
+        .connect(config)
+        .await
+        .map_err(|error| error.to_string())?;
+    info!("WebSocket connection scheduled");
 
     Ok(SuccessResponse::new())
 }
@@ -129,16 +148,25 @@ pub async fn ws_disconnect(
     info!("Received WebSocket disconnect request");
 
     let client_container = get_websocket_client_container();
-    let mut client_guard = client_container.write().await;
-
-    if client_guard
-        .as_ref()
-        .is_some_and(|client| client.binding.identity != binding)
-    {
-        return Err("拒绝旧账号任务断开新连接".into());
-    }
-    if let Some(client) = client_guard.take() {
-        client.internal_disconnect().await;
+    let client = {
+        let guard = client_container.read().await;
+        if guard
+            .as_ref()
+            .is_some_and(|client| client.binding.identity != binding)
+        {
+            return Err("拒绝旧账号任务断开新连接".into());
+        }
+        guard.clone()
+    };
+    if let Some(client) = client {
+        client.disconnect().await;
+        let mut guard = client_container.write().await;
+        if guard
+            .as_ref()
+            .is_some_and(|current| current.same_owner(&client))
+        {
+            *guard = None;
+        }
     }
 
     info!("WebSocket connection disconnected");
@@ -207,15 +235,15 @@ pub async fn ws_force_reconnect(
     info!("Received force reconnect request");
 
     let client_container = get_websocket_client_container();
-    let client_guard = client_container.read().await;
+    let client = client_container.read().await.clone();
 
-    if let Some(client) = client_guard.as_ref() {
+    if let Some(client) = client {
         if client.binding.identity != binding {
             return Err("WS重连账号代次失效".into());
         }
         match client.force_reconnect().await {
             Ok(_) => {
-                info!("WebSocket reconnected successfully");
+                info!("WebSocket reconnection scheduled");
                 Ok(SuccessResponse::new())
             }
             Err(e) => {
