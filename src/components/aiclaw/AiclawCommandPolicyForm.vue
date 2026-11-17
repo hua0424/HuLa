@@ -186,7 +186,7 @@ const fetchPolicy = async () => {
     if (disposed) return
     defaults.value = policy?.defaults ?? []
     editableRows.value = (policy?.rows ?? [])
-      .filter((row) => (props.roomId ? Number(row.roomId) > 0 : Number(row.roomId) === 0))
+      .filter((row) => String(row.roomId) === (props.roomId || '0'))
       .map(toEditable)
   } catch {
     if (!disposed) loadError.value = true
