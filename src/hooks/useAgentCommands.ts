@@ -515,16 +515,44 @@ export function useAgentCommands(
         modelStatus.value = 'unknown'
         return
       }
-      if (result.catalog?.version !== intent.version) {
+      const modelCatalog = result.catalog
+      const menuCatalog = catalog.value
+      // OpenClaw can advertise the command without fetching models. Only the first page
+      // of the same connection/conversation may replace the menu version.
+      const openClaw = menuCatalog?.framework === 'openclaw'
+      const menuScope = openClaw ? /^openclaw-menu:([a-f0-9]{64}):[a-f0-9]{64}$/.exec(intent.version)?.[1] : undefined
+      const pageScope = openClaw
+        ? /^openclaw-models:([a-f0-9]{64}):[a-f0-9]{64}$/.exec(modelCatalog?.version ?? '')?.[1]
+        : undefined
+      const firstSnapshot = offset === 0 && !!menuScope && menuScope === pageScope
+      if (
+        !modelCatalog ||
+        modelCatalog.framework !== menuCatalog?.framework ||
+        modelCatalog.runtimeVersion !== menuCatalog.runtimeVersion ||
+        (!firstSnapshot && modelCatalog.version !== intent.version) ||
+        (openClaw &&
+          (!pageScope ||
+            !modelCatalog.capabilities?.some(
+              (entry) =>
+                entry.id === 'model.set' &&
+                entry.kind === 'model' &&
+                entry.source === 'model' &&
+                entry.defaultVisibility === 'public' &&
+                entry.permission === intent.capability.permission &&
+                executable(entry)
+            )))
+      ) {
         modelStatus.value = 'catalog_stale'
         selectedModel.value = undefined
+        models.value = undefined
         return
       }
-      const page = result.catalog.models
+      const page = modelCatalog.models
       if (!page || page.items.length > 100 || page.offset !== offset) {
         modelStatus.value = 'unknown'
         return
       }
+      if (firstSnapshot) selected.value = { ...intent, version: modelCatalog.version }
       models.value = page
       pageQuery = query
     } catch {
