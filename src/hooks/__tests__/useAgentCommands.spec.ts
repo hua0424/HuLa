@@ -132,6 +132,117 @@ it('blocks missing model parameters then sends the exact disconnected native pai
   })
 })
 
+const openClawModelCapability = {
+  ...setModel,
+  scope: 'conversation' as const,
+  source: 'model',
+  permission: 'open' as const
+}
+const openClawModel = { providerId: 'gateway', modelId: 'chosen', label: 'Chosen', connected: true }
+const openClawModelRows = [
+  openClawModel,
+  ...Array.from({ length: 100 }, (_, n) => ({ ...openClawModel, modelId: `model-${String(n).padStart(2, '0')}` }))
+]
+
+it('uses the OpenClaw model snapshot version from the same menu scope across pages and submit', async () => {
+  const { editor, commands } = setup()
+  const scope = '1'.repeat(64)
+  const version = `openclaw-models:${scope}:${'3'.repeat(64)}`
+  const rows = openClawModelRows
+  const effect = { kind: 'model', providerId: 'gateway', modelId: 'chosen', effective: 'next_request' }
+  api.postAgentCommand.mockImplementation(async (body) => {
+    const { requestId, roomId, aiclawUid, operation } = body
+    const receipt = { requestId, roomId, aiclawUid, operation, status: 'completed' }
+    if (operation === 'invoke') return { ...receipt, phase: 'outcome', generation: '1', receiptRevision: 1, effect }
+    const targeted = body.capabilityId === 'model.set'
+    const offset = body.parameters?.offset ?? 0
+    return {
+      ...receipt,
+      catalog: {
+        framework: 'openclaw',
+        runtimeVersion: '2026.6.5',
+        capabilities: [openClawModelCapability],
+        version: targeted ? version : `openclaw-menu:${scope}:${'2'.repeat(64)}`,
+        ...(targeted && {
+          models: {
+            items: rows.slice(offset, offset + 100),
+            total: rows.length,
+            offset,
+            ...(offset === 0 ? { nextOffset: 100 } : {})
+          }
+        })
+      }
+    }
+  })
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  await commands.searchModels()
+  expect(commands.models.value).toMatchObject({ items: rows.slice(0, 100), offset: 0, nextOffset: 100 })
+  commands.chooseModel(commands.models.value!.items[0])
+  await commands.searchModels(100)
+  expect(commands.models.value).toEqual({ items: rows.slice(100), offset: 100, total: rows.length })
+  await commands.send()
+  expect(commands.receipt.value?.effect).toEqual(effect)
+  expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke').map(([body]) => body)).toEqual(
+    [
+      expect.objectContaining({
+        capabilityId: 'model.set',
+        catalogVersion: version,
+        parameters: { providerId: 'gateway', modelId: 'chosen' }
+      })
+    ]
+  )
+})
+
+it.each(['scope', 'policy', 'later-page'])('never submits an OpenClaw model from a changed %s', async (change) => {
+  const { editor, commands } = setup()
+  const scope = '1'.repeat(64)
+  const rows = openClawModelRows
+  api.postAgentCommand.mockImplementation(async (body) => {
+    const { requestId, roomId, aiclawUid, operation } = body
+    const receipt = { requestId, roomId, aiclawUid, operation }
+    if (operation === 'invoke') return { ...receipt, status: 'failed', phase: 'outcome', error: 'catalog_stale' }
+    const targeted = body.capabilityId === 'model.set'
+    const offset = body.parameters?.offset ?? 0
+    const pageScope = change === 'scope' ? '2'.repeat(64) : scope
+    return {
+      ...receipt,
+      status: 'completed',
+      catalog: {
+        framework: 'openclaw',
+        runtimeVersion: '2026.6.5',
+        capabilities: targeted && change === 'policy' ? [] : [openClawModelCapability],
+        version: targeted
+          ? `openclaw-models:${pageScope}:${(offset ? '4' : '3').repeat(64)}`
+          : `openclaw-menu:${scope}:${'2'.repeat(64)}`,
+        ...(targeted && {
+          models: {
+            items: rows.slice(offset, offset + 100),
+            total: rows.length,
+            offset,
+            ...(offset === 0 ? { nextOffset: 100 } : {})
+          }
+        })
+      }
+    }
+  })
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  await commands.searchModels()
+  if (change === 'later-page') {
+    expect(commands.models.value?.items).toEqual(rows.slice(0, 100))
+    commands.chooseModel(commands.models.value!.items[0])
+    await commands.searchModels(100)
+  }
+  expect(commands.modelStatus.value).toBe('catalog_stale')
+  expect(commands.models.value).toBeUndefined()
+  expect(commands.selectedModel.value).toBeUndefined()
+  expect(await commands.send()).toBe(true)
+  expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(0)
+})
+
 it.each(['budget', 'network'])(
   'retains verified native acceptance after %s and explicitly reconciles without POST',
   async (failure) => {
