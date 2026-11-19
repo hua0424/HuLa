@@ -213,20 +213,36 @@ it.each(invalidDeadlines)('does not persist an invalid wire deadline as observed
   expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
 })
 
-it('recovers on remount and reconnect with the original ID despite a changed draft and never replays POST', async () => {
+it('recovers the original ID on native socket reconnect without depending on presence or replaying POST', async () => {
   const old = await submit()
+  const expiresAt = old.commands.approvalExpiresAt.value
   old.scope.stop()
   api.getAgentCommand.mockRejectedValueOnce(new Error('offline'))
+  api.getAgentCommand.mockResolvedValueOnce({
+    ...submitted,
+    status: 'completed',
+    approvalStatus: 'approved',
+    phase: 'outcome',
+    expiresAt
+  })
   const restored = await setup()
   restored.editor.value.textContent = 'keep me'
   await flush()
+  expect(restored.commands.approvalExpiresAt.value).toBe(expiresAt)
+  expect(restored.commands.approvalLocked.value).toBe(true)
   const { useMitt } = await import('../useMitt')
+  const { MittEnum } = await import('@/enums')
   const { WsResponseMessageType } = await import('@/services/wsType')
   useMitt.emit(WsResponseMessageType.ONLINE, { _sessionBinding: identity })
+  useMitt.emit(MittEnum.WS_RECONNECTED, { _sessionBinding: { ...identity, sessionEpoch: identity.sessionEpoch - 1 } })
+  await flush()
+  expect(api.getAgentCommand).toHaveBeenCalledTimes(1)
+  useMitt.emit(MittEnum.WS_RECONNECTED, { _sessionBinding: identity })
   await flush()
   expect(api.getAgentCommand).toHaveBeenCalledTimes(2)
   expect(api.getAgentCommand).toHaveBeenLastCalledWith(submitted.requestId)
   expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
+  expect(restored.commands.receipt.value?.expiresAt).toBe(expiresAt)
   expect(restored.commands.status.value).toBe('completed')
   expect(restored.commands.approvalLocked.value).toBe(false)
   expect(restored.editor.value.textContent).toBe('keep me')
@@ -478,7 +494,7 @@ it('keeps the submitted owner across a real new menu lookup without using that m
   expect(api.postAgentCommand.mock.calls.filter(([request]) => request.operation === 'invoke')).toHaveLength(1)
 })
 
-it('keeps a submitted ID queryable on reconnect after real input and loss of the initial POST response', async () => {
+it.each(['before edit', 'after edit', 'after settlement'])('recovers a lost POST: reconnect %s', async (timing) => {
   const mounted = await setup()
   mounted.editor.value.textContent = '/'
   await mounted.commands.input()
@@ -493,15 +509,26 @@ it('keeps a submitted ID queryable on reconnect after real input and loss of the
   const pending = mounted.commands.send()
   await flush()
   const body = submitted
+  const { useMitt } = await import('../useMitt')
+  const { MittEnum } = await import('@/enums')
+  const reconnect = () => useMitt.emit(MittEnum.WS_RECONNECTED, { _sessionBinding: identity })
+  if (timing === 'before edit') {
+    expect(mounted.commands.busy.value).toBe(true)
+    reconnect()
+    await flush()
+    expect(api.getAgentCommand).not.toHaveBeenCalled()
+  }
   mounted.editor.value.textContent = 'my pending draft'
   await mounted.commands.input(true)
+  expect(mounted.commands.busy.value).toBe(false)
+  if (timing === 'after edit') reconnect()
+  await flush()
+  expect(api.getAgentCommand).not.toHaveBeenCalled()
   reject(new Error('response lost'))
   await pending
-  const { useMitt } = await import('../useMitt')
-  const { WsResponseMessageType } = await import('@/services/wsType')
-  useMitt.emit(WsResponseMessageType.ONLINE, { _sessionBinding: identity })
+  if (timing === 'after settlement') reconnect()
   await flush()
-  expect(api.getAgentCommand).toHaveBeenCalledWith(body.requestId)
+  expect(api.getAgentCommand.mock.calls).toEqual([[body.requestId]])
   expect(mounted.commands.status.value).toBe('completed')
   expect(mounted.commands.requestId.value).toBe(body.requestId)
   expect(mounted.editor.value.textContent).toBe('my pending draft')
