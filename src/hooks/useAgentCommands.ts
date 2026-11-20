@@ -19,6 +19,7 @@ import {
 } from '@/hooks/useAgentApproval'
 import { eventSession, sameSession, sessionBinding } from '@/services/sessionBinding'
 import { useMitt } from '@/hooks/useMitt'
+import { MittEnum } from '@/enums'
 import { WsResponseMessageType, type CommandApprovalPayload } from '@/services/wsType'
 
 type Target = { roomId: string; aiclawUid: string; group: boolean }
@@ -46,6 +47,8 @@ export function useAgentCommands(
   const requestId = ref('')
   const receipt = shallowRef<AgentCommandResult>()
   let trackedRequest: AgentCommandRequest | undefined
+  const submittingInvocation = shallowRef<AgentCommandRequest>()
+  let reconnectRequest: AgentCommandRequest | undefined
   let trackedIntent: Omit<Intent, 'version'> | undefined
   const busy = ref(false)
   const submitted = ref(false)
@@ -90,6 +93,8 @@ export function useAgentCommands(
     stopApprovalPoll()
     receipt.value = undefined
     trackedRequest = undefined
+    submittingInvocation.value = undefined
+    reconnectRequest = undefined
     trackedIntent = undefined
     requestId.value = ''
   }
@@ -206,18 +211,39 @@ export function useAgentCommands(
       saveCommandRecovery(sessionBinding.value, uid, session().group, trackedRequest, receipt.value)
     }
   }
-  const reconnected = (data: unknown) => {
-    if (sessionBinding.value && !sameSession(eventSession(data) ?? null, sessionBinding.value)) return
+  const recoverCurrentRequest = () => {
     if (!trackedRequest) restoreApprovalLock()
     else void reconcile()
   }
+  const reconnected = (data: unknown) => {
+    const origin = eventSession(data)
+    if (!origin || !sameSession(origin, sessionBinding.value)) return
+    if (trackedRequest && (busy.value || submittingInvocation.value === trackedRequest)) {
+      reconnectRequest = trackedRequest
+      return
+    }
+    reconnectRequest = undefined
+    recoverCurrentRequest()
+  }
+  // Draft edits can clear UI busy while the original submission still has no response.
+  watch([busy, submittingInvocation], ([isBusy, submitting]) => {
+    const request = reconnectRequest
+    if (!request || isBusy || submitting === request) return
+    reconnectRequest = undefined
+    if (request === trackedRequest) void reconcile()
+  })
+  const online = () => {
+    if (!sessionBinding.value) recoverCurrentRequest()
+  }
   useMitt.on(WsResponseMessageType.COMMAND_APPROVAL_RESULT, approvalResult)
-  useMitt.on(WsResponseMessageType.ONLINE, reconnected)
+  useMitt.on(MittEnum.WS_RECONNECTED, reconnected)
+  useMitt.on(WsResponseMessageType.ONLINE, online)
   onScopeDispose(() => {
     forgetRequest()
     epoch++
     useMitt.off(WsResponseMessageType.COMMAND_APPROVAL_RESULT, approvalResult)
-    useMitt.off(WsResponseMessageType.ONLINE, reconnected)
+    useMitt.off(MittEnum.WS_RECONNECTED, reconnected)
+    useMitt.off(WsResponseMessageType.ONLINE, online)
   })
 
   const receiptStatus = (result?: AgentCommandResult) => {
@@ -266,6 +292,7 @@ export function useAgentCommands(
     if (primary && !options.reconcile) {
       requestId.value = body.requestId
       trackedRequest = body
+      if (body.operation === 'invoke') submittingInvocation.value = body
       trackedIntent = intent
       receipt.value = undefined
       saveCommandRecovery(binding, uid, s.group, body)
@@ -321,7 +348,7 @@ export function useAgentCommands(
         approvalPollTimer = undefined
         if (!current(true) || !commandApprovalLock(userId(), body.roomId)) return
         try {
-          const next = await getAgentCommand(body.requestId)
+          const next = await getAgentCommand(body.requestId, binding)
           if (!consume(next, true)) return
           if (
             next?.status === 'pending' &&
@@ -336,7 +363,7 @@ export function useAgentCommands(
       }, 2_000)
     }
     try {
-      let result = options.reconcile ? await getAgentCommand(body.requestId) : await postAgentCommand(body)
+      let result = options.reconcile ? await getAgentCommand(body.requestId, binding) : await postAgentCommand(body, binding)
       if (!consume(result)) return
       // WS 可能丢失；pending 期间用有界 GET 兜底，批准/拒绝/过期后立即解锁。
       if (primary && result?.status === 'pending' && result.approvalStatus === 'pending') pollPending()
@@ -344,7 +371,7 @@ export function useAgentCommands(
       for (let attempt = 0; !options.reconcile && result?.status === 'accepted' && attempt < 10; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 1000))
         if (!current(true)) return
-        result = await getAgentCommand(body.requestId)
+        result = await getAgentCommand(body.requestId, binding)
         if (!consume(result, true)) return
       }
       return confirmed
@@ -357,6 +384,7 @@ export function useAgentCommands(
       if (denied.includes('command_policy_denied_')) throw error
       return undefined
     } finally {
+      if (submittingInvocation.value === body && !options.reconcile) submittingInvocation.value = undefined
       if (
         current(!!options.reconcile || receipt.value?.requestId === body.requestId) &&
         primary &&

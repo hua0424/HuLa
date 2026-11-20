@@ -245,7 +245,8 @@ describe('mention cursor restoration through the real picker and selection hooks
         roomId: 'room-1',
         aiclawUid: 'agent',
         operation: 'discover'
-      })
+      }),
+      null
     )
     expect(editor.querySelector('#aitSpan')).toBe(mention)
   })

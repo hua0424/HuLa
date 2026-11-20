@@ -118,6 +118,8 @@ export enum MittEnum {
   MOBILE_CLOSE_PANEL = 'mobileClosePanel',
   /** 全局文件拖拽 */
   GLOBAL_FILES_DROP = 'globalFilesDrop',
+  /** 本机 WebSocket 重连完成 */
+  WS_RECONNECTED = 'ws-reconnected',
   /** 切换会话 */
   MSG_INIT = 'msg_init',
   /** 会话切换完成*/

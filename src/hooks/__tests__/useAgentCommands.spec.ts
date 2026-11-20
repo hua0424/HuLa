@@ -313,7 +313,7 @@ it('rejects a foreign accepted POST before polling and reconciles only the origi
     reconciled: true
   })
   await commands.reconcile()
-  expect(api.getAgentCommand).toHaveBeenCalledWith(body.requestId)
+  expect(api.getAgentCommand).toHaveBeenCalledWith(body.requestId, null)
   expect(commands.status.value).toBe('completed')
   expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
 })
