@@ -52,6 +52,8 @@ vi.mock('@/hooks/useCommon.ts', () => ({
 // --- useMsgInput：共享可观测的 send，供移动端发送行为断言 ---
 const mobileSendMock = vi.fn().mockResolvedValue(undefined)
 const mobileDisabledSendRef = ref(false)
+const pickerOpen = ref(false)
+const pickerItems = ref([{ uid: 'agent', name: 'OpenCmdTestAI', avatar: '' }])
 vi.mock('@/hooks/useMsgInput.ts', () => ({
   useMsgInput: () => ({
     inputKeyDown: vi.fn(),
@@ -63,9 +65,9 @@ vi.mock('@/hooks/useMsgInput.ts', () => ({
     sendFilesDirect: vi.fn(),
     sendVoiceDirect: vi.fn(),
     sendEmojiDirect: vi.fn(),
-    personList: ref([]),
+    personList: pickerItems,
     disabledSend: mobileDisabledSendRef,
-    ait: ref(false),
+    ait: pickerOpen,
     chatKey: ref('Enter'),
     menuList: ref([]),
     selectedAitKey: ref(-1),
@@ -87,7 +89,7 @@ vi.mock('@/hooks/useMitt.ts', () => ({
 vi.mock('@/views/moreWindow/settings/config.ts', () => ({ useSendOptions: () => ref([]) }))
 
 vi.mock('@/stores/global', () => ({
-  useGlobalStore: () => ({ currentSession: ref({ roomId: 'room-1' }) })
+  useGlobalStore: () => ({ currentSession: ref({ roomId: 'room-1', type: 1 }) })
 }))
 vi.mock('@/stores/setting.ts', () => ({
   useSettingStore: () => ({ themes: ref({ content: 'light' }) })
@@ -121,8 +123,9 @@ const nButtonStub = {
   template: '<button :disabled="disabled" v-bind="$attrs"><slot /></button>'
 }
 
-const mountMobileInput = () =>
+const mountMobileInput = (attachTo?: HTMLElement) =>
   mount(MsgInput, {
+    attachTo,
     global: {
       plugins: [i18n],
       stubs: {
@@ -162,6 +165,21 @@ describe('#155 移动端 MsgInput testid', () => {
     await nextTick()
     expect(wrapper.find('[data-testid="mobile-send-button"]').exists()).toBe(true)
   })
+})
+
+it('the capture listener closes the mention picker only on an outside click', async () => {
+  const wrapper = mountMobileInput(document.body)
+  try {
+    pickerOpen.value = true
+    await nextTick()
+    await wrapper.get('.ait-options #image-chat-ait').trigger('click')
+    expect(wrapper.find('.ait-options').exists()).toBe(true)
+    await wrapper.get('[data-testid="mobile-voice-button"]').trigger('click')
+    expect(wrapper.find('.ait-options').exists()).toBe(false)
+  } finally {
+    wrapper.unmount()
+    pickerOpen.value = false
+  }
 })
 
 describe('#445 移动端发送走 IM（AI 模式已退役）', () => {

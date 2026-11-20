@@ -12,6 +12,8 @@ import {
   type AgentCommandRequest
 } from '../agentCommands'
 
+const binding = { backendKey: 'test-backend', uid: '1', sessionEpoch: 7 }
+
 beforeEach(() => {
   request.mockReset()
 })
@@ -26,8 +28,8 @@ it('posts a correlated command once through the authenticated platform wrapper',
     catalogVersion: 'v1'
   }
   request.mockResolvedValue({ ...body, status: 'accepted' })
-  await postAgentCommand(body)
-  expect(request).toHaveBeenCalledExactlyOnceWith({ url: 'aiclawCommands', body }, { showError: false })
+  await postAgentCommand(body, binding)
+  expect(request).toHaveBeenCalledExactlyOnceWith({ url: 'aiclawCommands', body, binding }, { showError: false })
 })
 it.each<Pick<AgentCommandRequest, 'operation' | 'capabilityId' | 'parameters'>>([
   { operation: 'discover', capabilityId: 'model.set', parameters: { query: 'native', offset: 100 } },
@@ -48,21 +50,21 @@ it.each<Pick<AgentCommandRequest, 'operation' | 'capabilityId' | 'parameters'>>(
     nativeRef: { sessionId: 's', inputId: 'i', parentId: 'p' }
   }
   request.mockResolvedValue(receipt)
-  expect(await postAgentCommand(body)).toEqual(receipt)
-  expect(request).toHaveBeenCalledExactlyOnceWith({ url: 'aiclawCommands', body }, { showError: false })
+  expect(await postAgentCommand(body, binding)).toEqual(receipt)
+  expect(request).toHaveBeenCalledExactlyOnceWith({ url: 'aiclawCommands', body, binding }, { showError: false })
 })
 
 it('queries the original request ID without resending POST', async () => {
-  await getAgentCommand('9f56fcba-2f91-48bb-a21f-95c898ff983b')
+  await getAgentCommand('9f56fcba-2f91-48bb-a21f-95c898ff983b', binding)
   expect(request).toHaveBeenCalledExactlyOnceWith(
-    { url: 'aiclawCommandResult', params: { requestId: '9f56fcba-2f91-48bb-a21f-95c898ff983b' } },
+    { url: 'aiclawCommandResult', params: { requestId: '9f56fcba-2f91-48bb-a21f-95c898ff983b' }, binding },
     { showError: false }
   )
 })
 it('propagates transport uncertainty without retrying', async () => {
   request.mockRejectedValue(new Error('timeout'))
   await expect(
-    postAgentCommand({ requestId: 'id', roomId: 'r', aiclawUid: 'a', operation: 'discover' })
+    postAgentCommand({ requestId: 'id', roomId: 'r', aiclawUid: 'a', operation: 'discover' }, binding)
   ).rejects.toThrow('timeout')
   expect(request).toHaveBeenCalledTimes(1)
 })

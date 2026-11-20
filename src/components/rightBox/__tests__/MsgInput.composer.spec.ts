@@ -295,7 +295,7 @@ describe('#503 native command controls', () => {
     })
     await wrapper.get('[data-testid="agent-command-reconcile"]').trigger('click')
     await flushPromises()
-    expect(commandApi.getAgentCommand).toHaveBeenCalledExactlyOnceWith(body.requestId)
+    expect(commandApi.getAgentCommand).toHaveBeenCalledExactlyOnceWith(body.requestId, null)
     expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(2)
     expect(wrapper.get('[data-testid="agent-command-status"]').text()).toContain('完成')
     expect(wrapper.get('[data-testid="agent-command-cancel"]').text()).toContain('不停止')

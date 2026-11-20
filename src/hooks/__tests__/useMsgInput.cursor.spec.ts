@@ -1,4 +1,4 @@
-import { flushPromises } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, ref } from 'vue'
 import type { EffectScope } from 'vue'
@@ -9,7 +9,10 @@ vi.mock('@/stores/global', () => ({
 }))
 vi.mock('@/stores/chat', () => ({ useChatStore: () => ({ isGroup: true }) }))
 vi.mock('@/stores/group', () => ({
-  useGroupStore: () => ({ getUserInfo: () => ({ name: 'OpenCmdTestAI' }), userList: [] })
+  useGroupStore: () => ({
+    getUserInfo: () => ({ name: 'OpenCmdTestAI' }),
+    userList: [{ uid: 'agent', name: 'OpenCmdTestAI', avatar: '', account: 'agent' }]
+  })
 }))
 vi.mock('@/stores/setting', () => ({ useSettingStore: () => ({ chat: ref({ sendKey: 'Enter' }) }) }))
 vi.mock('@/router', () => ({ default: {} }))
@@ -44,10 +47,9 @@ const setup = () => {
   const editor = document.createElement('div')
   editor.id = 'message-input'
   editor.contentEditable = 'true'
-  editor.textContent = '@'
   document.body.append(editor)
   const range = document.createRange()
-  range.selectNodeContents(editor.firstChild!)
+  range.selectNodeContents(editor)
   range.collapse(false)
   window.getSelection()!.addRange(range)
   const scope = effectScope()
@@ -56,7 +58,7 @@ const setup = () => {
   editor.addEventListener('input', input.handleInput)
   editor.addEventListener('keyup', input.updateSelectionRange)
   input.updateSelectionRange()
-  input.handleAit({ uid: 'agent', name: 'OpenCmdTestAI', avatar: '', account: 'agent' })
+  input.handleAit({ uid: 'agent', name: 'OpenCmdTestAI', avatar: '', account: 'agent' }, 'context')
   const mention = editor.querySelector<HTMLElement>('#aitSpan')!
   expect(mention.textContent).toBe('@OpenCmdTestAI')
   expect(mention.contentEditable).toBe('false')
@@ -225,6 +227,118 @@ describe('mention cursor restoration through the real picker and selection hooks
     expect(editor.textContent).toBe('@OpenCmdTestAI\u00A0pasted text')
   })
 
+  it.each([
+    ['@OpenCmdTestAI', '', false],
+    ['@Op', ' tail @Other', false],
+    ['@Op', '', true]
+  ] as const)('replaces only %s with tail %j and lost selection %s', async (query, tail, lostSelection) => {
+    const editor = document.createElement('div')
+    editor.id = 'message-input'
+    editor.contentEditable = 'true'
+    editor.textContent = query + tail
+    document.body.append(editor)
+    const scope = effectScope()
+    scopes.push(scope)
+    const input = scope.run(() => useMsgInput(ref(editor)))!
+    editor.addEventListener('input', input.handleInput)
+
+    select(editor, 0)
+    input.updateSelectionRange()
+    const selection = select(editor.firstChild!, query.length)
+    editor.dispatchEvent(new InputEvent('input', { inputType: 'insertText', bubbles: true }))
+    await vi.runAllTimersAsync()
+    expect(input.ait.value).toBe(true)
+    if (lostSelection) selection.removeAllRanges()
+    input.handleAit({ uid: 'agent', name: 'OpenCmdTestAI', avatar: '', account: 'agent' }, 'picker')
+
+    expect(editor.querySelectorAll('[id="aitSpan"]')).toHaveLength(1)
+    expect(editor.textContent).toBe('@OpenCmdTestAI\u00A0' + tail)
+  })
+
+  it('replaces the committed IME query without requiring another keyboard event', async () => {
+    const editor = document.createElement('div')
+    editor.id = 'message-input'
+    editor.contentEditable = 'true'
+    document.body.append(editor)
+    let input!: ReturnType<typeof useMsgInput>
+    const wrapper = mount({
+      setup() {
+        input = useMsgInput(ref(editor))
+        return () => null
+      }
+    })
+    try {
+      editor.addEventListener('input', input.handleInput)
+      editor.addEventListener('compositionend', input.updateSelectionRange)
+      editor.dispatchEvent(new CompositionEvent('compositionstart'))
+      editor.textContent = '@Op'
+      select(editor.firstChild!, 3)
+      editor.dispatchEvent(new InputEvent('input', { isComposing: true, bubbles: true }))
+      editor.dispatchEvent(new CompositionEvent('compositionend', { data: 'Op' }))
+      await vi.runAllTimersAsync()
+      expect(input.ait.value).toBe(true)
+      input.handleAit(input.personList.value[0]!, 'picker')
+
+      expect(editor.querySelectorAll('[id="aitSpan"]')).toHaveLength(1)
+      expect(editor.textContent).toBe('@OpenCmdTestAI\u00A0')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it.each([
+    ['email: alice@example.test', true],
+    ['@Op', false]
+  ] as const)('does not consume %s when the caret moves with the picker open', async (prefix, cacheMove) => {
+    const { editor, input } = setup()
+    const draft = document.createTextNode(`${prefix} @Op`)
+    editor.append(draft)
+    select(draft, draft.length)
+    editor.dispatchEvent(new InputEvent('input', { inputType: 'insertText', bubbles: true }))
+    await vi.runAllTimersAsync()
+    expect(input.ait.value).toBe(true)
+    expect(input.personList.value).toHaveLength(1)
+    select(draft, prefix.length)
+    if (cacheMove) input.updateSelectionRange()
+    const before = editor.innerHTML
+
+    input.handleAit(input.personList.value[0]!, 'picker')
+
+    expect(editor.innerHTML).toBe(before)
+    expect(input.ait.value).toBe(false)
+  })
+
+  it('inserts a context mention without consuming an email suffix at the caret', async () => {
+    const { editor, input } = setup()
+    const draft = document.createTextNode('email: alice@example.test')
+    editor.append(draft)
+    select(draft, draft.length)
+    editor.dispatchEvent(new InputEvent('input', { inputType: 'insertText', bubbles: true }))
+    await vi.runAllTimersAsync()
+
+    input.handleAit({ uid: 'agent', name: 'OpenCmdTestAI', avatar: '', account: 'agent' }, 'context')
+
+    expect(editor.querySelectorAll('[id="aitSpan"]')).toHaveLength(2)
+    expect(editor.textContent).toBe('@OpenCmdTestAI\u00A0email: alice@example.test@OpenCmdTestAI\u00A0')
+  })
+
+  it.each(['protected', 'composing'])('keeps the valid cached caret on %s input', async (kind) => {
+    const { editor, input, mention } = setup()
+    const draft = document.createTextNode('draft')
+    editor.append(draft)
+    select(draft, 2)
+    input.updateSelectionRange()
+    const selection = select(kind === 'protected' ? mention.firstChild! : draft, 1)
+    editor.dispatchEvent(new InputEvent('input', { isComposing: kind === 'composing', bubbles: true }))
+    await vi.runAllTimersAsync()
+    selection.removeAllRanges()
+    input.focusOn(editor)
+
+    expect(selection.anchorNode).toBe(draft)
+    expect(selection.anchorOffset).toBe(2)
+    expect(editor.querySelector('#aitSpan')).toBe(mention)
+  })
+
   it('retains picker provenance after restoration and suppresses command discovery during IME', async () => {
     vi.mocked(postAgentCommand).mockImplementation(async (body) => ({ ...body, status: 'completed' }))
     const { editor, input, mention } = setup()
@@ -245,7 +359,8 @@ describe('mention cursor restoration through the real picker and selection hooks
         roomId: 'room-1',
         aiclawUid: 'agent',
         operation: 'discover'
-      })
+      }),
+      null
     )
     expect(editor.querySelector('#aitSpan')).toBe(mention)
   })
