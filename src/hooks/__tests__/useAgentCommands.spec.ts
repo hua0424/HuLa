@@ -757,6 +757,38 @@ it('unlocks through GET when the approval result WS event is lost', async () => 
   expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(1)
 })
 
+it('keeps querying the original approval after rejecting a pending receipt with a different deadline', async () => {
+  vi.useFakeTimers()
+  const { editor, commands } = setup()
+  const expiresAt = Date.now() + 60_000
+  api.postAgentCommand.mockImplementation(async (body) =>
+    body.operation === 'discover'
+      ? { ...body, status: 'completed', catalog }
+      : { ...body, status: 'pending', approvalStatus: 'pending', expiresAt }
+  )
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  await commands.send()
+  const invoke = api.postAgentCommand.mock.calls[1][0]
+  api.getAgentCommand
+    .mockResolvedValueOnce({ ...invoke, status: 'pending', approvalStatus: 'pending', expiresAt: expiresAt + 2_000 })
+    .mockResolvedValueOnce({ ...invoke, status: 'noop', phase: 'approval', approvalStatus: 'rejected', expiresAt })
+
+  await vi.advanceTimersByTimeAsync(2_000)
+  expect(commands.approvalLocked.value).toBe(true)
+  expect(commands.approvalExpiresAt.value).toBe(expiresAt)
+  expect(commands.receipt.value).toMatchObject({ status: 'pending', expiresAt })
+  await vi.advanceTimersByTimeAsync(2_000)
+  expect(commands.status.value).toBe('rejected')
+  expect(commands.approvalLocked.value).toBe(false)
+  expect(api.getAgentCommand.mock.calls).toEqual([
+    [invoke.requestId, null],
+    [invoke.requestId, null]
+  ])
+  expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(1)
+})
+
 it.each(['accepted', 'completed', 'failed', 'noop', 'unknown'])(
   'preserves an approved execution %s through query recovery and late approval events',
   async (outcome) => {

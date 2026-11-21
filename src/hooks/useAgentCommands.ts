@@ -346,24 +346,22 @@ export function useAgentCommands(
       stopApprovalPoll()
       approvalPollTimer = setTimeout(async () => {
         approvalPollTimer = undefined
-        if (!current(true) || !commandApprovalLock(userId(), body.roomId)) return
+        const stillPending = () => current(true) && commandApprovalLock(uid, body.roomId)?.requestId === body.requestId
+        if (!stillPending()) return
         try {
           const next = await getAgentCommand(body.requestId, binding)
-          if (!consume(next, true)) return
-          if (
-            next?.status === 'pending' &&
-            next.approvalStatus === 'pending' &&
-            commandApprovalLock(userId(), body.roomId)
-          )
-            pollPending()
+          if (consume(next, true) && (next?.status !== 'pending' || next.approvalStatus !== 'pending')) return
         } catch {
-          // 网络失败不制造终态；锁到期或 WS/GET 成功前继续按服务端真相重试。
-          if (current(true) && commandApprovalLock(userId(), body.roomId)) pollPending()
+          // A transport failure is not an approval decision.
         }
+        // Ignore unusable observations without abandoning or extending the original approval lock.
+        if (stillPending()) pollPending()
       }, 2_000)
     }
     try {
-      let result = options.reconcile ? await getAgentCommand(body.requestId, binding) : await postAgentCommand(body, binding)
+      let result = options.reconcile
+        ? await getAgentCommand(body.requestId, binding)
+        : await postAgentCommand(body, binding)
       if (!consume(result)) return
       // WS 可能丢失；pending 期间用有界 GET 兜底，批准/拒绝/过期后立即解锁。
       if (primary && result?.status === 'pending' && result.approvalStatus === 'pending') pollPending()
