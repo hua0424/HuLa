@@ -635,6 +635,61 @@ it('does not let an old same-room GET overwrite or unlock a newly submitted ID',
   expect(restored.commands.approvalLocked.value).toBe(true)
 })
 
+it('keeps an uncertain approved dispatch when approval WS arrives after its outcome', async () => {
+  const { commands } = await submit()
+  const { requestId, roomId, aiclawUid, operation } = submitted
+  const outcome = {
+    requestId,
+    roomId,
+    aiclawUid,
+    operation,
+    status: 'unknown',
+    phase: 'outcome',
+    approvalStatus: 'approved',
+    expiresAt: commands.approvalExpiresAt.value,
+    error: 'dispatch_unknown',
+    receiptRevision: 1
+  }
+  expect(commands.approvalLocked.value).toBe(true)
+  api.getAgentCommand.mockResolvedValueOnce(outcome)
+  await commands.reconcile()
+  expect(commands.status.value).toBe('unknown')
+  expect(commands.approvalLocked.value).toBe(false)
+
+  const { useMitt } = await import('../useMitt')
+  const { WsResponseMessageType } = await import('@/services/wsType')
+  useMitt.emit(WsResponseMessageType.COMMAND_APPROVAL_RESULT, {
+    _sessionBinding: identity,
+    requestId,
+    roomId,
+    aiclawUid,
+    callerUid: identity.uid,
+    approvalStatus: 'approved'
+  })
+  expect(commands.receipt.value).toEqual(outcome)
+  expect(commands.status.value).toBe('unknown')
+
+  const reconciled = {
+    ...outcome,
+    status: 'completed',
+    error: undefined,
+    generation: '1',
+    nativeRef: { sessionId: 's1', inputId: 'i1', parentId: 'i1', messageId: 'm1' },
+    receiptRevision: 2,
+    reconciled: true
+  }
+  api.getAgentCommand.mockResolvedValueOnce(reconciled)
+  await commands.reconcile()
+  expect(commands.status.value).toBe('completed')
+  expect(commands.receipt.value).toEqual(reconciled)
+  const invokes = api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')
+  expect(invokes.map(([body]) => body.requestId)).toEqual([requestId])
+  expect(api.getAgentCommand.mock.calls).toEqual([
+    [requestId, identity],
+    [requestId, identity]
+  ])
+})
+
 it('never renews the original approval deadline from a later pending GET', async () => {
   const old = await submit()
   const deadline = old.commands.approvalExpiresAt.value
