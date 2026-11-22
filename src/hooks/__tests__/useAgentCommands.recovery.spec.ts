@@ -527,6 +527,127 @@ it('locks a changed draft for the original pending POST receipt, then unlocks wi
   expect(api.postAgentCommand.mock.calls.filter(([request]) => request.operation === 'invoke')).toHaveLength(1)
 })
 
+it.each(['approved', 'rejected', 'expired', 'invalidated'])(
+  'keeps a bound %s WS decision ahead of the original pending POST after a draft edit',
+  async (approvalStatus) => {
+    const mounted = await setup()
+    mounted.editor.value.textContent = '/'
+    await mounted.commands.input()
+    mounted.commands.select(mounted.commands.capabilities.value[0])
+    let resolve!: (result: unknown) => void
+    api.postAgentCommand.mockImplementationOnce((body: AgentCommandRequest) => {
+      submitted = body
+      return new Promise((done) => {
+        resolve = done
+      })
+    })
+    const pending = mounted.commands.send()
+    const body = submitted
+    mounted.editor.value.textContent = 'keep this draft'
+    await mounted.commands.input()
+    const { useMitt } = await import('../useMitt')
+    const { WsResponseMessageType } = await import('@/services/wsType')
+    const event = {
+      _sessionBinding: identity,
+      requestId: body.requestId,
+      roomId: body.roomId,
+      aiclawUid: body.aiclawUid,
+      callerUid: identity.uid,
+      approvalStatus
+    }
+    const publish = (data: typeof event) => useMitt.emit(WsResponseMessageType.COMMAND_APPROVAL_RESULT, data)
+    publish({ ...event, callerUid: '22' })
+    publish({ ...event, _sessionBinding: { ...identity, sessionEpoch: 8 } })
+    expect(mounted.commands.receipt.value).toBeUndefined()
+    publish(event)
+    if (approvalStatus === 'invalidated') publish({ ...event, approvalStatus: 'approved' })
+    resolve({ ...body, status: 'pending', approvalStatus: 'pending', expiresAt: Date.now() + 60_000 })
+    await pending
+    expect(mounted.commands.status.value).toBe(approvalStatus)
+    expect(mounted.commands.receipt.value).toMatchObject({
+      requestId: body.requestId,
+      approvalStatus,
+      phase: approvalStatus === 'approved' ? 'dispatch' : 'approval'
+    })
+    expect(mounted.commands.receipt.value?.expiresAt).toBeUndefined()
+    expect(mounted.commands.receipt.value?.nativeRef).toBeUndefined()
+    expect(mounted.commands.approvalLocked.value).toBe(false)
+    expect(mounted.editor.value.textContent).toBe('keep this draft')
+    expect(await mounted.commands.send()).toBe(false)
+    expect(api.getAgentCommand).not.toHaveBeenCalled()
+    expect(api.postAgentCommand.mock.calls.filter(([request]) => request.operation === 'invoke')).toHaveLength(1)
+  }
+)
+
+it.each([false, true])('keeps original approval visible across a delayed menu lookup (denied: %s)', async (denied) => {
+  const mounted = await setup()
+  mounted.editor.value.textContent = '/'
+  await mounted.commands.input()
+  mounted.commands.select(mounted.commands.capabilities.value[0])
+  let resolve!: (result: unknown) => void
+  api.postAgentCommand.mockImplementationOnce((body: AgentCommandRequest) => {
+    submitted = body
+    return new Promise((done) => {
+      resolve = done
+    })
+  })
+  const pending = mounted.commands.send()
+  const body = submitted
+  let settleMenu!: () => void
+  api.postAgentCommand.mockImplementationOnce(
+    (menu: AgentCommandRequest) =>
+      new Promise((done, reject) => {
+        settleMenu = () =>
+          denied
+            ? reject(new Error('command_policy_denied_closed:skill:example'))
+            : done({ ...menu, status: 'completed', catalog: { version: 'v2', capabilities: [capability] } })
+      })
+  )
+  mounted.editor.value.textContent = '/new'
+  const discovery = mounted.commands.input()
+  const expiresAt = Date.now() + 60_000
+  resolve({ ...body, status: 'pending', approvalStatus: 'pending', expiresAt })
+  await pending
+  expect(mounted.commands.status.value).toBe('pending')
+  settleMenu()
+  await discovery
+  expect(mounted.commands.status.value).toBe('pending')
+  expect(mounted.commands.requestId.value).toBe(body.requestId)
+  expect(mounted.commands.approvalExpiresAt.value).toBe(expiresAt)
+  expect(mounted.commands.capabilities.value).toHaveLength(denied ? 0 : 1)
+  if (!denied) {
+    mounted.commands.select(mounted.commands.capabilities.value[0])
+    expect(mounted.commands.selected.value?.capability.id).toBe(capability.id)
+    expect(mounted.commands.status.value).toBe('pending')
+  }
+  expect(mounted.editor.value.textContent).toBe('/new')
+  expect(api.postAgentCommand.mock.calls.filter(([request]) => request.operation === 'invoke')).toHaveLength(1)
+})
+
+it('does not replace a submitted invocation owner while its original POST is unresolved', async () => {
+  const mounted = await setup()
+  mounted.editor.value.textContent = '/'
+  await mounted.commands.input()
+  mounted.commands.select(mounted.commands.capabilities.value[0])
+  let resolve!: (result: unknown) => void
+  api.postAgentCommand.mockImplementationOnce((body: AgentCommandRequest) => {
+    submitted = body
+    return new Promise((done) => {
+      resolve = done
+    })
+  })
+  const pending = mounted.commands.send()
+  const body = submitted
+  mounted.editor.value.textContent = '/new'
+  await mounted.commands.input()
+  mounted.commands.select(mounted.commands.capabilities.value[0])
+  expect(await mounted.commands.send()).toBe(true)
+  expect(mounted.commands.requestId.value).toBe(body.requestId)
+  expect(api.postAgentCommand.mock.calls.filter(([request]) => request.operation === 'invoke')).toHaveLength(1)
+  resolve({ ...body, status: 'pending', approvalStatus: 'pending', expiresAt: Date.now() + 60_000 })
+  await pending
+})
+
 it.each(['before edit', 'after edit', 'after settlement'])('recovers a lost POST: reconnect %s', async (timing) => {
   const mounted = await setup()
   mounted.editor.value.textContent = '/'

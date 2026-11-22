@@ -48,6 +48,7 @@ export function useAgentCommands(
   const receipt = shallowRef<AgentCommandResult>()
   let trackedRequest: AgentCommandRequest | undefined
   const submittingInvocation = shallowRef<AgentCommandRequest>()
+  let dismissedInvocation: AgentCommandRequest | undefined
   let reconnectRequest: AgentCommandRequest | undefined
   let trackedIntent: Omit<Intent, 'version'> | undefined
   const busy = ref(false)
@@ -94,6 +95,7 @@ export function useAgentCommands(
     receipt.value = undefined
     trackedRequest = undefined
     submittingInvocation.value = undefined
+    dismissedInvocation = undefined
     reconnectRequest = undefined
     trackedIntent = undefined
     requestId.value = ''
@@ -126,6 +128,7 @@ export function useAgentCommands(
     }
   }
   function cancel() {
+    dismissedInvocation = submittingInvocation.value
     blocked = false
     consumed = undefined
     selected.value = undefined
@@ -172,44 +175,56 @@ export function useAgentCommands(
     }
   }
   const approvalResult = (data: CommandApprovalPayload) => {
-    if (!data?.requestId || data.approvalStatus === 'pending') return
-    if (sessionBinding.value && !sameSession(eventSession(data) ?? null, sessionBinding.value)) return
+    const decision = data?.approvalStatus
+    if (!data?.requestId) return
+    if (decision !== 'approved' && decision !== 'rejected' && decision !== 'expired' && decision !== 'invalidated')
+      return
+    const binding = sessionBinding.value
+    if (binding && !sameSession(eventSession(data) ?? null, binding)) return
     const uid = userId()
-    if (!uid || (data.callerUid && String(data.callerUid) !== uid)) return
+    if (!uid || String(data.callerUid) !== uid) return
     const roomId = String(data.roomId ?? '')
+    const body = trackedRequest
     if (
       data.requestId !== requestId.value ||
       roomId !== session().roomId ||
-      (trackedRequest && String(data.aiclawUid) !== trackedRequest.aiclawUid)
+      (body && (body.operation !== 'invoke' || String(data.aiclawUid) !== body.aiclawUid))
     )
       return
     // Only this identity/room/agent/request can release the current input lock.
     unlockCommandApproval(uid, roomId, data.requestId)
-    // Approval events cannot erase a verified native ACK or execution outcome.
-    if (receipt.value?.phase === 'accepted' || receipt.value?.phase === 'outcome') return
-    if (receipt.value) {
+    const previous = receipt.value
+    // A duplicate approval cannot undo a final approval denial, native ACK or execution outcome.
+    if (
+      previous?.phase === 'accepted' ||
+      previous?.phase === 'outcome' ||
+      (previous?.phase === 'approval' && previous.status === 'noop')
+    )
+      return
+    // WS may beat the initial POST. Record approval only, never a native ACK or deadline.
+    const original =
+      previous ??
+      (binding &&
+        body && {
+          requestId: body.requestId,
+          roomId: body.roomId,
+          aiclawUid: body.aiclawUid,
+          operation: body.operation
+        })
+    if (original) {
       receipt.value =
-        data.approvalStatus === 'approved'
-          ? { ...receipt.value, approvalStatus: 'approved', status: 'accepted', phase: 'dispatch', error: undefined }
+        decision === 'approved'
+          ? { ...original, approvalStatus: decision, status: 'accepted', phase: 'dispatch', error: undefined }
           : {
-              ...receipt.value,
-              approvalStatus: data.approvalStatus,
+              ...original,
+              approvalStatus: decision,
               status: 'noop',
               phase: 'approval',
-              error: data.error || `approval_${data.approvalStatus}`
+              error: data.error || `approval_${decision}`
             }
+      if (body) saveCommandRecovery(binding, uid, session().group, body, receipt.value)
     }
-    status.value =
-      data.approvalStatus === 'approved'
-        ? 'approved'
-        : data.approvalStatus === 'rejected'
-          ? 'rejected'
-          : data.approvalStatus === 'expired'
-            ? 'expired'
-            : 'invalidated'
-    if (trackedRequest && receipt.value) {
-      saveCommandRecovery(sessionBinding.value, uid, session().group, trackedRequest, receipt.value)
-    }
+    status.value = decision
   }
   const recoverCurrentRequest = () => {
     if (!trackedRequest) restoreApprovalLock()
@@ -388,6 +403,7 @@ export function useAgentCommands(
       return undefined
     } finally {
       if (submittingInvocation.value === body && !options.reconcile) submittingInvocation.value = undefined
+      if (dismissedInvocation === body && !options.reconcile) dismissedInvocation = undefined
       if (
         current(!!options.reconcile || receipt.value?.requestId === body.requestId) &&
         primary &&
@@ -449,7 +465,9 @@ export function useAgentCommands(
     if (!current) return
     const generation = epoch
     busy.value = true
-    status.value = 'loading'
+    if (!approvalLocked.value) status.value = 'loading'
+    // Discovery can populate a new menu, but not replace an invocation receipt that arrived while waiting.
+    const ownsStatus = () => trackedRequest?.operation !== 'invoke' || status.value === 'loading'
     try {
       const result = await request(
         { requestId: crypto.randomUUID(), roomId: current.roomId, aiclawUid: current.aiclawUid, operation: 'discover' },
@@ -460,11 +478,11 @@ export function useAgentCommands(
       if (result?.status === 'completed' && result.catalog && Array.isArray(result.catalog.capabilities)) {
         catalog.value = result.catalog
         discovered = { ...current, version: result.catalog.version }
-        status.value = blocked ? 'changed' : ''
+        if (ownsStatus()) status.value = blocked ? 'changed' : ''
       }
     } catch (error) {
       // aichatoverview#504：服务端门控拒绝（菜单过期/权限变更）用明确状态，不冒充 unknown。
-      if (generation === epoch) {
+      if (generation === epoch && ownsStatus()) {
         const message = error instanceof Error ? error.message : String(error ?? '')
         if (message.includes('command_policy_denied_approval')) status.value = 'needs_approval'
         else if (message.includes('command_policy_denied_closed')) status.value = 'not_permitted'
@@ -498,7 +516,7 @@ export function useAgentCommands(
       // A rejected explicit intent must not become an ordinary chat submission.
       selected.value = undefined
       blocked = true
-      status.value = 'changed'
+      if (!approvalLocked.value) status.value = 'changed'
       return
     }
     selected.value = { ...discovered!, capability }
@@ -510,7 +528,7 @@ export function useAgentCommands(
     modelEpoch++
     consumed = undefined
     blocked = false
-    status.value = 'selected'
+    if (!approvalLocked.value) status.value = 'selected'
   }
   async function searchModels(offset = 0) {
     const intent = selected.value
@@ -608,6 +626,8 @@ export function useAgentCommands(
     }
     const intent = selected.value
     if (!intent) return false
+    // Editing alone cannot replace the unresolved command owner. Explicit dismissal still can.
+    if (submittingInvocation.value && submittingInvocation.value !== dismissedInvocation) return true
     if (!same(intent, target())) {
       invalidate()
       return true
