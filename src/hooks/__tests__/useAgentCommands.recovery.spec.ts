@@ -494,6 +494,38 @@ it('keeps the submitted owner across a real new menu lookup without using that m
   expect(api.postAgentCommand.mock.calls.filter(([request]) => request.operation === 'invoke')).toHaveLength(1)
 })
 
+it('restores the original native acknowledgement when a new menu lookup loses its response', async () => {
+  const mounted = await submit()
+  const body = submitted
+  api.getAgentCommand.mockResolvedValueOnce({
+    ...body,
+    status: 'accepted',
+    phase: 'accepted',
+    approvalStatus: 'approved',
+    nativeRef: { sessionId: 'session-1', turnId: 'turn-1' }
+  })
+  await mounted.commands.reconcile()
+  expect(mounted.commands.status.value).toBe('accepted')
+  const original = mounted.commands.receipt.value
+
+  mounted.editor.value.textContent = '/new'
+  api.postAgentCommand.mockRejectedValueOnce(new Error('connection lost'))
+  await mounted.commands.input()
+
+  expect(mounted.commands.busy.value).toBe(false)
+  expect(mounted.commands.status.value).toBe('accepted')
+  expect(mounted.commands.receipt.value).toBe(original)
+  expect(mounted.commands.requestId.value).toBe(body.requestId)
+  expect(mounted.commands.approvalLocked.value).toBe(false)
+  expect(mounted.editor.value.textContent).toBe('/new')
+  expect(api.getAgentCommand.mock.calls).toEqual([[body.requestId, identity]])
+  expect(api.postAgentCommand.mock.calls.map(([request]) => request.operation)).toEqual([
+    'discover',
+    'invoke',
+    'discover'
+  ])
+})
+
 it('locks a changed draft for the original pending POST receipt, then unlocks without replay', async () => {
   const mounted = await setup()
   mounted.editor.value.textContent = '/'

@@ -485,7 +485,11 @@ export function useAgentCommands(
         else status.value = 'unknown'
       }
     } finally {
-      if (generation === epoch) busy.value = false
+      if (generation === epoch) {
+        // A failed secondary lookup must not strand the original receipt behind a loading state.
+        if (status.value === 'loading') status.value = receiptStatus(receipt.value)
+        busy.value = false
+      }
     }
   }
   const capabilities = computed(() => catalog.value?.capabilities.filter((c) => c.defaultVisibility === 'public') || [])
