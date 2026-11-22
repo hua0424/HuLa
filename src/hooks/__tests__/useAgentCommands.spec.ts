@@ -407,30 +407,28 @@ it('ignores stale model searches and never silently selects a replacement', asyn
   expect(commands.selectedModel.value).toBeUndefined()
 })
 
-it('dismisses only local UI, allowing a new command while an old native request still runs', async () => {
+it('dismisses only local UI and permits a distinct command after the original native ACK', async () => {
+  vi.useFakeTimers()
   const { editor, commands } = setup()
   editor.value.textContent = '/'
   await commands.input()
   commands.select(commands.capabilities.value[0])
-  let resolve!: (value: unknown) => void
-  api.postAgentCommand.mockImplementationOnce(
-    () =>
-      new Promise((r) => {
-        resolve = r
-      })
-  )
+  api.postAgentCommand.mockImplementationOnce(async (body) => ({ ...body, status: 'accepted', phase: 'accepted' }))
   const old = commands.send()
   const oldBody = api.postAgentCommand.mock.calls.at(-1)![0]
+  await vi.advanceTimersByTimeAsync(0)
+  expect(commands.receipt.value).toMatchObject({ requestId: oldBody.requestId, status: 'accepted', phase: 'accepted' })
   commands.cancel()
   await commands.input()
   commands.select(commands.capabilities.value[0])
   await commands.send()
   const newId = commands.requestId.value
-  resolve({ ...oldBody, status: 'failed', phase: 'outcome' })
+  await vi.advanceTimersByTimeAsync(1_000)
   await old
   expect(commands.requestId.value).toBe(newId)
   expect(newId).not.toBe(oldBody.requestId)
   expect(commands.status.value).toBe('completed')
+  expect(api.getAgentCommand).not.toHaveBeenCalled()
   expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(2)
 })
 

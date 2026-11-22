@@ -553,7 +553,8 @@ it.each(['approved', 'rejected', 'expired', 'invalidated'])(
       roomId: body.roomId,
       aiclawUid: body.aiclawUid,
       callerUid: identity.uid,
-      approvalStatus
+      approvalStatus,
+      expiresAt: Date.now() + 60_000
     }
     const publish = (data: typeof event) => useMitt.emit(WsResponseMessageType.COMMAND_APPROVAL_RESULT, data)
     publish({ ...event, callerUid: '22' })
@@ -624,7 +625,7 @@ it.each([false, true])('keeps original approval visible across a delayed menu lo
   expect(api.postAgentCommand.mock.calls.filter(([request]) => request.operation === 'invoke')).toHaveLength(1)
 })
 
-it('does not replace a submitted invocation owner while its original POST is unresolved', async () => {
+it.each([false, true])('does not replace an unobserved invoke after edit or dismissal (%s)', async (dismiss) => {
   const mounted = await setup()
   mounted.editor.value.textContent = '/'
   await mounted.commands.input()
@@ -638,14 +639,19 @@ it('does not replace a submitted invocation owner while its original POST is unr
   })
   const pending = mounted.commands.send()
   const body = submitted
+  if (dismiss) mounted.commands.cancel()
   mounted.editor.value.textContent = '/new'
   await mounted.commands.input()
   mounted.commands.select(mounted.commands.capabilities.value[0])
   expect(await mounted.commands.send()).toBe(true)
   expect(mounted.commands.requestId.value).toBe(body.requestId)
   expect(api.postAgentCommand.mock.calls.filter(([request]) => request.operation === 'invoke')).toHaveLength(1)
-  resolve({ ...body, status: 'pending', approvalStatus: 'pending', expiresAt: Date.now() + 60_000 })
+  const expiresAt = Date.now() + 60_000
+  resolve({ ...body, status: 'pending', approvalStatus: 'pending', expiresAt })
   await pending
+  expect(mounted.commands.approvalExpiresAt.value).toBe(expiresAt)
+  expect(mounted.commands.status.value).toBe('pending')
+  expect(mounted.editor.value.textContent).toBe('/new')
 })
 
 it.each(['before edit', 'after edit', 'after settlement'])('recovers a lost POST: reconnect %s', async (timing) => {

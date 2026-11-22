@@ -48,7 +48,6 @@ export function useAgentCommands(
   const receipt = shallowRef<AgentCommandResult>()
   let trackedRequest: AgentCommandRequest | undefined
   const submittingInvocation = shallowRef<AgentCommandRequest>()
-  let dismissedInvocation: AgentCommandRequest | undefined
   let reconnectRequest: AgentCommandRequest | undefined
   let trackedIntent: Omit<Intent, 'version'> | undefined
   const busy = ref(false)
@@ -95,7 +94,6 @@ export function useAgentCommands(
     receipt.value = undefined
     trackedRequest = undefined
     submittingInvocation.value = undefined
-    dismissedInvocation = undefined
     reconnectRequest = undefined
     trackedIntent = undefined
     requestId.value = ''
@@ -128,7 +126,6 @@ export function useAgentCommands(
     }
   }
   function cancel() {
-    dismissedInvocation = submittingInvocation.value
     blocked = false
     consumed = undefined
     selected.value = undefined
@@ -403,7 +400,6 @@ export function useAgentCommands(
       return undefined
     } finally {
       if (submittingInvocation.value === body && !options.reconcile) submittingInvocation.value = undefined
-      if (dismissedInvocation === body && !options.reconcile) dismissedInvocation = undefined
       if (
         current(!!options.reconcile || receipt.value?.requestId === body.requestId) &&
         primary &&
@@ -626,8 +622,8 @@ export function useAgentCommands(
     }
     const intent = selected.value
     if (!intent) return false
-    // Editing alone cannot replace the unresolved command owner. Explicit dismissal still can.
-    if (submittingInvocation.value && submittingInvocation.value !== dismissedInvocation) return true
+    // A local edit/dismissal cannot decide whether the unsettled command needs approval.
+    if (submittingInvocation.value && (!receipt.value || receipt.value.status === 'pending')) return true
     if (!same(intent, target())) {
       invalidate()
       return true
