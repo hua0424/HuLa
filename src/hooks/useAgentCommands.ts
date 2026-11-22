@@ -272,15 +272,20 @@ export function useAgentCommands(
     const s = { ...session() }
     const current = (query = !!options.reconcile) => {
       if (uid !== userId() || !sameSession(binding, sessionBinding.value)) return false
-      // Only the same submitted invocation owns its GET, independently of editor/menu epochs.
-      if (query && primary && body.operation === 'invoke')
-        return (
-          trackedRequest === body &&
-          requestId.value === body.requestId &&
-          s.roomId === session().roomId &&
-          s.aiclawUid === session().aiclawUid &&
-          s.group === session().group
+      // The submitted invocation owns its POST receipt and GETs, independently of editor/menu epochs.
+      if (primary && body.operation === 'invoke') {
+        if (
+          trackedRequest !== body ||
+          requestId.value !== body.requestId ||
+          s.roomId !== session().roomId ||
+          s.aiclawUid !== session().aiclawUid ||
+          s.group !== session().group
         )
+          return false
+        // A silent DOM change still invalidates the menu, not the submitted invocation.
+        if (!query && generation === epoch && !same(intent, target())) invalidate()
+        return true
+      }
       if (generation !== epoch || (options.page !== undefined && options.page !== modelEpoch)) return false
       if (!same(intent, target())) {
         invalidate()

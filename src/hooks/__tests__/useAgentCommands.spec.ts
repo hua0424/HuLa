@@ -622,7 +622,7 @@ it('rejects mismatched response correlation and foreign capabilities', async () 
   expect(await commands.send()).toBe(false)
   expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
 })
-it('ignores invoke results after a silent editor mutation', async () => {
+it('keeps the original invoke receipt but invalidates the menu after a silent editor mutation', async () => {
   const { editor, commands } = setup()
   editor.value.textContent = '/'
   await commands.input()
@@ -639,8 +639,12 @@ it('ignores invoke results after a silent editor mutation', async () => {
   editor.value.textContent = 'new draft'
   resolve({ ...body, status: 'completed' })
   await pending
-  expect(commands.status.value).toBe('')
+  expect(commands.receipt.value).toMatchObject({ requestId: body.requestId, status: 'completed' })
+  expect(commands.selected.value).toBeUndefined()
+  expect(commands.capabilities.value).toEqual([])
+  expect(editor.value.textContent).toBe('new draft')
   expect(await commands.send()).toBe(false)
+  expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
 })
 it('does not discover for human targets or ambiguous group mentions', async () => {
   const { editor, session, commands } = setup()

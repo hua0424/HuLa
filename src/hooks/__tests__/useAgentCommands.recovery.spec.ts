@@ -494,6 +494,39 @@ it('keeps the submitted owner across a real new menu lookup without using that m
   expect(api.postAgentCommand.mock.calls.filter(([request]) => request.operation === 'invoke')).toHaveLength(1)
 })
 
+it('locks a changed draft for the original pending POST receipt, then unlocks without replay', async () => {
+  const mounted = await setup()
+  mounted.editor.value.textContent = '/'
+  await mounted.commands.input()
+  mounted.commands.select(mounted.commands.capabilities.value[0])
+  let resolve!: (result: unknown) => void
+  api.postAgentCommand.mockImplementationOnce((body: AgentCommandRequest) => {
+    submitted = body
+    return new Promise((done) => {
+      resolve = done
+    })
+  })
+  const pending = mounted.commands.send()
+  const body = submitted
+  const expiresAt = Date.now() + 60_000
+  mounted.editor.value.textContent = 'my next message'
+  await mounted.commands.input()
+  resolve({ ...body, status: 'pending', approvalStatus: 'pending', expiresAt })
+  await pending
+  expect(mounted.commands.receipt.value).toMatchObject({ requestId: body.requestId, status: 'pending' })
+  expect(mounted.commands.approvalLocked.value).toBe(true)
+  expect(mounted.commands.approvalExpiresAt.value).toBe(expiresAt)
+  expect(await mounted.commands.send()).toBe(true)
+  api.getAgentCommand.mockResolvedValueOnce({ ...body, status: 'noop', phase: 'approval', approvalStatus: 'rejected' })
+  await vi.advanceTimersByTimeAsync(2_000)
+  expect(mounted.commands.status.value).toBe('rejected')
+  expect(mounted.commands.approvalLocked.value).toBe(false)
+  expect(mounted.editor.value.textContent).toBe('my next message')
+  expect(await mounted.commands.send()).toBe(false)
+  expect(api.getAgentCommand.mock.calls).toEqual([[body.requestId, identity]])
+  expect(api.postAgentCommand.mock.calls.filter(([request]) => request.operation === 'invoke')).toHaveLength(1)
+})
+
 it.each(['before edit', 'after edit', 'after settlement'])('recovers a lost POST: reconnect %s', async (timing) => {
   const mounted = await setup()
   mounted.editor.value.textContent = '/'
