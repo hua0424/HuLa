@@ -94,9 +94,9 @@ describe('mobile friend profile with no shared group', () => {
     const { wrapper } = await mountProfile()
 
     expect(wrapper.text()).toContain(friend.name)
-    const remove = wrapper.findAll('button').find((button) => button.text() === personalInfoEn.remove_user)
-    expect(remove).toBeDefined()
-    await remove?.trigger('click')
+    const remove = wrapper.get('[data-testid="mobile-friend-profile-remove"]')
+    expect(remove.attributes('aria-label')).toBe(personalInfoEn.remove_user)
+    await remove.trigger('click')
     await flushPromises()
     expect(showDialog).toHaveBeenCalledTimes(1)
     expect(onDeleteFriend).not.toHaveBeenCalled()

@@ -127,6 +127,8 @@
           strong
           secondary
           @click="handleDelete"
+          data-testid="mobile-friend-profile-remove"
+          :aria-label="t('mobile_personal_info.remove_user')"
           :color="'#d5304f'"
           v-if="!props.isMyPage && isFriend && !isBotUser(uid)"
           class="px-5 py-10px font-bold text-center rounded-full text-12px">
