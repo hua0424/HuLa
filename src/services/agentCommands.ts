@@ -18,7 +18,7 @@ export type AgentCapability = {
   /** aichatoverview#504：服务端判定标注（open/需主人审批）；closed 项已被服务端移除 */
   permission?: 'open' | 'approval_required'
 }
-export type AgentModel = { providerId: string; modelId: string; label: string; connected: boolean }
+export type AgentModel = { providerId: string; modelId: string; label: string; connected?: boolean }
 export type ModelPage = { items: AgentModel[]; total: number; offset: number; nextOffset?: number }
 export type AgentCatalog = {
   version: string

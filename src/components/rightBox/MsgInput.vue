@@ -93,8 +93,10 @@
               :disabled="agentCommands.modelsBusy.value || agentCommands.submitted.value"
               class="text-left rounded p-6px border border-gray-300 disabled:opacity-50 break-words"
               @click="agentCommands.chooseModel(model)">
-              {{ model.label }} ({{ model.providerId }} · {{ model.modelId }}) ·
-              {{ t(model.connected ? 'editor.commands.connected' : 'editor.commands.disconnected') }}
+              {{ model.label }} ({{ model.providerId }} · {{ model.modelId }})
+              <template v-if="typeof model.connected === 'boolean'">
+                · {{ t(model.connected ? 'editor.commands.connected' : 'editor.commands.disconnected') }}
+              </template>
             </button>
             <div class="flex gap-12px">
               <button

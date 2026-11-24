@@ -325,10 +325,14 @@ describe('#503 native command controls', () => {
           version: 'v1',
           capabilities: [capability],
           models: {
-            items: [{ providerId: 'p/a', modelId: 'm/b', label: 'Native disconnected', connected: false }],
+            items: [
+              { providerId: 'p/a', modelId: 'm/b', label: 'Native disconnected', connected: false },
+              { providerId: 'p/a', modelId: 'm/unknown', label: 'Native unknown' },
+              { providerId: 'p/a', modelId: 'm/connected', label: 'Native connected', connected: true }
+            ],
             total: 8944,
             offset: 0,
-            nextOffset: 100
+            nextOffset: 3
           }
         }
       }))
@@ -355,9 +359,15 @@ describe('#503 native command controls', () => {
         parameters: { query: 'native', offset: 0 }
       })
       expect(wrapper.get('[data-testid="agent-command-model-total"]').text()).toContain('8944')
-      const option = wrapper.get('[data-testid="agent-command-model-option"]')
-      expect(option.attributes('disabled')).toBeUndefined()
-      await option.trigger('click')
+      const [disconnected, unknown, connected] = wrapper.findAll('[data-testid="agent-command-model-option"]')
+      expect(disconnected.text()).toContain('未连接')
+      expect(connected.text()).toContain('已连接')
+      expect(unknown.text()).toBe('Native unknown (p/a · m/unknown)')
+      expect(unknown.attributes('disabled')).toBeUndefined()
+      await unknown.trigger('click')
+      expect(unknown.attributes('aria-pressed')).toBe('true')
+      expect(disconnected.attributes('disabled')).toBeUndefined()
+      await disconnected.trigger('click')
       expect(wrapper.get('[data-testid="agent-command-model-selected"]').text()).toContain('p/a')
       await send.trigger('click')
       await flushPromises()
