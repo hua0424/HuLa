@@ -9,14 +9,18 @@
         :class="{ 'cursor-pointer': props.isMyPage }"
         :style="{ transform: props.isShow ? 'scale(1) translateY(0)' : 'scale(0.62) translateY(0px)' }"
         @click="props.isMyPage && router.push('/mobile/mobileMy/simpleBio')">
-        <n-avatar :size="86" :src="AvatarUtils.getAvatarUrl(userDetailInfo!.avatar)" fallback-src="/logo.png" round />
+        <n-avatar
+          :size="86"
+          :src="AvatarUtils.getAvatarUrl(userDetailInfo?.avatar ?? '')"
+          fallback-src="/logo.png"
+          round />
       </div>
 
       <!-- 基本信息栏 -->
       <div ref="infoBox" class="pl-2 flex gap-8px flex-col transition-transform duration-300 ease-in-out">
         <!-- 名字与在线状态 -->
         <div class="flex flex-warp gap-4 items-center">
-          <n-text class="font-bold text-20px">{{ userDetailInfo!.name }}</n-text>
+          <n-text class="font-bold text-20px">{{ userDetailInfo?.name }}</n-text>
           <div
             v-show="hasUserOnlineState"
             class="bg-#E7EFE6 flex flex-wrap ps-2 px-8px items-center rounded-full gap-1 h-24px">
@@ -34,7 +38,7 @@
 
         <!-- 账号 -->
         <div class="flex flex-warp gap-2 items-center">
-          <span class="text-bold-style">{{ t('mobile_personal_info.account') }}:{{ userDetailInfo!.account }}</span>
+          <span class="text-bold-style">{{ t('mobile_personal_info.account') }}:{{ userDetailInfo?.account }}</span>
           <span v-if="isMyPage" @click="toMyQRCode" class="pe-15px">
             <img class="w-14px h-14px dark:invert" src="@/assets/mobile/my/qr-code.webp" alt="" />
           </span>
@@ -85,7 +89,7 @@
     <div v-if="props.isShow" ref="animatedBox" style="transform: translateZ(0)" class="flex flex-col px-16px">
       <!-- 个人描述 -->
       <div class="mt-2 text-bold-style line-height-24px">
-        {{ isMyPage ? userStore.userInfo?.resume : (userDetailInfo as UserInfoType).resume }}
+        {{ isMyPage ? userStore.userInfo?.resume : userDetailInfo?.resume }}
       </div>
       <!-- 点赞关注 -->
       <div class="flex flex-wrap justify-around mt-4">
@@ -162,10 +166,10 @@ import { useUserStore } from '@/stores/user'
 import { useUserStatusStore } from '@/stores/userStatus'
 import { AvatarUtils } from '@/utils/AvatarUtils'
 import 'vant/es/dialog/style'
-import { ImUrlEnum, OnlineEnum, UserType } from '@/enums'
+import { ImUrlEnum, UserType } from '@/enums'
 import { imRequest } from '@/utils/ImRequestUtils'
 import { useMessage } from '@/hooks/useMessage.ts'
-import type { UserInfoType, UserItem } from '@/services/types'
+import type { UserItem } from '@/services/types'
 import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contacts'
 import { useGlobalStore } from '@/stores/global'
@@ -230,16 +234,7 @@ const handleAddFriend = async () => {
   router.push('/mobile/mobileFriends/confirmAddFriend')
 }
 
-// 用户详情信息，默认字段只写必要的，不加可能会报错undefined
-const userDetailInfo = ref<UserItem | UserInfoType | undefined>({
-  activeStatus: OnlineEnum.ONLINE,
-  avatar: '',
-  lastOptTime: 0,
-  name: '',
-  uid: '',
-  account: '',
-  resume: ''
-})
+const userDetailInfo = ref<Partial<UserItem>>()
 
 // 这个值只有在查看好友详细信息时才用
 const friendUserState = ref<any>({
@@ -275,8 +270,8 @@ onMounted(() => {
   }
 
   const foundedUser = groupStore.allUserInfo.find((i) => i.uid === uid)
-
-  userDetailInfo.value = foundedUser
+  const foundedFriend = contactStore.contactsList.find((item) => item.uid === uid)
+  userDetailInfo.value = foundedUser ?? (foundedFriend && (groupStore.getUserInfo(uid) ?? foundedFriend))
 
   // aiclaw 用户需要额外获取 ownerInfo（缓存中没有）
   if (isAiclaw(uid)) {
@@ -296,8 +291,6 @@ onMounted(() => {
     // 设置完成状态后最后再显示状态
     hasUserOnlineState.value = true
   }
-
-  const foundedFriend = contactStore.contactsList.find((item) => item.uid === uid)
 
   if (foundedFriend) {
     isFriend.value = true
