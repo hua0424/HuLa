@@ -11,7 +11,7 @@
         @click="props.isMyPage && router.push('/mobile/mobileMy/simpleBio')">
         <n-avatar
           :size="86"
-          :src="AvatarUtils.getAvatarUrl(userDetailInfo?.avatar ?? '')"
+          :src="AvatarUtils.getAvatarUrl(profileDisplayInfo?.avatar ?? '')"
           fallback-src="/logo.png"
           round />
       </div>
@@ -20,7 +20,7 @@
       <div ref="infoBox" class="pl-2 flex gap-8px flex-col transition-transform duration-300 ease-in-out">
         <!-- 名字与在线状态 -->
         <div class="flex flex-warp gap-4 items-center">
-          <n-text class="font-bold text-20px">{{ userDetailInfo?.name }}</n-text>
+          <n-text class="font-bold text-20px">{{ profileDisplayInfo?.name }}</n-text>
           <div
             v-show="hasUserOnlineState"
             class="bg-#E7EFE6 flex flex-wrap ps-2 px-8px items-center rounded-full gap-1 h-24px">
@@ -38,7 +38,7 @@
 
         <!-- 账号 -->
         <div class="flex flex-warp gap-2 items-center">
-          <span class="text-bold-style">{{ t('mobile_personal_info.account') }}:{{ userDetailInfo?.account }}</span>
+          <span class="text-bold-style">{{ t('mobile_personal_info.account') }}:{{ profileDisplayInfo?.account }}</span>
           <span v-if="isMyPage" @click="toMyQRCode" class="pe-15px">
             <img class="w-14px h-14px dark:invert" src="@/assets/mobile/my/qr-code.webp" alt="" />
           </span>
@@ -89,7 +89,7 @@
     <div v-if="props.isShow" ref="animatedBox" style="transform: translateZ(0)" class="flex flex-col px-16px">
       <!-- 个人描述 -->
       <div class="mt-2 text-bold-style line-height-24px">
-        {{ isMyPage ? userStore.userInfo?.resume : userDetailInfo?.resume }}
+        {{ isMyPage ? userStore.userInfo?.resume : profileDisplayInfo?.resume }}
       </div>
       <!-- 点赞关注 -->
       <div class="flex flex-wrap justify-around mt-4">
@@ -151,8 +151,10 @@
           @click="toChatRoom"
           :disabled="loading"
           v-if="!props.isMyPage && isFriend"
+          :data-testid="isBotUser(uid) ? undefined : 'mobile-friend-profile-chat'"
+          :aria-label="chatLabel"
           class="px-5 py-10px text-center font-bold rounded-full text-12px">
-          {{ isBotUser(uid) ? t('mobile_personal_info.open_bot') : t('mobile_personal_info.chat') }}
+          {{ chatLabel }}
         </n-button>
       </div>
     </div>
@@ -210,6 +212,7 @@ const uid = route.params.uid as string
 const isFriend = ref(props.isMyFriend)
 
 const isBotUser = (uid: string) => groupStore.getUserInfo(uid)?.account === UserType.BOT
+const chatLabel = computed(() => t(isBotUser(uid) ? 'mobile_personal_info.open_bot' : 'mobile_personal_info.chat'))
 
 const toChatRoom = async () => {
   try {
@@ -235,6 +238,8 @@ const handleAddFriend = async () => {
 }
 
 const userDetailInfo = ref<Partial<UserItem>>()
+const contactDisplayFallback = ref<Pick<Partial<UserItem>, 'avatar' | 'name' | 'account' | 'resume'>>()
+const profileDisplayInfo = computed(() => userDetailInfo.value ?? contactDisplayFallback.value)
 
 // 这个值只有在查看好友详细信息时才用
 const friendUserState = ref<any>({
@@ -271,7 +276,10 @@ onMounted(() => {
 
   const foundedUser = groupStore.allUserInfo.find((i) => i.uid === uid)
   const foundedFriend = contactStore.contactsList.find((item) => item.uid === uid)
-  userDetailInfo.value = foundedUser ?? (foundedFriend && (groupStore.getUserInfo(uid) ?? foundedFriend))
+  userDetailInfo.value = foundedUser
+  if (!foundedUser && foundedFriend && isAiclawByUserType(foundedFriend.userType)) {
+    contactDisplayFallback.value = groupStore.getUserInfo(uid) ?? foundedFriend
+  }
 
   // aiclaw 用户需要额外获取 ownerInfo（缓存中没有）
   if (isAiclaw(uid)) {
