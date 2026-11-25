@@ -18,7 +18,7 @@
           type="button"
           :data-testid="`agent-command-${capability.id.replace(/[^a-z0-9-]/gi, '-').toLowerCase()}`"
           :aria-label="capability.name"
-          :disabled="agentCommands.busy.value || !agentCommands.executable(capability)"
+          :disabled="agentCommands.busy.value || !agentCommands.canSubmit(capability)"
           @click="agentCommands.select(capability)"
           class="text-left rounded p-6px border border-gray-300 disabled:opacity-50">
           <strong>{{ capability.name }}</strong>
@@ -27,13 +27,17 @@
             · {{ t('editor.commands.source') }}: {{ capability.source }}
           </small>
           <div>{{ capability.description }}</div>
-          <small v-if="!agentCommands.executable(capability)">
+          <small v-if="agentCommands.submissionOnly(capability)">{{ t('editor.commands.submission_only') }}</small>
+          <small v-else-if="!agentCommands.canSubmit(capability)">
             {{ capability.reason || t('editor.commands.metadata') }}
           </small>
         </button>
       </div>
       <div v-if="agentCommands.selected.value" class="flex flex-col gap-4px" @keydown.enter.stop>
         <strong>{{ agentCommands.selected.value.capability.name }}</strong>
+        <small v-if="agentCommands.submissionOnly(agentCommands.selected.value.capability)">
+          {{ t('editor.commands.submission_only') }}
+        </small>
         <n-input
           v-if="agentCommands.selected.value.capability.id.startsWith('skill:')"
           v-model:value="agentCommands.arguments.value"

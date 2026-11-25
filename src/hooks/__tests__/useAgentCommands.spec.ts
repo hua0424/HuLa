@@ -98,9 +98,35 @@ it.each([
   editor.value.textContent = '/'
   await commands.input()
   const capability = commands.capabilities.value[0]
-  expect(commands.executable(capability)).toBe(false)
+  expect(commands.canSubmit(capability)).toBe(false)
   commands.select(capability)
   expect(commands.selected.value).toBeUndefined()
+  expect(await commands.send()).toBe(true)
+  expect(api.postAgentCommand).toHaveBeenCalledTimes(1)
+})
+
+it.each([
+  { name: 'non-Claude catalog', framework: 'opencode', overrides: {} },
+  { name: 'wrong kind', framework: 'cc', overrides: { kind: 'command' as const } },
+  { name: 'wrong reason', framework: 'cc', overrides: { reason: 'unsupported' } },
+  { name: 'unsupported skill', framework: 'cc', overrides: { supported: false } },
+  { name: 'unrecognized parameter', framework: 'cc', overrides: { parameters: [{ name: 'extra', type: 'string' }] } }
+])('does not submit a non-executable skill with $name', async ({ framework, overrides }) => {
+  const { editor, commands } = setup()
+  api.postAgentCommand.mockImplementation(async (body) => ({
+    ...body,
+    status: 'completed',
+    catalog: {
+      ...catalog,
+      framework,
+      capabilities: [{ ...skill, executable: false, reason: 'submission_only', ...overrides }]
+    }
+  }))
+  editor.value.textContent = '/'
+  await commands.input()
+  const capability = commands.capabilities.value[0]
+  expect(commands.canSubmit(capability)).toBe(false)
+  commands.select(capability)
   expect(await commands.send()).toBe(true)
   expect(api.postAgentCommand).toHaveBeenCalledTimes(1)
 })

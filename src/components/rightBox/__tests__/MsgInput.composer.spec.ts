@@ -206,6 +206,64 @@ const getInputDom = (wrapper: ReturnType<typeof mountInput>) =>
   wrapper.get('[data-testid="message-input"]').element as HTMLElement
 
 describe('#503 native command controls', () => {
+  it.each(['desktop', 'android'])('%s sends the selected Claude skill for receipt only', async (surface) => {
+    platform.mobile = surface === 'android'
+    const skill = {
+      id: 'skill:real-project-skill',
+      kind: 'skill',
+      source: 'skill',
+      name: 'real-project-skill',
+      supported: true,
+      executable: false,
+      reason: 'submission_only',
+      defaultVisibility: 'public',
+      scope: 'conversation',
+      parameters: [{ name: 'arguments', type: 'string', required: false }]
+    }
+    commandApi.postAgentCommand.mockImplementation(async (body) =>
+      body.operation === 'discover'
+        ? {
+            ...body,
+            status: 'completed',
+            catalog: {
+              version: 'v1',
+              framework: 'cc',
+              runtimeVersion: '2.1.195',
+              capabilities: [skill, { ...skill, id: 'skill:shadowed', source: 'mcp' }]
+            }
+          }
+        : { ...body, status: 'noop', phase: 'outcome' }
+    )
+    const wrapper = mountInput()
+    getInputDom(wrapper).textContent = '/'
+    await wrapper.get('[data-testid="message-input"]').trigger('input')
+    await flushPromises()
+    const button = wrapper.get('[data-testid="agent-command-skill-real-project-skill"]')
+    expect(button.attributes('disabled')).toBeUndefined()
+    expect(button.text()).toContain('仅发送给插件，不执行。')
+    expect(wrapper.get('[data-testid="agent-command-skill-shadowed"]').attributes('disabled')).toBeDefined()
+    await button.trigger('click')
+    expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="agent-command-skill-real-project-skill"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="agent-command-menu"]').text()).toContain('仅发送给插件，不执行。')
+    await wrapper.get('[data-testid="agent-command-arguments"] textarea').setValue('  original\narguments  ')
+    await wrapper.get(`[data-testid="${platform.mobile ? 'mobile-send-button' : 'send-button'}"]`).trigger('click')
+    await flushPromises()
+    expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(2)
+    expect(commandApi.postAgentCommand.mock.calls[1][0]).toMatchObject({
+      operation: 'invoke',
+      roomId: 'room-1',
+      aiclawUid: 'agent',
+      capabilityId: 'skill:real-project-skill',
+      catalogVersion: 'v1',
+      parameters: { arguments: '  original\narguments  ' }
+    })
+    expect(wrapper.get('[data-testid="agent-command-status"]').text()).toBe(
+      '本次请求未产生原生效果；详情见当前会话回执。'
+    )
+    expect(sendMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
   it.each([undefined, 'command', 'mcp'])(
     'keeps skill source %s metadata-only even when execution flags are true',
     async (source) => {
