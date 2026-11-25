@@ -98,7 +98,7 @@ it.each([
   editor.value.textContent = '/'
   await commands.input()
   const capability = commands.capabilities.value[0]
-  expect(commands.executable(capability)).toBe(false)
+  expect(commands.canSubmit(capability)).toBe(false)
   commands.select(capability)
   expect(commands.selected.value).toBeUndefined()
   expect(await commands.send()).toBe(true)

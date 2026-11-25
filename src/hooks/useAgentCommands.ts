@@ -495,7 +495,14 @@ export function useAgentCommands(
   const capabilities = computed(() => catalog.value?.capabilities.filter((c) => c.defaultVisibility === 'public') || [])
   /** aichatoverview#504：服务端标注需主人审批的能力（closed 项已被服务端移除）。 */
   const needsApproval = (capability: AgentCapability) => capability.permission === 'approval_required'
-  const executable = (capability: AgentCapability) => {
+  const typedSkill = (capability: AgentCapability) =>
+    capability.id.startsWith('skill:') && capability.kind === 'skill' && capability.source === 'skill'
+  const submissionOnly = (capability: AgentCapability) =>
+    catalog.value?.framework === 'cc' &&
+    typedSkill(capability) &&
+    !capability.executable &&
+    capability.reason === 'submission_only'
+  const canSubmit = (capability: AgentCapability) => {
     const names =
       capability.id === 'model.set'
         ? ['providerId', 'modelId']
@@ -504,15 +511,15 @@ export function useAgentCommands(
           : []
     return (
       capability.supported &&
-      capability.executable &&
+      (capability.executable || submissionOnly(capability)) &&
       (['model.list', 'model.set', 'session.reset', 'session.compact'].includes(capability.id) ||
-        (capability.id.startsWith('skill:') && capability.kind === 'skill' && capability.source === 'skill')) &&
+        typedSkill(capability)) &&
       !capability.parameters?.some((p) => p.type !== 'string' || !names.includes(p.name))
     )
   }
   function select(capability: AgentCapability) {
     if (busy.value || consumed || !capabilities.value.includes(capability) || !same(discovered, target())) return
-    if (!executable(capability)) {
+    if (!canSubmit(capability)) {
       // A rejected explicit intent must not become an ordinary chat submission.
       selected.value = undefined
       blocked = true
@@ -588,7 +595,7 @@ export function useAgentCommands(
                 entry.source === 'model' &&
                 entry.defaultVisibility === 'public' &&
                 entry.permission === intent.capability.permission &&
-                executable(entry)
+                canSubmit(entry)
             )))
       ) {
         modelStatus.value = 'catalog_stale'
@@ -725,7 +732,8 @@ export function useAgentCommands(
     reconcile,
     busy,
     submitted,
-    executable,
+    canSubmit,
+    submissionOnly,
     needsApproval,
     select,
     send,
