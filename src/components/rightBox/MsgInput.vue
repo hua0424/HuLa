@@ -18,7 +18,7 @@
           type="button"
           :data-testid="`agent-command-${capability.id.replace(/[^a-z0-9-]/gi, '-').toLowerCase()}`"
           :aria-label="capability.name"
-          :disabled="agentCommands.busy.value || !agentCommands.executable(capability)"
+          :disabled="agentCommands.busy.value || !agentCommands.canSubmit(capability)"
           @click="agentCommands.select(capability)"
           class="text-left rounded p-6px border border-gray-300 disabled:opacity-50">
           <strong>{{ capability.name }}</strong>
@@ -27,13 +27,17 @@
             · {{ t('editor.commands.source') }}: {{ capability.source }}
           </small>
           <div>{{ capability.description }}</div>
-          <small v-if="!agentCommands.executable(capability)">
+          <small v-if="agentCommands.submissionOnly(capability)">{{ t('editor.commands.submission_only') }}</small>
+          <small v-else-if="!agentCommands.canSubmit(capability)">
             {{ capability.reason || t('editor.commands.metadata') }}
           </small>
         </button>
       </div>
       <div v-if="agentCommands.selected.value" class="flex flex-col gap-4px" @keydown.enter.stop>
         <strong>{{ agentCommands.selected.value.capability.name }}</strong>
+        <small v-if="agentCommands.submissionOnly(agentCommands.selected.value.capability)">
+          {{ t('editor.commands.submission_only') }}
+        </small>
         <n-input
           v-if="agentCommands.selected.value.capability.id.startsWith('skill:')"
           v-model:value="agentCommands.arguments.value"
@@ -93,8 +97,10 @@
               :disabled="agentCommands.modelsBusy.value || agentCommands.submitted.value"
               class="text-left rounded p-6px border border-gray-300 disabled:opacity-50 break-words"
               @click="agentCommands.chooseModel(model)">
-              {{ model.label }} ({{ model.providerId }} · {{ model.modelId }}) ·
-              {{ t(model.connected ? 'editor.commands.connected' : 'editor.commands.disconnected') }}
+              {{ model.label }} ({{ model.providerId }} · {{ model.modelId }})
+              <template v-if="typeof model.connected === 'boolean'">
+                · {{ t(model.connected ? 'editor.commands.connected' : 'editor.commands.disconnected') }}
+              </template>
             </button>
             <div class="flex gap-12px">
               <button
@@ -295,7 +301,7 @@
               <n-flex
                 @mouseover="() => (selectedAitKey = item.uid)"
                 :class="{ active: selectedAitKey === item.uid }"
-                @click="handleAit(item)"
+                @click="handleAit(item, 'picker')"
                 :key="item.uid"
                 align="center"
                 class="ait-item">
@@ -546,9 +552,8 @@ const handleAitKeyChange = (
   virtualListInst?.scrollTo({ index: newIndex })
 }
 
-const closeMenu = (event: any) => {
-  /** 需要判断点击如果不是.context-menu类的元素的时候，menu才会关闭 */
-  if (!event.target.matches('#message-input, #message-input *')) {
+const closeMenu = (event: MouseEvent) => {
+  if (event.target instanceof Element && !event.target.closest('#message-input, .ait-options')) {
     ait.value = false
   }
 }
@@ -753,7 +758,7 @@ onMounted(async () => {
     if (ait.value && Number(selectedAitKey.value) > -1) {
       const item = personList.value.find((item) => item.uid === selectedAitKey.value)
       if (item) {
-        handleAit(item)
+        handleAit(item, 'picker')
       }
     }
   })
@@ -782,7 +787,7 @@ onMounted(async () => {
   // TODO 应该把打开的窗口的item给存到set中，需要修改输入框和消息展示的搭配，输入框和消息展示模块应该是一体并且每个用户独立的，这样当我点击这个用户框输入消息的时候就可以暂存信息了并且可以判断每个消息框是什么类型是群聊还是单聊，不然会导致比如@框可以在单聊框中出现 (nyh -> 2024-04-09 01:03:59)
   /** 当不是独立窗口的时候也就是组件与组件之间进行通信然后监听信息对话的变化 */
   useMitt.on(MittEnum.AT, (event: any) => {
-    handleAit(groupStore.getUserInfo(event)!)
+    handleAit(groupStore.getUserInfo(event)!, 'context')
   })
   // 监听录音模式切换事件
   useMitt.on(MittEnum.VOICE_RECORD_TOGGLE, () => {

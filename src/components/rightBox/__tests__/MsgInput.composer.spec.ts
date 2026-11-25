@@ -206,6 +206,58 @@ const getInputDom = (wrapper: ReturnType<typeof mountInput>) =>
   wrapper.get('[data-testid="message-input"]').element as HTMLElement
 
 describe('#503 native command controls', () => {
+  it.each(['desktop', 'android'])('%s sends the selected Claude skill for receipt only', async (surface) => {
+    platform.mobile = surface === 'android'
+    const skill = {
+      id: 'skill:real-project-skill',
+      kind: 'skill',
+      source: 'skill',
+      name: 'real-project-skill',
+      supported: true,
+      executable: false,
+      reason: 'submission_only',
+      defaultVisibility: 'public',
+      scope: 'conversation',
+      parameters: [{ name: 'arguments', type: 'string', required: false }]
+    }
+    commandApi.postAgentCommand.mockImplementation(async (body) =>
+      body.operation === 'discover'
+        ? {
+            ...body,
+            status: 'completed',
+            catalog: {
+              version: 'v1',
+              framework: 'cc',
+              runtimeVersion: '2.1.195',
+              capabilities: [skill, { ...skill, id: 'skill:shadowed', source: 'mcp' }]
+            }
+          }
+        : { ...body, status: 'noop', phase: 'outcome' }
+    )
+    const wrapper = mountInput()
+    getInputDom(wrapper).textContent = '/'
+    await wrapper.get('[data-testid="message-input"]').trigger('input')
+    await flushPromises()
+    const button = wrapper.get('[data-testid="agent-command-skill-real-project-skill"]')
+    expect(button.attributes('disabled')).toBeUndefined()
+    expect(button.text()).toContain('仅发送给插件，不执行')
+    expect(wrapper.get('[data-testid="agent-command-skill-shadowed"]').attributes('disabled')).toBeDefined()
+    await button.trigger('click')
+    expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(1)
+    await wrapper.get('[data-testid="agent-command-arguments"] textarea').setValue('  original\narguments  ')
+    await wrapper.get(`[data-testid="${platform.mobile ? 'mobile-send-button' : 'send-button'}"]`).trigger('click')
+    await flushPromises()
+    expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(2)
+    expect(commandApi.postAgentCommand.mock.calls[1][0]).toMatchObject({
+      operation: 'invoke',
+      capabilityId: 'skill:real-project-skill',
+      catalogVersion: 'v1',
+      parameters: { arguments: '  original\narguments  ' }
+    })
+    expect(wrapper.get('[data-testid="agent-command-status"]').text()).not.toContain('确认原生操作')
+    expect(sendMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
   it.each([undefined, 'command', 'mcp'])(
     'keeps skill source %s metadata-only even when execution flags are true',
     async (source) => {
@@ -295,7 +347,7 @@ describe('#503 native command controls', () => {
     })
     await wrapper.get('[data-testid="agent-command-reconcile"]').trigger('click')
     await flushPromises()
-    expect(commandApi.getAgentCommand).toHaveBeenCalledExactlyOnceWith(body.requestId)
+    expect(commandApi.getAgentCommand).toHaveBeenCalledExactlyOnceWith(body.requestId, null)
     expect(commandApi.postAgentCommand).toHaveBeenCalledTimes(2)
     expect(wrapper.get('[data-testid="agent-command-status"]').text()).toContain('完成')
     expect(wrapper.get('[data-testid="agent-command-cancel"]').text()).toContain('不停止')
@@ -325,10 +377,14 @@ describe('#503 native command controls', () => {
           version: 'v1',
           capabilities: [capability],
           models: {
-            items: [{ providerId: 'p/a', modelId: 'm/b', label: 'Native disconnected', connected: false }],
+            items: [
+              { providerId: 'p/a', modelId: 'm/b', label: 'Native disconnected', connected: false },
+              { providerId: 'p/a', modelId: 'm/unknown', label: 'Native unknown' },
+              { providerId: 'p/a', modelId: 'm/connected', label: 'Native connected', connected: true }
+            ],
             total: 8944,
             offset: 0,
-            nextOffset: 100
+            nextOffset: 3
           }
         }
       }))
@@ -355,9 +411,15 @@ describe('#503 native command controls', () => {
         parameters: { query: 'native', offset: 0 }
       })
       expect(wrapper.get('[data-testid="agent-command-model-total"]').text()).toContain('8944')
-      const option = wrapper.get('[data-testid="agent-command-model-option"]')
-      expect(option.attributes('disabled')).toBeUndefined()
-      await option.trigger('click')
+      const [disconnected, unknown, connected] = wrapper.findAll('[data-testid="agent-command-model-option"]')
+      expect(disconnected.text()).toContain('未连接')
+      expect(connected.text()).toContain('已连接')
+      expect(unknown.text()).toBe('Native unknown (p/a · m/unknown)')
+      expect(unknown.attributes('disabled')).toBeUndefined()
+      await unknown.trigger('click')
+      expect(unknown.attributes('aria-pressed')).toBe('true')
+      expect(disconnected.attributes('disabled')).toBeUndefined()
+      await disconnected.trigger('click')
       expect(wrapper.get('[data-testid="agent-command-model-selected"]').text()).toContain('p/a')
       await send.trigger('click')
       await flushPromises()

@@ -1,5 +1,7 @@
 import { ImUrlEnum } from '@/enums'
+import { type SessionIdentity, SessionExpiredError } from '@/services/sessionBinding'
 import { imRequest } from '@/utils/ImRequestUtils'
+import { isWeb } from '@/utils/PlatformConstants'
 
 export type AgentCapability = {
   id: string
@@ -16,7 +18,7 @@ export type AgentCapability = {
   /** aichatoverview#504：服务端判定标注（open/需主人审批）；closed 项已被服务端移除 */
   permission?: 'open' | 'approval_required'
 }
-export type AgentModel = { providerId: string; modelId: string; label: string; connected: boolean }
+export type AgentModel = { providerId: string; modelId: string; label: string; connected?: boolean }
 export type ModelPage = { items: AgentModel[]; total: number; offset: number; nextOffset?: number }
 export type AgentCatalog = {
   version: string
@@ -53,11 +55,23 @@ export type AgentCommandResult = Pick<AgentCommandRequest, 'requestId' | 'roomId
   error?: string
 }
 
+function commandBinding(binding: SessionIdentity | null) {
+  // Without an initiating native session the IM wrapper would capture a different login.
+  if (!binding && !isWeb()) throw new SessionExpiredError()
+  return binding ?? undefined
+}
+
 // Never opt into the wrapper's retry mode: a lost response is not permission to invoke again.
-export const postAgentCommand = (body: AgentCommandRequest) =>
-  imRequest<AgentCommandResult>({ url: ImUrlEnum.AICLAW_COMMANDS, body }, { showError: false })
-export const getAgentCommand = (requestId: string) =>
-  imRequest<AgentCommandResult>({ url: ImUrlEnum.AICLAW_COMMAND_RESULT, params: { requestId } }, { showError: false })
+export const postAgentCommand = async (body: AgentCommandRequest, binding: SessionIdentity | null) =>
+  imRequest<AgentCommandResult>(
+    { url: ImUrlEnum.AICLAW_COMMANDS, body, binding: commandBinding(binding) },
+    { showError: false }
+  )
+export const getAgentCommand = async (requestId: string, binding: SessionIdentity | null) =>
+  imRequest<AgentCommandResult>(
+    { url: ImUrlEnum.AICLAW_COMMAND_RESULT, params: { requestId }, binding: commandBinding(binding) },
+    { showError: false }
+  )
 
 /** aichatoverview#505：主人待审批列表（服务端只返回当前认证主人的申请）。 */
 export type AgentCommandApproval = {

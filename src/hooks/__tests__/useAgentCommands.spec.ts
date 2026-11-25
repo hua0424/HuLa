@@ -98,7 +98,7 @@ it.each([
   editor.value.textContent = '/'
   await commands.input()
   const capability = commands.capabilities.value[0]
-  expect(commands.executable(capability)).toBe(false)
+  expect(commands.canSubmit(capability)).toBe(false)
   commands.select(capability)
   expect(commands.selected.value).toBeUndefined()
   expect(await commands.send()).toBe(true)
@@ -130,6 +130,117 @@ it('blocks missing model parameters then sends the exact disconnected native pai
     capabilityId: 'model.set',
     parameters: { providerId: 'provider/a', modelId: 'models/b:c' }
   })
+})
+
+const openClawModelCapability = {
+  ...setModel,
+  scope: 'conversation' as const,
+  source: 'model',
+  permission: 'open' as const
+}
+const openClawModel = { providerId: 'gateway', modelId: 'chosen', label: 'Chosen', connected: true }
+const openClawModelRows = [
+  openClawModel,
+  ...Array.from({ length: 100 }, (_, n) => ({ ...openClawModel, modelId: `model-${String(n).padStart(2, '0')}` }))
+]
+
+it('uses the OpenClaw model snapshot version from the same menu scope across pages and submit', async () => {
+  const { editor, commands } = setup()
+  const scope = '1'.repeat(64)
+  const version = `openclaw-models:${scope}:${'3'.repeat(64)}`
+  const rows = openClawModelRows
+  const effect = { kind: 'model', providerId: 'gateway', modelId: 'chosen', effective: 'next_request' }
+  api.postAgentCommand.mockImplementation(async (body) => {
+    const { requestId, roomId, aiclawUid, operation } = body
+    const receipt = { requestId, roomId, aiclawUid, operation, status: 'completed' }
+    if (operation === 'invoke') return { ...receipt, phase: 'outcome', generation: '1', receiptRevision: 1, effect }
+    const targeted = body.capabilityId === 'model.set'
+    const offset = body.parameters?.offset ?? 0
+    return {
+      ...receipt,
+      catalog: {
+        framework: 'openclaw',
+        runtimeVersion: '2026.6.5',
+        capabilities: [openClawModelCapability],
+        version: targeted ? version : `openclaw-menu:${scope}:${'2'.repeat(64)}`,
+        ...(targeted && {
+          models: {
+            items: rows.slice(offset, offset + 100),
+            total: rows.length,
+            offset,
+            ...(offset === 0 ? { nextOffset: 100 } : {})
+          }
+        })
+      }
+    }
+  })
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  await commands.searchModels()
+  expect(commands.models.value).toMatchObject({ items: rows.slice(0, 100), offset: 0, nextOffset: 100 })
+  commands.chooseModel(commands.models.value!.items[0])
+  await commands.searchModels(100)
+  expect(commands.models.value).toEqual({ items: rows.slice(100), offset: 100, total: rows.length })
+  await commands.send()
+  expect(commands.receipt.value?.effect).toEqual(effect)
+  expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke').map(([body]) => body)).toEqual(
+    [
+      expect.objectContaining({
+        capabilityId: 'model.set',
+        catalogVersion: version,
+        parameters: { providerId: 'gateway', modelId: 'chosen' }
+      })
+    ]
+  )
+})
+
+it.each(['scope', 'policy', 'later-page'])('never submits an OpenClaw model from a changed %s', async (change) => {
+  const { editor, commands } = setup()
+  const scope = '1'.repeat(64)
+  const rows = openClawModelRows
+  api.postAgentCommand.mockImplementation(async (body) => {
+    const { requestId, roomId, aiclawUid, operation } = body
+    const receipt = { requestId, roomId, aiclawUid, operation }
+    if (operation === 'invoke') return { ...receipt, status: 'failed', phase: 'outcome', error: 'catalog_stale' }
+    const targeted = body.capabilityId === 'model.set'
+    const offset = body.parameters?.offset ?? 0
+    const pageScope = change === 'scope' ? '2'.repeat(64) : scope
+    return {
+      ...receipt,
+      status: 'completed',
+      catalog: {
+        framework: 'openclaw',
+        runtimeVersion: '2026.6.5',
+        capabilities: targeted && change === 'policy' ? [] : [openClawModelCapability],
+        version: targeted
+          ? `openclaw-models:${pageScope}:${(offset ? '4' : '3').repeat(64)}`
+          : `openclaw-menu:${scope}:${'2'.repeat(64)}`,
+        ...(targeted && {
+          models: {
+            items: rows.slice(offset, offset + 100),
+            total: rows.length,
+            offset,
+            ...(offset === 0 ? { nextOffset: 100 } : {})
+          }
+        })
+      }
+    }
+  })
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  await commands.searchModels()
+  if (change === 'later-page') {
+    expect(commands.models.value?.items).toEqual(rows.slice(0, 100))
+    commands.chooseModel(commands.models.value!.items[0])
+    await commands.searchModels(100)
+  }
+  expect(commands.modelStatus.value).toBe('catalog_stale')
+  expect(commands.models.value).toBeUndefined()
+  expect(commands.selectedModel.value).toBeUndefined()
+  expect(await commands.send()).toBe(true)
+  expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(0)
 })
 
 it.each(['budget', 'network'])(
@@ -202,7 +313,7 @@ it('rejects a foreign accepted POST before polling and reconciles only the origi
     reconciled: true
   })
   await commands.reconcile()
-  expect(api.getAgentCommand).toHaveBeenCalledWith(body.requestId)
+  expect(api.getAgentCommand).toHaveBeenCalledWith(body.requestId, null)
   expect(commands.status.value).toBe('completed')
   expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
 })
@@ -296,30 +407,28 @@ it('ignores stale model searches and never silently selects a replacement', asyn
   expect(commands.selectedModel.value).toBeUndefined()
 })
 
-it('dismisses only local UI, allowing a new command while an old native request still runs', async () => {
+it('dismisses only local UI and permits a distinct command after the original native ACK', async () => {
+  vi.useFakeTimers()
   const { editor, commands } = setup()
   editor.value.textContent = '/'
   await commands.input()
   commands.select(commands.capabilities.value[0])
-  let resolve!: (value: unknown) => void
-  api.postAgentCommand.mockImplementationOnce(
-    () =>
-      new Promise((r) => {
-        resolve = r
-      })
-  )
+  api.postAgentCommand.mockImplementationOnce(async (body) => ({ ...body, status: 'accepted', phase: 'accepted' }))
   const old = commands.send()
   const oldBody = api.postAgentCommand.mock.calls.at(-1)![0]
+  await vi.advanceTimersByTimeAsync(0)
+  expect(commands.receipt.value).toMatchObject({ requestId: oldBody.requestId, status: 'accepted', phase: 'accepted' })
   commands.cancel()
   await commands.input()
   commands.select(commands.capabilities.value[0])
   await commands.send()
   const newId = commands.requestId.value
-  resolve({ ...oldBody, status: 'failed', phase: 'outcome' })
+  await vi.advanceTimersByTimeAsync(1_000)
   await old
   expect(commands.requestId.value).toBe(newId)
   expect(newId).not.toBe(oldBody.requestId)
   expect(commands.status.value).toBe('completed')
+  expect(api.getAgentCommand).not.toHaveBeenCalled()
   expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(2)
 })
 
@@ -511,7 +620,7 @@ it('rejects mismatched response correlation and foreign capabilities', async () 
   expect(await commands.send()).toBe(false)
   expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
 })
-it('ignores invoke results after a silent editor mutation', async () => {
+it('keeps the original invoke receipt but invalidates the menu after a silent editor mutation', async () => {
   const { editor, commands } = setup()
   editor.value.textContent = '/'
   await commands.input()
@@ -528,8 +637,12 @@ it('ignores invoke results after a silent editor mutation', async () => {
   editor.value.textContent = 'new draft'
   resolve({ ...body, status: 'completed' })
   await pending
-  expect(commands.status.value).toBe('')
+  expect(commands.receipt.value).toMatchObject({ requestId: body.requestId, status: 'completed' })
+  expect(commands.selected.value).toBeUndefined()
+  expect(commands.capabilities.value).toEqual([])
+  expect(editor.value.textContent).toBe('new draft')
   expect(await commands.send()).toBe(false)
+  expect(api.postAgentCommand).toHaveBeenCalledTimes(2)
 })
 it('does not discover for human targets or ambiguous group mentions', async () => {
   const { editor, session, commands } = setup()
@@ -643,6 +756,38 @@ it('unlocks through GET when the approval result WS event is lost', async () => 
   expect(commands.receipt.value).toMatchObject({ status: 'completed', approvalStatus: 'approved' })
   expect(commands.approvalLocked.value).toBe(false)
   expect(api.getAgentCommand).toHaveBeenCalledTimes(2)
+  expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(1)
+})
+
+it('keeps querying the original approval after rejecting a pending receipt with a different deadline', async () => {
+  vi.useFakeTimers()
+  const { editor, commands } = setup()
+  const expiresAt = Date.now() + 60_000
+  api.postAgentCommand.mockImplementation(async (body) =>
+    body.operation === 'discover'
+      ? { ...body, status: 'completed', catalog }
+      : { ...body, status: 'pending', approvalStatus: 'pending', expiresAt }
+  )
+  editor.value.textContent = '/'
+  await commands.input()
+  commands.select(commands.capabilities.value[0])
+  await commands.send()
+  const invoke = api.postAgentCommand.mock.calls[1][0]
+  api.getAgentCommand
+    .mockResolvedValueOnce({ ...invoke, status: 'pending', approvalStatus: 'pending', expiresAt: expiresAt + 2_000 })
+    .mockResolvedValueOnce({ ...invoke, status: 'noop', phase: 'approval', approvalStatus: 'rejected', expiresAt })
+
+  await vi.advanceTimersByTimeAsync(2_000)
+  expect(commands.approvalLocked.value).toBe(true)
+  expect(commands.approvalExpiresAt.value).toBe(expiresAt)
+  expect(commands.receipt.value).toMatchObject({ status: 'pending', expiresAt })
+  await vi.advanceTimersByTimeAsync(2_000)
+  expect(commands.status.value).toBe('rejected')
+  expect(commands.approvalLocked.value).toBe(false)
+  expect(api.getAgentCommand.mock.calls).toEqual([
+    [invoke.requestId, null],
+    [invoke.requestId, null]
+  ])
   expect(api.postAgentCommand.mock.calls.filter(([body]) => body.operation === 'invoke')).toHaveLength(1)
 })
 

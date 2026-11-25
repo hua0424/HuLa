@@ -30,6 +30,18 @@ import { useTrigger } from './useTrigger'
 import { UploadProviderEnum, useUpload } from './useUpload.ts'
 import { useI18n } from 'vue-i18n'
 
+const isEditableRange = (editor: HTMLElement, candidate?: Range): candidate is Range =>
+  !!candidate &&
+  [candidate.startContainer, candidate.endContainer].every((node) => {
+    if (!editor.contains(node)) return false
+    let element = node instanceof Element ? node : node.parentElement
+    while (element && element !== editor) {
+      if (element.getAttribute('contenteditable') === 'false') return false
+      element = element.parentElement
+    }
+    return true
+  })
+
 /**
  * 光标管理器
  */
@@ -58,20 +70,9 @@ export function useCursorManager() {
 
     const selection = window.getSelection()
     if (!selection) return
-    const isEditableRange = (candidate?: Range): candidate is Range =>
-      !!candidate &&
-      [candidate.startContainer, candidate.endContainer].every((node) => {
-        if (!editor.contains(node)) return false
-        let element = node instanceof Element ? node : node.parentElement
-        while (element && element !== editor) {
-          if (element.getAttribute('contenteditable') === 'false') return false
-          element = element.parentElement
-        }
-        return true
-      })
     const cached = getCursorSelectionRange()?.range
     const current = selection.rangeCount ? selection.getRangeAt(0) : undefined
-    let range = isEditableRange(cached) ? cached : isEditableRange(current) ? current : undefined
+    let range = isEditableRange(editor, cached) ? cached : isEditableRange(editor, current) ? current : undefined
     if (!range) {
       range = document.createRange()
       range.selectNodeContents(editor)
@@ -160,8 +161,6 @@ export const useMsgInput = (messageInputDom: Ref) => {
 
   /** 是否正在输入拼音 */
   const isChinese = ref(false)
-  // 记录编辑器光标的位置
-  const editorRange = ref<{ range: Range; selection: Selection } | null>(null)
   /** @ 候选人列表 */
   const personList = computed(() => {
     if (aitKey.value && !isChinese.value) {
@@ -622,8 +621,11 @@ export const useMsgInput = (messageInputDom: Ref) => {
     }
   }
 
+  let pickerAnchor: { node: Text; offset: number } | undefined
+
   /** 当输入框手动输入值的时候触发input事件(使用vueUse的防抖) */
   const handleInput = (e: Event) => {
+    pickerAnchor = undefined
     // Invalidate command intent before the ordinary editor's debounced work.
     void agentCommands.input(isChinese.value || (e as InputEvent).isComposing)
     return handleOrdinaryInput(e)
@@ -667,15 +669,26 @@ export const useMsgInput = (messageInputDom: Ref) => {
     /** 获取当前节点 */
     const curNode = range.endContainer
     /** 判断当前节点是否是文本节点 */
-    if (!curNode || !curNode.textContent || curNode.nodeName !== '#text') {
+    if (!(curNode instanceof Text) || !curNode.data) {
       resetAllStates()
       return
     }
 
     /** 获取当前光标位置和文本内容 */
     const cursorPosition = selection.focusOffset
-    const text = curNode.textContent
+    const text = curNode.data
 
+    // Touch keyboards can move the caret through input without a keyup.
+    if (
+      inputElement === messageInputDom.value &&
+      !isChinese.value &&
+      !(e as InputEvent).isComposing &&
+      range.collapsed &&
+      isEditableRange(inputElement, range)
+    ) {
+      updateSelectionRange({ range, selection })
+      pickerAnchor = { node: curNode, offset: range.endOffset }
+    }
     await handleTrigger(text, cursorPosition, { range, selection, keyword: '' })
   }, 0)
 
@@ -732,36 +745,41 @@ export const useMsgInput = (messageInputDom: Ref) => {
     }
   }
 
-  /** 处理点击 @ 提及框事件 */
-  const handleAit = (item: BaseUserItem) => {
-    // 如果正在输入拼音，不发送消息
-    if (isChinese.value) {
-      return
-    }
-    // 先确保输入框获得焦点
-    focusOn(messageInputDom.value)
-    // 先获取并保存当前的编辑器范围
-    const { range: currentRange, selection: currentSelection } = getEditorRange()!
-    editorRange.value = { range: currentRange, selection: currentSelection }
-
-    const myEditorRange = editorRange?.value?.range
-    /** 获取光标所在位置的文本节点 */
-    const textNode = myEditorRange?.endContainer
-
-    // 如果有文本节点，说明是通过输入框@触发的
-    if (textNode) {
-      /** 获取光标在所在文本节点中的偏移位置 */
-      const endOffset = myEditorRange?.endOffset
-      /** 获取文本节点的值，并将其转换为字符串类型 */
-      const textNodeValue = textNode?.nodeValue as string
-      /** 使用正则表达式匹配@符号之后获取到的文本节点的值 */
-      const expRes = /@([^@]*)$/.exec(textNodeValue)
-      if (expRes) {
-        /** 设置范围的起始位置为文本节点中@符号的位置 */
-        currentRange.setStart(textNode, expRes.index)
-        /** 设置范围的结束位置为光标的位置 */
-        currentRange.setEnd(textNode, endOffset!)
+  /** 从候选列表或消息菜单插入提及 */
+  const handleAit = (item: BaseUserItem, source: 'picker' | 'context') => {
+    if (isChinese.value) return
+    const editor = messageInputDom.value
+    const anchor = pickerAnchor
+    const matchesAnchor = (candidate: Range) =>
+      anchor && candidate.collapsed && candidate.endContainer === anchor.node && candidate.endOffset === anchor.offset
+    if (source === 'picker') {
+      // A visible picker can outlive a caret move. Check before restoring a cached selection.
+      const selection = window.getSelection()
+      const live = selection?.rangeCount ? selection.getRangeAt(0) : undefined
+      if (
+        live &&
+        (editor.contains(live.startContainer) || editor.contains(live.endContainer)) &&
+        !matchesAnchor(live)
+      ) {
+        resetAllStates()
+        return
       }
+    }
+    focusOn(editor)
+    const range = getEditorRange()?.range
+    if (!range) return
+
+    if (source === 'picker') {
+      if (!ait.value || !anchor || !matchesAnchor(range)) {
+        resetAllStates()
+        return
+      }
+      const query = /@([^@]*)$/.exec(anchor.node.data.slice(0, anchor.offset))
+      if (!query || query[1] !== aitKey.value) {
+        resetAllStates()
+        return
+      }
+      range.setStart(anchor.node, query.index)
     }
 
     // 获取用户的完整信息，优先使用群昵称（myName），与渲染逻辑保持一致
@@ -1017,8 +1035,7 @@ export const useMsgInput = (messageInputDom: Ref) => {
       messageInputDom.value.addEventListener('compositionend', (e: CompositionEvent) => {
         setTimeout(() => {
           isChinese.value = false
-          aitKey.value = e.data
-          void agentCommands.input()
+          if (e.target === messageInputDom.value) void handleInput(e)
         }, 10)
       })
     }

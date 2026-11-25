@@ -650,6 +650,8 @@ const handleWebsocketEvent = async (event: any) => {
   lastWsConnectionState = nextState || previousState
 
   if (!shouldHandleReconnect) return
+  // 命令恢复只查询原请求，不依赖在线通知或聊天列表同步。
+  useMitt.emit(MittEnum.WS_RECONNECTED, payload)
   // 防止并行重连/同步导致 syncLoading 卡死
   if (isReconnectInFlight || chatStore.syncLoading) return
   isReconnectInFlight = true
